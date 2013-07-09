@@ -931,13 +931,13 @@ public class StorageProxy implements StorageProxyMBean
                     int responseCount = handler.getReceivedCount();
                     String gotData = "";
                     if (responseCount > 0)
-                        gotData = handler.resolver.isDataPresent() ? "(including data)" : "(only digests)";
+                        gotData = handler.resolver.isDataPresent() ? " (including data)" : " (only digests)";
 
                     if (Tracing.isTracing())
-                        Tracing.trace("Timed out; received {} of {} responses {}",
+                        Tracing.trace("Timed out; received {} of {} responses{}",
                                 new Object[] {responseCount, blockFor, gotData});
                     else if (logger.isDebugEnabled())
-                        logger.debug("Read timeout; received {} of {} responses {}", responseCount, blockFor, gotData);
+                        logger.debug("Read timeout; received {} of {} responses{}", responseCount, blockFor, gotData);
                     throw ex;
                 }
                 catch (DigestMismatchException ex)
@@ -1215,7 +1215,7 @@ public class StorageProxy implements StorageProxyMBean
                         gotData = resolver.isDataPresent() ? " (including data)" : " (only digests)";
 
                     if (Tracing.isTracing())
-                        Tracing.trace("Timed out; received {} of {} responses{} for range {} of {} ",
+                        Tracing.trace("Timed out; received {} of {} responses{} for range {} of {}",
                                 new Object[] {responseCount, blockFor, gotData, i, ranges.size()});
                     else
                         logger.debug("Range slice timeout; received {} of {} responses{} for range {} of {}",
