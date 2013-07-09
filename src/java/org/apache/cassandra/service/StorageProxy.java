@@ -30,7 +30,6 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.base.Function;
-import com.google.common.base.Joiner;
 import com.google.common.collect.*;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
