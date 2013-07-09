@@ -29,7 +29,6 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.base.Function;
-import com.google.common.base.Joiner;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.commons.lang.StringUtils;
