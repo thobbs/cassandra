@@ -1251,7 +1251,7 @@ public class StorageProxy implements StorageProxyMBean
                     // We got all responses, but timed out while repairing
                     int blockFor = consistency_level.blockFor(table);
                     if (Tracing.isTracing())
-                        Tracing.trace("Timed out after receiving all {} responses", blockFor);
+                        Tracing.trace("Timed out while read-repairing after receiving all {} responses", blockFor);
                     else
                         logger.debug("Range slice timeout: {}", ex.toString());
                     throw new ReadTimeoutException(consistency_level, blockFor, blockFor, true);
