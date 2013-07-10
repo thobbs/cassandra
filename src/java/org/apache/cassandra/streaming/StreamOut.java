@@ -153,15 +153,19 @@ public class StreamOut
     {
         // build a list of the estimated number of keys in the sstables within the given ranges
         List<Long> estimatedKeysForRanges = new ArrayList<Long>();
+        List<List<Pair<Long, Long>>> sectionsForRanges = new ArrayList<List<Pair<Long, Long>>>();
         for (SSTableReader sstable : sstables)
+        {
             estimatedKeysForRanges.add(sstable.estimatedKeysForRanges(ranges));
+            sectionsForRanges.add(sstable.getPositionsForRanges(ranges));
+        }
 
-        transferSSTables(session, sstables, ranges, estimatedKeysForRanges, type);
+        transferSSTables(session, sstables, sectionsForRanges, estimatedKeysForRanges, type);
     }
 
-    public static void transferSSTables(StreamOutSession session, Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, List<Long> estimatedKeysForRanges, OperationType type)
+    public static void transferSSTables(StreamOutSession session, Iterable<SSTableReader> sstables, Iterable<List<Pair<Long, Long>>> sstableSections, List<Long> estimatedKeys, OperationType type)
     {
-        List<PendingFile> pending = createPendingFiles(sstables, ranges, estimatedKeysForRanges, type);
+        List<PendingFile> pending = createPendingFiles(sstables, sstableSections, estimatedKeys, type);
 
         // Even if the list of pending files is empty, we need to initiate the transfer otherwise
         // the remote end will hang in cases where this was a requested transfer.
@@ -170,14 +174,15 @@ public class StreamOut
     }
 
     // called prior to sending anything.
-    private static List<PendingFile> createPendingFiles(Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, Iterable<Long> estimatedKeysForRanges, OperationType type)
+    private static List<PendingFile> createPendingFiles(Iterable<SSTableReader> sstables, Iterable<List<Pair<Long, Long>>> sstableSections, Iterable<Long> estimatedKeys, OperationType type)
     {
         List<PendingFile> pending = new ArrayList<PendingFile>();
-        Iterator<Long> estimatedKeyIterator = estimatedKeysForRanges.iterator();
+        Iterator<Long> estimatedKeyIterator = estimatedKeys.iterator();
+        Iterator<List<Pair<Long, Long>>> sectionsIterator = sstableSections.iterator();
         for (SSTableReader sstable : sstables)
         {
             Descriptor desc = sstable.descriptor;
-            List<Pair<Long,Long>> sections = sstable.getPositionsForRanges(ranges);
+            List<Pair<Long,Long>> sections = sectionsIterator.next();
             if (sections.isEmpty())
             {
                 // A reference was acquired on the sstable and we won't stream it
