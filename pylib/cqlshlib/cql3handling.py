@@ -986,8 +986,8 @@ syntax_rules += r'''
 <batchStatement> ::= "BEGIN" ( "UNLOGGED" | "COUNTER" )? "BATCH"
                         ( "USING" [batchopt]=<usingOption>
                                   ( "AND" [batchopt]=<usingOption> )* )?
-                        [batchstmt]=<batchStatementMember> ";"
-                            ( [batchstmt]=<batchStatementMember> ";" )*
+                        [batchstmt]=<batchStatementMember> ";"?
+                            ( [batchstmt]=<batchStatementMember> ";"? )*
                      "APPLY" "BATCH"
                    ;
 <batchStatementMember> ::= <insertStatement>
@@ -1239,6 +1239,8 @@ syntax_rules += r'''
                       | "ADD" newcol=<cident> <storageType>
                       | "DROP" existcol=<cident>
                       | "WITH" <cfamProperty> ( "AND" <cfamProperty> )*
+                      | "RENAME" existcol=<cident> "TO" newcol=<cident>
+                         ( "AND" existcol=<cident> "TO" newcol=<cident> )*
                       ;
 '''
 

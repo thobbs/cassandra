@@ -945,7 +945,7 @@ public class SelectStatement implements CQLStatement
                         stmt.columnRestrictions[name.position] = updateRestriction(name, stmt.columnRestrictions[name.position], rel, names);
                         break;
                     case VALUE_ALIAS:
-                        throw new InvalidRequestException(String.format("Restricting the value of a compact CF (%s) is not supported", name.name));
+                        throw new InvalidRequestException(String.format("Predicates on the non-primary-key column (%s) of a COMPACT table are not yet supported", name.name));
                     case COLUMN_METADATA:
                         stmt.metadataRestrictions.put(name, updateRestriction(name, stmt.metadataRestrictions.get(name), rel, names));
                         break;
@@ -1046,11 +1046,7 @@ public class SelectStatement implements CQLStatement
                 }
                 else
                 {
-                    if (!partitioner.preservesOrder())
-                        throw new InvalidRequestException("Only EQ and IN relation are supported on the partition key for random partitioners (unless you use the token() function)");
-
-                    stmt.isKeyRange = true;
-                    shouldBeDone = true;
+                    throw new InvalidRequestException("Only EQ and IN relation are supported on the partition key (you will need to use the token() function for non equality based relation)");
                 }
                 previous = cname;
             }

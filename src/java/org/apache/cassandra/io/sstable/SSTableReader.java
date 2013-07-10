@@ -175,7 +175,6 @@ public class SSTableReader extends SSTable
     {
         long start = System.currentTimeMillis();
         SSTableMetadata sstableMetadata = openMetadata(descriptor, components, partitioner);
-
         SSTableReader sstable = new SSTableReader(descriptor,
                                                   components,
                                                   metadata,
@@ -214,7 +213,7 @@ public class SSTableReader extends SSTable
 
         logger.info("Opening {} ({} bytes)", descriptor, new File(descriptor.filenameFor(COMPONENT_DATA)).length());
 
-        SSTableMetadata sstableMetadata = SSTableMetadata.serializer.deserialize(descriptor);
+        SSTableMetadata sstableMetadata = SSTableMetadata.serializer.deserialize(descriptor).left;
 
         // Check if sstable is created using same partitioner.
         // Partitioner can be null, which indicates older version of sstable or no stats available.
@@ -1175,7 +1174,15 @@ public class SSTableReader extends SSTable
 
     public Set<Integer> getAncestors()
     {
-        return sstableMetadata.ancestors;
+        try
+        {
+            return SSTableMetadata.serializer.deserialize(descriptor).right;
+        }
+        catch (IOException e)
+        {
+            SSTableReader.logOpenException(descriptor, e);
+            return Collections.emptySet();
+        }
     }
 
     public RandomAccessReader openDataReader(RateLimiter limiter)
