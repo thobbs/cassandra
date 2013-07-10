@@ -928,15 +928,19 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     int blockFor = consistency_level.blockFor(Table.open(command.getKeyspace()));
                     int responseCount = handler.getReceivedCount();
-                    String gotData = "";
-                    if (responseCount > 0)
-                        gotData = handler.resolver.isDataPresent() ? " (including data)" : " (only digests)";
+                    String gotData = responseCount > 0 ?
+                                     gotData = handler.resolver.isDataPresent() ? " (including data)" : " (only digests)" :
+                                     "";
 
                     if (Tracing.isTracing())
+                    {
                         Tracing.trace("Timed out; received {} of {} responses{}",
-                                new Object[] {responseCount, blockFor, gotData});
+                                      new Object[]{ responseCount, blockFor, gotData });
+                    }
                     else if (logger.isDebugEnabled())
+                    {
                         logger.debug("Read timeout; received {} of {} responses{}", responseCount, blockFor, gotData);
+                    }
                     throw ex;
                 }
                 catch (DigestMismatchException ex)
@@ -1209,16 +1213,20 @@ public class StorageProxy implements StorageProxyMBean
                     // we timed out waiting for responses
                     int blockFor = consistency_level.blockFor(table);
                     int responseCount = resolver.responses.size();
-                    String gotData = "";
-                    if (responseCount > 0)
-                        gotData = resolver.isDataPresent() ? " (including data)" : " (only digests)";
+                    String gotData = responseCount > 0 ?
+                                     resolver.isDataPresent() ? " (including data)" : " (only digests)" :
+                                     "";
 
                     if (Tracing.isTracing())
+                    {
                         Tracing.trace("Timed out; received {} of {} responses{} for range {} of {}",
-                                new Object[] {responseCount, blockFor, gotData, i, ranges.size()});
-                    else
+                                new Object[]{ responseCount, blockFor, gotData, i, ranges.size() });
+                    }
+                    else if (logger.isDebugEnabled())
+                    {
                         logger.debug("Range slice timeout; received {} of {} responses{} for range {} of {}",
                                 responseCount, blockFor, gotData, i, ranges.size());
+                    }
                     throw ex;
                 }
                 catch (TimeoutException ex)
