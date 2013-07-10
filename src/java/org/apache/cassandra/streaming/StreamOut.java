@@ -151,7 +151,17 @@ public class StreamOut
      */
     public static void transferSSTables(StreamOutSession session, Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, OperationType type)
     {
-        List<PendingFile> pending = createPendingFiles(sstables, ranges, type);
+        // build a list of the estimated number of keys in the sstables within the given ranges
+        List<Long> estimatedKeysForRanges = new ArrayList<Long>();
+        for (SSTableReader sstable : sstables)
+            estimatedKeysForRanges.add(sstable.estimatedKeysForRanges(ranges));
+
+        transferSSTables(session, sstables, ranges, estimatedKeysForRanges, type);
+    }
+
+    public static void transferSSTables(StreamOutSession session, Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, List<Long> estimatedKeysForRanges, OperationType type)
+    {
+        List<PendingFile> pending = createPendingFiles(sstables, ranges, estimatedKeysForRanges, type);
 
         // Even if the list of pending files is empty, we need to initiate the transfer otherwise
         // the remote end will hang in cases where this was a requested transfer.
@@ -160,9 +170,10 @@ public class StreamOut
     }
 
     // called prior to sending anything.
-    private static List<PendingFile> createPendingFiles(Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, OperationType type)
+    private static List<PendingFile> createPendingFiles(Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, Iterable<Long> estimatedKeysForRanges, OperationType type)
     {
         List<PendingFile> pending = new ArrayList<PendingFile>();
+        Iterator<Long> estimatedKeyIterator = estimatedKeysForRanges.iterator();
         for (SSTableReader sstable : sstables)
         {
             Descriptor desc = sstable.descriptor;
@@ -179,7 +190,7 @@ public class StreamOut
                 compression = new CompressionInfo(sstable.getCompressionMetadata().getChunksForSections(sections),
                                                   sstable.getCompressionMetadata().parameters);
             }
-            pending.add(new PendingFile(sstable, desc, SSTable.COMPONENT_DATA, sections, type, sstable.estimatedKeysForRanges(ranges), compression));
+            pending.add(new PendingFile(sstable, desc, SSTable.COMPONENT_DATA, sections, type, estimatedKeyIterator.next(), compression));
         }
         logger.info("Stream context metadata {}, {} sstables.", pending, Iterables.size(sstables));
         return pending;
