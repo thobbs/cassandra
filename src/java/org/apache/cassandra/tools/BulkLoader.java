@@ -105,7 +105,7 @@ public class BulkLoader
         }
         catch (Exception e)
         {
-            System.err.println(e.getMessage());
+            System.err.println(e);
             if (options.debug)
                 e.printStackTrace(System.err);
             System.exit(1);

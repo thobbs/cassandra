@@ -398,26 +398,19 @@ public class SSTableReader extends SSTable
                                          ? new CompressedSegmentedFile.Builder()
                                          : new BufferedSegmentedFile.Builder();
 
-        // build a bare-bones IndexSummary
-        IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(1);
-        RandomAccessReader in = RandomAccessReader.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX)), true);
-        try
-        {
-            ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
-            first = decodeKey(partitioner, descriptor, key);
-            summaryBuilder.maybeAddEntry(first, 0);
-            indexSummary = summaryBuilder.build(partitioner);
-        }
-        finally
-        {
-            FileUtils.closeQuietly(in);
-        }
+        // Build summary if absent. We will use it to get an estimate of the number of keys.
+        boolean summaryLoaded = false;
+        if (components.contains(Component.SUMMARY))
+            summaryLoaded = loadSummary(this, ibuilder, dbuilder);
 
-        last = null; // shouldn't need this for batch operations
+        if (!summaryLoaded)
+            buildSummary(false, ibuilder, dbuilder, false);
 
         ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
         dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
     }
+
+
 
     private void buildSummary(boolean recreatebloom, SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, boolean summaryLoaded) throws IOException
     {
@@ -532,6 +525,11 @@ public class SSTableReader extends SSTable
         {
             FileUtils.closeQuietly(oStream);
         }
+    }
+
+    public void releaseSummary()
+    {
+         indexSummary = null;
     }
 
     private void validate()

@@ -47,6 +47,9 @@ public class SSTableLoader
     private final Client client;
     private final OutputHandler outputHandler;
 
+    private final List<SSTableReader> sstables = new LinkedList<SSTableReader>();
+    private final List<Long> estimatedKeys = new ArrayList<Long>();
+
     static
     {
         Config.setLoadYaml(false);
@@ -60,9 +63,8 @@ public class SSTableLoader
         this.outputHandler = outputHandler;
     }
 
-    protected Collection<SSTableReader> openSSTables()
+    protected void openSSTables()
     {
-        final List<SSTableReader> sstables = new LinkedList<SSTableReader>();
 
         directory.list(new FilenameFilter()
         {
@@ -90,6 +92,8 @@ public class SSTableLoader
                 Set<Component> components = new HashSet<Component>();
                 components.add(Component.DATA);
                 components.add(Component.PRIMARY_INDEX);
+                if (new File(desc.filenameFor(Component.SUMMARY)).exists())
+                    components.add(Component.SUMMARY);
                 if (new File(desc.filenameFor(Component.COMPRESSION_INFO)).exists())
                     components.add(Component.COMPRESSION_INFO);
                 if (new File(desc.filenameFor(Component.STATS)).exists())
@@ -97,7 +101,10 @@ public class SSTableLoader
 
                 try
                 {
-                    sstables.add(SSTableReader.openForBatch(desc, components, client.getPartitioner()));
+                    SSTableReader sstable = SSTableReader.openForBatch(desc, components, client.getPartitioner());
+                    sstables.add(sstable);
+                    estimatedKeys.add(sstable.estimatedKeys());
+                    sstable.releaseSummary();
                 }
                 catch (IOException e)
                 {
@@ -106,7 +113,6 @@ public class SSTableLoader
                 return false;
             }
         });
-        return sstables;
     }
 
     public LoaderFuture stream() throws IOException
@@ -118,7 +124,7 @@ public class SSTableLoader
     {
         client.init(keyspace);
 
-        Collection<SSTableReader> sstables = openSSTables();
+        openSSTables();
         if (sstables.isEmpty())
         {
             outputHandler.output("No sstables to stream");
@@ -142,7 +148,7 @@ public class SSTableLoader
             StreamOutSession session = StreamOutSession.create(keyspace, remote, new CountDownCallback(future, remote));
             // transferSSTables assumes references have been acquired
             SSTableReader.acquireReferences(sstables);
-            StreamOut.transferSSTables(session, sstables, ranges, OperationType.BULK_LOAD);
+            StreamOut.transferSSTables(session, sstables, ranges, estimatedKeys, OperationType.BULK_LOAD);
             future.setPendings(remote, session.getFiles());
         }
         return future;
