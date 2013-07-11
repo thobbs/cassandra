@@ -153,6 +153,10 @@ public class SSTableReader extends SSTable
         return open(descriptor, components, metadata, partitioner, true);
     }
 
+    /**
+     * A version of open() designed for bulk loading. The bloom filter is not loaded. If absent, the index summary
+     * will be created but will not be persisted to disk.
+     */
     public static SSTableReader openForBatch(Descriptor descriptor, Set<Component> components, IPartitioner partitioner) throws IOException
     {
         SSTableMetadata sstableMetadata = openMetadata(descriptor, components, partitioner);
@@ -163,7 +167,8 @@ public class SSTableReader extends SSTable
                                                   System.currentTimeMillis(),
                                                   sstableMetadata);
         sstable.bf = new AlwaysPresentFilter();
-        sstable.loadForBatch();
+        // don't save index summary to disk if we needed to build one
+        sstable.load(true, false);
         return sstable;
     }
 
@@ -184,11 +189,11 @@ public class SSTableReader extends SSTable
         // versions before 'c' encoded keys as utf-16 before hashing to the filter
         if (descriptor.version.hasStringsInBloomFilter)
         {
-            sstable.load(true);
+            sstable.load(true, true);
         }
         else
         {
-            sstable.load(false);
+            sstable.load(false, true);
             sstable.loadBloomFilter();
         }
 
@@ -369,8 +374,10 @@ public class SSTableReader extends SSTable
 
     /**
      * Loads ifile, dfile and indexSummary, and optionally recreates the bloom filter.
+     * @param saveSummaryIfCreated for bulk loading purposes, if the summary was absent and needed to be built, you can
+     *                             avoid persisting it to disk by setting this to false
      */
-    private void load(boolean recreatebloom) throws IOException
+    private void load(boolean recreatebloom, boolean saveSummaryIfCreated) throws IOException
     {
         SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
         SegmentedFile.Builder dbuilder = compression
@@ -384,33 +391,9 @@ public class SSTableReader extends SSTable
 
         ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
         dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
-        if (recreatebloom || !summaryLoaded) // save summary information to disk
+        if (saveSummaryIfCreated && (recreatebloom || !summaryLoaded)) // save summary information to disk
             saveSummary(this, ibuilder, dbuilder);
     }
-
-    /**
-     * A simplified load that creates a minimal partition index
-     */
-    private void loadForBatch() throws IOException
-    {
-        SegmentedFile.Builder ibuilder = new BufferedSegmentedFile.Builder();
-        SegmentedFile.Builder dbuilder = compression
-                                         ? new CompressedSegmentedFile.Builder()
-                                         : new BufferedSegmentedFile.Builder();
-
-        // Build summary if absent. We will use it to get an estimate of the number of keys.
-        boolean summaryLoaded = false;
-        if (components.contains(Component.SUMMARY))
-            summaryLoaded = loadSummary(this, ibuilder, dbuilder);
-
-        if (!summaryLoaded)
-            buildSummary(false, ibuilder, dbuilder, false);
-
-        ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
-        dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
-    }
-
-
 
     private void buildSummary(boolean recreatebloom, SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, boolean summaryLoaded) throws IOException
     {
