@@ -906,6 +906,40 @@ public class SSTableReader extends SSTable
         return null;
     }
 
+    public DecoratedKey firstKeyBeyond(RowPosition token)
+    {
+        long sampledPosition = getIndexScanPosition(token);
+
+        int i = 0;
+        Iterator<FileDataInput> segments = ifile.iterator(sampledPosition, INDEX_FILE_BUFFER_BYTES);
+        while (segments.hasNext() && i <= indexSummary.getIndexInterval())
+        {
+            FileDataInput in = segments.next();
+            try
+            {
+                while (!in.isEOF() && i <= indexSummary.getIndexInterval())
+                {
+                    i++;
+
+                    ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
+                    DecoratedKey indexDecoratedKey = partitioner.decorateKey(indexKey);
+                    if (indexDecoratedKey.compareTo(token) > 0)
+                        return indexDecoratedKey;
+                }
+            }
+            catch (IOException e)
+            {
+                markSuspect();
+                throw new CorruptSSTableException(e, in.getPath());
+            }
+            finally
+            {
+                FileUtils.closeQuietly(in);
+            }
+        }
+        return null;
+    }
+
     /**
      * @return The length in bytes of the data for this SSTable. For
      * compressed files, this is not the same thing as the on disk size (see
