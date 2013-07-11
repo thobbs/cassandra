@@ -478,7 +478,7 @@ public class CompactionManager implements CompactionManagerMBean
             Range<Token> range = sortedRanges.get(i);
             if (range.right.isMinimum())
                 // there can't be any keys beyond this (and this is the last range)
-                return true;
+                return false;
 
             DecoratedKey firstBeyondRange = sstable.firstKeyBeyond(range.right.maxKeyBound());
             if (firstBeyondRange == null)
