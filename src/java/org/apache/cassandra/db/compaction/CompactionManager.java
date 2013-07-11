@@ -456,6 +456,52 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     /**
+     * Determines if a cleanup would actually remove any data in this SSTable based
+     * on a set of owned ranges.
+     */
+    static boolean needsCleanup(SSTableReader sstable, Collection<Range<Token>> ownedRanges)
+    {
+        if (ownedRanges.isEmpty())
+            // we shouldn't have an sstable at all
+            return true;
+
+        // unwrap and sort the ranges by LHS token
+        ArrayList<Range<Token>> sortedRanges = new ArrayList(Range.normalize(ownedRanges));
+
+        // see if there are any keys LTE the token for the start of the first range
+        // (token range ownership is exclusive on the LHS.)
+        Range<Token> firstRange = sortedRanges.get(0);
+        if (sstable.first.token.compareTo(firstRange.left) <= 0)
+            // the first key falls before the first range
+            return true;
+
+        // then, iterate over all owned ranges and see if the next key beyond the end of the owned
+        // range falls before the start of the next range
+        for (int i = 0; i < sortedRanges.size(); i++)
+        {
+            Range<Token> range = sortedRanges.get(i);
+            if (range.right.isMinimum())
+                // there can't be any keys beyond this (and this is the last range)
+                return false;
+
+            DecoratedKey firstBeyondRange = sstable.firstKeyBeyond(range.right.maxKeyBound());
+            if (firstBeyondRange == null)
+                // we ran off the end of the sstable looking for the next key; we don't need to check any more ranges
+                return false;
+
+            if (i == (ownedRanges.size() - 1))
+                // we're at the last range and we found a key beyond the end of the range
+                return true;
+
+            Range<Token> nextRange = sortedRanges.get(i + 1);
+            if (!nextRange.contains(firstBeyondRange.token))
+                // we found a key in between the owned ranges
+                return true;
+        }
+        return false;
+    }
+
+    /**
      * This function goes over each file and removes the keys that the node is not responsible for
      * and only keeps keys that this node is responsible for.
      *
@@ -480,6 +526,11 @@ public class CompactionManager implements CompactionManagerMBean
             if (!hasIndexes && !new Bounds<Token>(sstable.first.token, sstable.last.token).intersects(ranges))
             {
                 cfs.replaceCompactedSSTables(Arrays.asList(sstable), Collections.<SSTableReader>emptyList(), OperationType.CLEANUP);
+                continue;
+            }
+            if (!needsCleanup(sstable, ranges))
+            {
+                logger.debug("Skipping {} for cleanup; all rows should be kept", sstable);
                 continue;
             }
 
