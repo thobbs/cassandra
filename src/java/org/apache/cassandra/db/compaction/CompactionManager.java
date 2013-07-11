@@ -485,7 +485,7 @@ public class CompactionManager implements CompactionManagerMBean
                 // we ran off the end of the sstable
                 continue;
 
-            if (i == ownedRanges.size())
+            if (i == (ownedRanges.size() - 1))
                 // we're at the last range and we found a key beyond the end of the range
                 return true;
 
