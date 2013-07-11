@@ -65,6 +65,8 @@ public class SSTableLoader
 
     protected void openSSTables(final Map<InetAddress, Collection<Range<Token>>> endpointToRanges)
     {
+        outputHandler.output("Opening sstables and calculating sections to stream");
+
         directory.list(new FilenameFilter()
         {
             public boolean accept(File dir, String name)
@@ -115,7 +117,10 @@ public class SSTableLoader
 
                         EndpointStreamingDetails details = endpointToStreamingDetails.get(endpoint);
                         if (details == null)
+                        {
                             details = new EndpointStreamingDetails();
+                            endpointToStreamingDetails.put(endpoint, details);
+                        }
 
                         details.addSSTableDetails(estimatedKeys, sstableSections);
                     }
@@ -139,6 +144,7 @@ public class SSTableLoader
     public LoaderFuture stream(Set<InetAddress> toIgnore) throws IOException
     {
         client.init(keyspace);
+        outputHandler.output("Established Thrift connection to initial host");
 
         Map<InetAddress, Collection<Range<Token>>> filteredEndpointToRanges = client.getEndpointToRangesMap();
         Map<InetAddress, Collection<Range<Token>>> endpointToRanges = client.getEndpointToRangesMap();
