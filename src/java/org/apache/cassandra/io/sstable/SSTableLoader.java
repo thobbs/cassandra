@@ -27,6 +27,9 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+import com.google.common.collect.Multimap;
+import com.google.common.collect.HashMultimap;
+
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -48,7 +51,7 @@ public class SSTableLoader
     private final OutputHandler outputHandler;
 
     private final List<SSTableReader> sstables = new ArrayList<SSTableReader>();
-    private final Map<InetAddress, EndpointStreamingDetails> endpointToStreamingDetails = new HashMap<InetAddress, EndpointStreamingDetails>();
+    private final Multimap<InetAddress, StreamOut.SSTableStreamingSections> streamingDetails = HashMultimap.create();
 
     static
     {
@@ -63,7 +66,7 @@ public class SSTableLoader
         this.outputHandler = outputHandler;
     }
 
-    protected void openSSTables(final Map<InetAddress, Collection<Range<Token>>> endpointToRanges)
+    protected void openSSTables(final Map<InetAddress, Collection<Range<Token>>> ranges)
     {
         outputHandler.output("Opening sstables and calculating sections to stream");
 
@@ -110,24 +113,19 @@ public class SSTableLoader
 
                     // calculate the sstable sections to stream as well as the estimated number of
                     // keys per host
-                    for (Map.Entry<InetAddress, Collection<Range<Token>>> entry: endpointToRanges.entrySet())
+                    for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : ranges.entrySet())
                     {
                         InetAddress endpoint = entry.getKey();
                         Collection<Range<Token>> tokenRanges = entry.getValue();
 
                         List<Pair<Long, Long>> sstableSections = sstable.getPositionsForRanges(tokenRanges);
-                        Long estimatedKeys = sstable.estimatedKeysForRanges(tokenRanges);
+                        long estimatedKeys = sstable.estimatedKeysForRanges(tokenRanges);
 
-                        EndpointStreamingDetails details = endpointToStreamingDetails.get(endpoint);
-                        if (details == null)
-                        {
-                            details = new EndpointStreamingDetails();
-                            endpointToStreamingDetails.put(endpoint, details);
-                        }
-
-                        details.addSSTableDetails(estimatedKeys, sstableSections);
+                        StreamOut.SSTableStreamingSections details = new StreamOut.SSTableStreamingSections(sstable, sstableSections, estimatedKeys);
+                        streamingDetails.put(endpoint, details);
                     }
 
+                    // to conserve heap space when bulk loading
                     sstable.releaseSummary();
                 }
                 catch (IOException e)
@@ -147,57 +145,46 @@ public class SSTableLoader
     public LoaderFuture stream(Set<InetAddress> toIgnore) throws IOException
     {
         client.init(keyspace);
-        outputHandler.output("Established Thrift connection to initial host");
+        outputHandler.output("Established Thrift connection to initial hosts");
 
-        Map<InetAddress, Collection<Range<Token>>> filteredEndpointToRanges = client.getEndpointToRangesMap();
-        Map<InetAddress, Collection<Range<Token>>> endpointToRanges = client.getEndpointToRangesMap();
-        for (Map.Entry<InetAddress, Collection<Range<Token>>> entry: endpointToRanges.entrySet())
+        Map<InetAddress, Collection<Range<Token>>> filteredRanges = new HashMap<InetAddress, Collection<Range<Token>>>();
+        for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : client.getEndpointToRangesMap().entrySet())
         {
             InetAddress remote = entry.getKey();
             if (!toIgnore.contains(remote))
-                filteredEndpointToRanges.put(entry.getKey(), entry.getValue());
+                filteredRanges.put(entry.getKey(), entry.getValue());
         }
 
-        openSSTables(filteredEndpointToRanges);
+        openSSTables(filteredRanges);
         if (sstables.isEmpty())
         {
             outputHandler.output("No sstables to stream");
             return new LoaderFuture(0);
         }
 
-        outputHandler.output(String.format("Streaming relevant part of %s to %s", names(sstables), endpointToRanges.keySet()));
+        outputHandler.output(String.format("Streaming relevant part of %s to %s", names(sstables), filteredRanges.keySet()));
 
         // There will be one streaming session by endpoint
-        LoaderFuture future = new LoaderFuture(endpointToRanges.size());
-        for (InetAddress remote : endpointToRanges.keySet())
+        LoaderFuture future = new LoaderFuture(filteredRanges.size());
+        for (InetAddress remote : filteredRanges.keySet())
         {
             if (toIgnore.contains(remote))
             {
                 future.latch.countDown();
+                continue;
             }
-            else
-            {
-                StreamOutSession session = StreamOutSession.create(keyspace, remote, new CountDownCallback(future, remote));
-                // transferSSTables assumes references have been acquired
-                EndpointStreamingDetails details = endpointToStreamingDetails.get(remote);
-                SSTableReader.acquireReferences(sstables);
-                StreamOut.transferSSTables(session, sstables, details.perSSTableSections, details.estimatedKeysPerSSTable, OperationType.BULK_LOAD);
-                future.setPendings(remote, session.getFiles());
-            }
+
+            StreamOutSession session = StreamOutSession.create(keyspace, remote, new CountDownCallback(future, remote));
+            Collection<StreamOut.SSTableStreamingSections> endpointDetails = streamingDetails.get(remote);
+
+            // transferSSTables assumes references have been acquired
+            for (StreamOut.SSTableStreamingSections details : endpointDetails)
+                details.sstable.acquireReference();
+
+            StreamOut.transferSSTables(session, endpointDetails, OperationType.BULK_LOAD);
+            future.setPendings(remote, session.getFiles());
         }
         return future;
-    }
-
-    private class EndpointStreamingDetails
-    {
-        public List<Long> estimatedKeysPerSSTable = new ArrayList<Long>();
-        public List<List<Pair<Long, Long>>> perSSTableSections = new ArrayList<List<Pair<Long, Long>>>();
-
-        public void addSSTableDetails (Long estimatedKeys, List<Pair<Long, Long>> sstableSections)
-        {
-            estimatedKeysPerSSTable.add(estimatedKeys);
-            perSSTableSections.add(sstableSections);
-        }
     }
 
     public static class LoaderFuture implements Future<Void>

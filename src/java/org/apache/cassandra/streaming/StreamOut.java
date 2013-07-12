@@ -145,27 +145,36 @@ public class StreamOut
         transferSSTables(session, sstables, ranges, type);
     }
 
+    public static class SSTableStreamingSections
+    {
+        public final SSTableReader sstable;
+        public final List<Pair<Long, Long>> sections;
+        public final long estimatedKeys;
+
+        public SSTableStreamingSections(SSTableReader sstable, List<Pair<Long, Long>> sections, long estimatedKeys)
+        {
+            this.sstable = sstable;
+            this.sections = sections;
+            this.estimatedKeys = estimatedKeys;
+        }
+    }
+
     /**
      * Low-level transfer of matching portions of a group of sstables from a single table to the target endpoint.
      * You should probably call transferRanges instead. This moreover assumes that references have been acquired on the sstables.
      */
     public static void transferSSTables(StreamOutSession session, Iterable<SSTableReader> sstables, Collection<Range<Token>> ranges, OperationType type)
     {
-        // build a list of the estimated number of keys in the sstables within the given ranges
-        List<Long> estimatedKeysForRanges = new ArrayList<Long>();
-        List<List<Pair<Long, Long>>> sectionsForRanges = new ArrayList<List<Pair<Long, Long>>>();
+        List<SSTableStreamingSections> sstableDetails = new ArrayList<SSTableStreamingSections>();
         for (SSTableReader sstable : sstables)
-        {
-            estimatedKeysForRanges.add(sstable.estimatedKeysForRanges(ranges));
-            sectionsForRanges.add(sstable.getPositionsForRanges(ranges));
-        }
+            sstableDetails.add(new SSTableStreamingSections(sstable, sstable.getPositionsForRanges(ranges), sstable.estimatedKeysForRanges(ranges)));
 
-        transferSSTables(session, sstables, sectionsForRanges, estimatedKeysForRanges, type);
+        transferSSTables(session, sstableDetails, type);
     }
 
-    public static void transferSSTables(StreamOutSession session, Iterable<SSTableReader> sstables, Iterable<List<Pair<Long, Long>>> sstableSections, List<Long> estimatedKeys, OperationType type)
+    public static void transferSSTables(StreamOutSession session, Collection<SSTableStreamingSections> sstableDetails, OperationType type)
     {
-        List<PendingFile> pending = createPendingFiles(sstables, sstableSections, estimatedKeys, type);
+        List<PendingFile> pending = createPendingFiles(sstableDetails, type);
 
         // Even if the list of pending files is empty, we need to initiate the transfer otherwise
         // the remote end will hang in cases where this was a requested transfer.
@@ -174,16 +183,14 @@ public class StreamOut
     }
 
     // called prior to sending anything.
-    private static List<PendingFile> createPendingFiles(Iterable<SSTableReader> sstables, Iterable<List<Pair<Long, Long>>> sstableSections, Iterable<Long> estimatedKeys, OperationType type)
+    private static List<PendingFile> createPendingFiles(Collection<SSTableStreamingSections> sstables, OperationType type)
     {
         List<PendingFile> pending = new ArrayList<PendingFile>();
-        Iterator<Long> estimatedKeyIterator = estimatedKeys.iterator();
-        Iterator<List<Pair<Long, Long>>> sectionsIterator = sstableSections.iterator();
-        for (SSTableReader sstable : sstables)
+        for (SSTableStreamingSections sstableDetails : sstables)
         {
-            Descriptor desc = sstable.descriptor;
-            List<Pair<Long,Long>> sections = sectionsIterator.next();
-            if (sections.isEmpty())
+            SSTableReader sstable = sstableDetails.sstable;
+            Descriptor desc = sstableDetails.sstable.descriptor;
+            if (sstableDetails.sections.isEmpty())
             {
                 // A reference was acquired on the sstable and we won't stream it
                 sstable.releaseReference();
@@ -192,10 +199,10 @@ public class StreamOut
             CompressionInfo compression = null;
             if (sstable.compression)
             {
-                compression = new CompressionInfo(sstable.getCompressionMetadata().getChunksForSections(sections),
+                compression = new CompressionInfo(sstable.getCompressionMetadata().getChunksForSections(sstableDetails.sections),
                                                   sstable.getCompressionMetadata().parameters);
             }
-            pending.add(new PendingFile(sstable, desc, SSTable.COMPONENT_DATA, sections, type, estimatedKeyIterator.next(), compression));
+            pending.add(new PendingFile(sstable, desc, SSTable.COMPONENT_DATA, sstableDetails.sections, type, sstableDetails.estimatedKeys, compression));
         }
         logger.info("Stream context metadata {}, {} sstables.", pending, Iterables.size(sstables));
         return pending;
