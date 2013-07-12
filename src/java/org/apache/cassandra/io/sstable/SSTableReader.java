@@ -906,6 +906,9 @@ public class SSTableReader extends SSTable
         return null;
     }
 
+    /**
+     * Finds and returns the first key beyond a given token in this SSTable or null if no such key exists.
+     */
     public DecoratedKey firstKeyBeyond(RowPosition token)
     {
         long sampledPosition = getIndexScanPosition(token);
