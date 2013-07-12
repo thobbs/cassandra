@@ -455,7 +455,7 @@ public class CompactionManager implements CompactionManagerMBean
             cfs.replaceCompactedSSTables(Collections.singletonList(sstable), Collections.singletonList(scrubber.getNewSSTable()), OperationType.SCRUB);
     }
 
-    private boolean needsCleanup(SSTableReader sstable, Collection<Range<Token>> ownedRanges)
+    static boolean needsCleanup(SSTableReader sstable, Collection<Range<Token>> ownedRanges)
     {
         if (ownedRanges.isEmpty())
             // we shouldn't have an sstable at all
@@ -467,7 +467,7 @@ public class CompactionManager implements CompactionManagerMBean
         // see if there are any keys LTE the token for the start of the first range
         // (token range ownership is exclusive on the LHS.)
         Range<Token> firstRange = sortedRanges.get(0);
-        if (sstable.first.compareTo(firstRange.left.minKeyBound()) <= 0)
+        if (sstable.first.token.compareTo(firstRange.left) <= 0)
             // the first key falls before the first range
             return true;
 
@@ -482,8 +482,8 @@ public class CompactionManager implements CompactionManagerMBean
 
             DecoratedKey firstBeyondRange = sstable.firstKeyBeyond(range.right.maxKeyBound());
             if (firstBeyondRange == null)
-                // we ran off the end of the sstable
-                continue;
+                // we ran off the end of the sstable looking for the next key; we don't need to check any more ranges
+                return false;
 
             if (i == (ownedRanges.size() - 1))
                 // we're at the last range and we found a key beyond the end of the range
