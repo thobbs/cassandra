@@ -925,6 +925,8 @@ public class SSTableReader extends SSTable
                     DecoratedKey indexDecoratedKey = partitioner.decorateKey(indexKey);
                     if (indexDecoratedKey.compareTo(token) > 0)
                         return indexDecoratedKey;
+
+                    RowIndexEntry.serializer.skip(in);
                 }
             }
             catch (IOException e)
