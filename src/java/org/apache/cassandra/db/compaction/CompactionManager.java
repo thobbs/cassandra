@@ -455,6 +455,10 @@ public class CompactionManager implements CompactionManagerMBean
             cfs.replaceCompactedSSTables(Collections.singletonList(sstable), Collections.singletonList(scrubber.getNewSSTable()), OperationType.SCRUB);
     }
 
+    /**
+     * Determines if a cleanup would actually remove any data in this SSTable based
+     * on a set of owned ranges.
+     */
     static boolean needsCleanup(SSTableReader sstable, Collection<Range<Token>> ownedRanges)
     {
         if (ownedRanges.isEmpty())
@@ -525,7 +529,10 @@ public class CompactionManager implements CompactionManagerMBean
                 continue;
             }
             if (!needsCleanup(sstable, ranges))
+            {
+                logger.debug("Skipping {} for cleanup; all rows should be kept", sstable);
                 continue;
+            }
 
             CompactionController controller = new CompactionController(cfs, Collections.singleton(sstable), getDefaultGcBefore(cfs));
             long start = System.nanoTime();
