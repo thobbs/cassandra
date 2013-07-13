@@ -67,9 +67,6 @@ public class SSTableReader extends SSTable
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
-    // guesstimated size of INDEX_INTERVAL index entries
-    private static final int INDEX_FILE_BUFFER_BYTES = 16 * CFMetaData.DEFAULT_INDEX_INTERVAL;
-
     /**
      * maxDataAge is a timestamp in local server time (e.g. System.currentTimeMilli) which represents an uppper bound
      * to the newest piece of data stored in the sstable. In other words, this sstable does not contain items created
@@ -862,7 +859,7 @@ public class SSTableReader extends SSTable
         // is lesser than the first key of next interval (and in that case we must return the position of the first key
         // of the next interval).
         int i = 0;
-        Iterator<FileDataInput> segments = ifile.iterator(sampledPosition, INDEX_FILE_BUFFER_BYTES);
+        Iterator<FileDataInput> segments = ifile.iterator(sampledPosition);
         while (segments.hasNext() && i <= indexSummary.getIndexInterval())
         {
             FileDataInput in = segments.next();
@@ -952,7 +949,7 @@ public class SSTableReader extends SSTable
         long sampledPosition = getIndexScanPosition(token);
 
         int i = 0;
-        Iterator<FileDataInput> segments = ifile.iterator(sampledPosition, INDEX_FILE_BUFFER_BYTES);
+        Iterator<FileDataInput> segments = ifile.iterator(sampledPosition);
         while (segments.hasNext() && i <= indexSummary.getIndexInterval())
         {
             FileDataInput in = segments.next();
