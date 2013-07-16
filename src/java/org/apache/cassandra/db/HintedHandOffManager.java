@@ -547,23 +547,6 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
         return result;
     }
 
-    public Map<String, Integer> countPendingHints()
-    {
-        Token.TokenFactory tokenFactory = StorageService.getPartitioner().getTokenFactory();
-
-        Map<String, Integer> result = new HashMap<String, Integer>();
-        for (Row row : getHintsSlice(Integer.MAX_VALUE))
-        {
-            if (row.cf == null) // ignore removed rows
-                continue;
-
-            int count = row.cf.getColumnCount();
-            if (count > 0)
-                result.put(tokenFactory.toString(row.key.token), count);
-        }
-        return result;
-    }
-
     private List<Row> getHintsSlice(int columnCount)
     {
         // Get count # of columns...
