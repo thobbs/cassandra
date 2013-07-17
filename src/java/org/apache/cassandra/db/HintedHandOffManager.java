@@ -119,9 +119,11 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
      * Returns a mutation representing a Hint to be sent to <code>targetId</code>
      * as soon as it becomes available again.
      */
-    public static RowMutation hintFor(RowMutation mutation, int ttl, UUID targetId)
+    public RowMutation hintFor(RowMutation mutation, int ttl, UUID targetId)
     {
         assert ttl > 0;
+        metrics.incrCreatedHints(StorageService.instance.getTokenMetadata().getEndpointForHostId(targetId));
+
         UUID hintId = UUIDGen.getTimeUUID();
         // serialize the hint with id and version as a composite column name
         ByteBuffer name = comparator.decompose(hintId, MessagingService.current_version);
