@@ -87,7 +87,8 @@ public class SSTableLoader implements StreamEventHandler
                     return false;
                 }
 
-                if (!client.validateColumnFamily(keyspace, desc.cfname))
+                CFMetaData metadata = client.getCFMetaData(keyspace, desc.cfname);
+                if (metadata == null)
                 {
                     outputHandler.output(String.format("Skipping file %s: column family %s.%s doesn't exist", name, keyspace, desc.cfname));
                     return false;
@@ -108,10 +109,7 @@ public class SSTableLoader implements StreamEventHandler
                     // To conserve heap space, open SSTableReaders without bloom filters and discard
                     // the index summary after calculating the file sections to stream and the estimated
                     // number of keys for each endpoint. See CASSANDRA-5555 for details.
-
-                    // TODO get metadata from client
-
-                    SSTableReader sstable = SSTableReader.openForBatch(desc, components, null, client.getPartitioner());
+                    SSTableReader sstable = SSTableReader.openForBatch(desc, components, metadata, client.getPartitioner());
                     sstables.add(sstable);
 
                     // calculate the sstable sections to stream as well as the estimated number of
@@ -187,18 +185,7 @@ public class SSTableLoader implements StreamEventHandler
 
     public void handleStreamEvent(StreamEvent event)
     {
-        if (event.eventType == StreamEvent.Type.FILE_PROGRESS)
-        {
-            ProgressInfo progress = ((StreamEvent.ProgressEvent) event).progress;
-            StringBuilder sb = new StringBuilder("\r");
-            sb.append(progress.fileName);
-            sb.append(": ");
-            sb.append(progress.currentBytes).append("/").append(progress.totalBytes);
-            System.out.print(sb.toString());
-            if (progress.currentBytes == progress.totalBytes)
-                System.out.println();
-        }
-        else if (event.eventType == StreamEvent.Type.STREAM_COMPLETE)
+        if (event.eventType == StreamEvent.Type.STREAM_COMPLETE)
         {
             StreamEvent.SessionCompleteEvent se = (StreamEvent.SessionCompleteEvent) event;
             if (!se.success)
@@ -244,7 +231,7 @@ public class SSTableLoader implements StreamEventHandler
          * Validate that {@code keyspace} is an existing keyspace and {@code
          * cfName} one of its existing column family.
          */
-        public abstract boolean validateColumnFamily(String keyspace, String cfName);
+        public abstract CFMetaData getCFMetaData(String keyspace, String cfName);
 
         public Map<InetAddress, Collection<Range<Token>>> getEndpointToRangesMap()
         {

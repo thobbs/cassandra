@@ -389,7 +389,7 @@ public class Shuffle extends AbstractJmxClient
 
                 ByteBuffer tokenBytes = ByteBuffer.wrap(row.getColumns().get(0).getValue());
                 ByteBuffer requestedAt = ByteBuffer.wrap(row.getColumns().get(1).getValue());
-                Date time = TimestampSerializer.instance.serialize(requestedAt);
+                Date time = TimestampSerializer.instance.deserialize(requestedAt);
                 Token<?> token = partitioner.getTokenFactory().fromByteArray(tokenBytes);
 
                 writeln("%-42s %-15s %s", token.toString(), host, time.toString());
@@ -434,7 +434,7 @@ public class Shuffle extends AbstractJmxClient
                 assert row.getColumns().size() == 2;
 
                 ByteBuffer tokenBytes = ByteBuffer.wrap(row.getColumns().get(0).getValue());
-                String query = String.format("DELETE FROM system.range_xfers WHERE token_bytes = '%s'",
+                String query = String.format("DELETE FROM system.range_xfers WHERE token_bytes = 0x%s",
                         ByteBufferUtil.bytesToHex(tokenBytes));
                 executeCqlQuery(host, thriftPort, thriftFramed, query);
             }
@@ -683,7 +683,7 @@ public class Shuffle extends AbstractJmxClient
                 shuffler.ls();
             else if (subCommand.startsWith("en"))
                 shuffler.enable();
-            else if (subCommand.startsWith("in"))
+            else if (subCommand.startsWith("dis"))
                 shuffler.disable();
             else if (subCommand.equals("clear"))
                 shuffler.clear();

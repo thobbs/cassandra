@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
 
 import com.google.common.base.Function;
 import com.google.common.collect.HashMultimap;
@@ -360,9 +361,10 @@ public class SystemKeyspace
         return tokens;
     }
 
-    private static void forceBlockingFlush(String cfname)
+    public static void forceBlockingFlush(String cfname)
     {
-        Keyspace.open(Keyspace.SYSTEM_KS).getColumnFamilyStore(cfname).forceBlockingFlush();
+        if (!Boolean.getBoolean("cassandra.unsafesystem"))
+            FBUtilities.waitOnFuture(Keyspace.open(Keyspace.SYSTEM_KS).getColumnFamilyStore(cfname).forceFlush());
     }
 
     /**

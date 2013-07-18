@@ -70,6 +70,9 @@ class Cql3ParsingRuleSet(CqlParsingRuleSet):
         ('read_repair_chance', None),
         ('replicate_on_write', None),
         ('populate_io_cache_on_flush', None),
+        ('default_time_to_live', None),
+        ('speculative_retry', None),
+        ('memtable_flush_period_in_ms', None),
     )
 
     columnfamily_layout_map_options = (
@@ -1204,6 +1207,8 @@ CqlRuleSet.append_rules(syntax_rules)
 
 class CqlColumnDef:
     index_name = None
+    index_type = None
+    index_options = {}
 
     def __init__(self, name, cqltype):
         self.name = name
@@ -1218,6 +1223,9 @@ class CqlColumnDef:
             colname = layout[u'column']
         c = cls(colname, lookup_casstype(layout[u'validator']))
         c.index_name = layout[u'index_name']
+        c.index_type = layout[u'index_type']
+        if c.index_type == 'CUSTOM':
+            c.index_options = json.loads(layout[u'index_options'])
         return c
 
     def __str__(self):

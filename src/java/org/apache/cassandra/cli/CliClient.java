@@ -146,8 +146,8 @@ public class CliClient
     }
 
     private static final String DEFAULT_PLACEMENT_STRATEGY = "org.apache.cassandra.locator.NetworkTopologyStrategy";
-    private final String NEWLINE = System.getProperty("line.separator");
-    private final String TAB = "  ";
+    private static final String NEWLINE = System.getProperty("line.separator");
+    private static final String TAB = "  ";
 
     private final Cassandra.Client thriftClient;
     private final CliSessionState sessionState;
@@ -2338,6 +2338,7 @@ public class CliClient
         sessionState.out.println("Cluster Information:");
         try
         {
+            sessionState.out.println("   Name: " + thriftClient.describe_cluster_name());
             sessionState.out.println("   Snitch: " + thriftClient.describe_snitch());
             sessionState.out.println("   Partitioner: " + thriftClient.describe_partitioner());
 

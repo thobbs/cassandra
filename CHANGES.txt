@@ -1,4 +1,13 @@
-2.0
+2.0.0-beta2
+ * Allow nodetool with no args, and with help to run without a server (CASSANDRA-5734)
+ * Cleanup AbstractType/TypeSerializer classes (CASSANDRA-5744)
+ * Remove unimplemented cli option schema-mwt (CASSANDRA-5754)
+ * Support range tombstones in thrift (CASSANDRA-5435)
+ * Normalize table-manipulating CQL3 statements' class names (CASSANDRA-5759)
+ * cqlsh: add missing table options to DESCRIBE output (CASSANDRA-5749)
+ * Fix assertion error during repair (CASSANDRA-5757)
+
+2.0.0-beta1
  * Removed on-heap row cache (CASSANDRA-5348)
  * use nanotime consistently for node-local timeouts (CASSANDRA-5581)
  * Avoid unnecessary second pass on name-based queries (CASSANDRA-5577)
@@ -73,9 +82,13 @@
  * Auto paging in binary protocol (CASSANDRA-4415, 5714)
  * Don't tie client side use of AbstractType to JDBC (CASSANDRA-4495)
  * Adds new TimestampType to replace DateType (CASSANDRA-5723, CASSANDRA-5729)
- * Allow nodetool with no args, and with help to run without a server (CASSANDRA-5734)
+
 
 1.2.7
+ * add cassandra.unsafesystem property (CASSANDRA-5704)
+ * (Hadoop) quote identifiers in CqlPagingRecordReader (CASSANDRA-5763)
+ * Add replace_node functionality for vnodes (CASSANDRA-5337)
+ * Add timeout events to query traces (CASSANDRA-5520)
  * make starting native protocol server idempotent (CASSANDRA-5728)
  * Fix loading key cache when a saved entry is no longer valid (CASSANDRA-5706)
  * Fix serialization of the LEFT gossip value (CASSANDRA-5696)
@@ -87,6 +100,11 @@
  * Don't keep ancestor information in memory (CASSANDRA-5342)
  * cqlsh: fix handling of semicolons inside BATCH queries (CASSANDRA-5697)
  * Expose native protocol server status in nodetool info (CASSANDRA-5735)
+ * Fix pathetic performance of range tombstones (CASSANDRA-5677)
+ * Fix querying with an empty (impossible) range (CASSANDRA-5573)
+ * cqlsh: handle CUSTOM 2i in DESCRIBE output (CASSANDRA-5760)
+ * Fix minor bug in Range.intersects(Bound) (CASSANDRA-5771)
+
 
 1.2.6
  * Fix tracing when operation completes before all responses arrive 
