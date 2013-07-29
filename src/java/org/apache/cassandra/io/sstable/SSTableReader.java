@@ -43,9 +43,11 @@ import org.apache.cassandra.db.DataTracker;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.RowPosition;
+import org.apache.cassandra.db.columniterator.IdentityQueryFilter;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.ICompactionScanner;
+import org.apache.cassandra.db.filter.IDiskAtomFilter;
 import org.apache.cassandra.db.filter.QueryFilter;
 import org.apache.cassandra.db.index.SecondaryIndex;
 import org.apache.cassandra.dht.*;
@@ -55,6 +57,7 @@ import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.thrift.TokenRange;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
 
@@ -1044,11 +1047,11 @@ public class SSTableReader extends SSTable
             return getScanner(limiter);
 
         // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
-        Iterator<Pair<Long, Long>> rangeIterator = getPositionsForRanges(ranges).iterator();
-        if (rangeIterator.hasNext())
-            return new SSTableScanner(this, rangeIterator, limiter);
-        else
+        List<Pair<Long, Long>> positions = getPositionsForRanges(Range.normalize(ranges));
+        if (positions.isEmpty())
             return new EmptyCompactionScanner(getFilename());
+        else
+            return new SSTableScanner(this, ranges, limiter);
     }
 
     public FileDataInput getFileDataInput(long position)

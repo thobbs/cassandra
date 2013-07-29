@@ -150,7 +150,7 @@ public class RowCacheTest extends SchemaLoader
         CacheService.instance.setRowCacheCapacityInMB(1);
         rowCacheLoad(100, Integer.MAX_VALUE, 1000);
 
-        ColumnFamilyStore store = Table.open(KEYSPACE).getColumnFamilyStore(COLUMN_FAMILY);
+        ColumnFamilyStore store = Keyspace.open(KEYSPACE).getColumnFamilyStore(COLUMN_FAMILY);
         assertEquals(CacheService.instance.rowCache.getKeySet().size(), 100);
         store.cleanupCache();
         assertEquals(CacheService.instance.rowCache.getKeySet().size(), 100);

@@ -1462,7 +1462,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public void cleanupCache()
     {
-        Collection<Range<Token>> ranges = StorageService.instance.getLocalRanges(table.getName());
+        Collection<Range<Token>> ranges = StorageService.instance.getLocalRanges(keyspace.getName());
 
         for (RowCacheKey key : CacheService.instance.rowCache.getKeySet())
         {
