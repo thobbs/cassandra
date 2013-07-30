@@ -430,8 +430,8 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
 
                 columns = withoutKeyColumns(columns);
                 columns = (clusterKey == null || "".equals(clusterKey))
-                        ? quote(partitionKey) + "," + columns
-                        : quote(partitionKey) + "," + quote(clusterKey) + "," + columns;
+                        ? partitionKey + "," + columns
+                        : partitionKey + "," + clusterKey + "," + columns;
             }
 
             String whereStr = userDefinedWhereClauses == null ? "" : " AND " + userDefinedWhereClauses;
@@ -590,7 +590,8 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
         }
 
         /** Quoting for working with uppercase */
-        private String quote(String identifier) {
+        private String quote(String identifier)
+        {
             return "\"" + identifier.replaceAll("\"", "\"\"") + "\"";
         }
 
@@ -706,7 +707,7 @@ public class CqlPagingRecordReader extends RecordReader<Map<String, ByteBuffer>,
             for (int i = 0; i < partitionBoundColumns.size(); i++)
                 keys[i] = partitionBoundColumns.get(i).value.duplicate();
 
-            rowKey = ((CompositeType) keyValidator).build(keys);
+            rowKey = CompositeType.build(keys);
         }
         else
         {

@@ -20,6 +20,7 @@ package org.apache.cassandra.streaming;
 import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.Collection;
@@ -52,6 +53,7 @@ public class StreamReader
     protected final long estimatedKeys;
     protected final Collection<Pair<Long, Long>> sections;
     protected final StreamSession session;
+    protected final Descriptor.Version inputVersion;
 
     protected Descriptor desc;
 
@@ -61,6 +63,7 @@ public class StreamReader
         this.cfId = header.cfId;
         this.estimatedKeys = header.estimatedKeys;
         this.sections = header.sections;
+        this.inputVersion = new Descriptor.Version(header.version);
     }
 
     /**
@@ -74,17 +77,12 @@ public class StreamReader
 
         Pair<String, String> kscf = Schema.instance.getCF(cfId);
         ColumnFamilyStore cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
-        Directories.DataDirectory localDir = cfs.directories.getLocationCapableOfSize(totalSize);
-        if (localDir == null)
-            throw new IOException("Insufficient disk space to store " + totalSize + " bytes");
-        desc = Descriptor.fromFilename(cfs.getTempSSTablePath(cfs.directories.getLocationForDisk(localDir)));
 
-        SSTableWriter writer = new SSTableWriter(desc.filenameFor(Component.DATA), estimatedKeys);
+        SSTableWriter writer = createWriter(cfs, totalSize);
+        DataInputStream dis = new DataInputStream(new LZFInputStream(Channels.newInputStream(channel)));
+        BytesReadTracker in = new BytesReadTracker(dis);
         try
         {
-            DataInputStream dis = new DataInputStream(new LZFInputStream(Channels.newInputStream(channel)));
-            BytesReadTracker in = new BytesReadTracker(dis);
-
             while (in.getBytesRead() < totalSize)
             {
                 writeRow(writer, in, cfs);
@@ -96,11 +94,30 @@ public class StreamReader
         catch (Throwable e)
         {
             writer.abort();
+            drain(dis, in.getBytesRead());
             if (e instanceof IOException)
                 throw (IOException) e;
             else
                 throw Throwables.propagate(e);
         }
+    }
+
+    protected SSTableWriter createWriter(ColumnFamilyStore cfs, long totalSize) throws IOException
+    {
+        Directories.DataDirectory localDir = cfs.directories.getLocationCapableOfSize(totalSize);
+        if (localDir == null)
+            throw new IOException("Insufficient disk space to store " + totalSize + " bytes");
+        desc = Descriptor.fromFilename(cfs.getTempSSTablePath(cfs.directories.getLocationForDisk(localDir)));
+
+        return new SSTableWriter(desc.filenameFor(Component.DATA), estimatedKeys);
+    }
+
+    protected void drain(InputStream dis, long bytesRead) throws IOException
+    {
+        long toSkip = totalSize() - bytesRead;
+        toSkip = toSkip - dis.skip(toSkip);
+        while (toSkip > 0)
+            toSkip = toSkip - dis.skip(toSkip);
     }
 
     protected long totalSize()
@@ -114,7 +131,7 @@ public class StreamReader
     protected void writeRow(SSTableWriter writer, DataInput in, ColumnFamilyStore cfs) throws IOException
     {
         DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
-        writer.appendFromStream(key, cfs.metadata, in);
+        writer.appendFromStream(key, cfs.metadata, in, inputVersion);
         cfs.invalidateCachedRow(key);
     }
 }

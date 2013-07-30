@@ -237,7 +237,7 @@ public final class KSMetaData
     public RowMutation toSchema(long timestamp)
     {
         RowMutation rm = new RowMutation(Keyspace.SYSTEM_KS, SystemKeyspace.getSchemaKSKey(name));
-        ColumnFamily cf = rm.addOrGet(SystemKeyspace.SCHEMA_KEYSPACES_CF);
+        ColumnFamily cf = rm.addOrGet(CFMetaData.SchemaKeyspacesCf);
 
         cf.addColumn(Column.create(durableWrites, timestamp, "durable_writes"));
         cf.addColumn(Column.create(strategyClass.getName(), timestamp, "strategy_class"));
@@ -308,13 +308,11 @@ public final class KSMetaData
 
         for (CFMetaData cfm : cfms.values())
         {
-            Row columnRow = ColumnDefinition.readSchema(cfm.ksName, cfm.cfName);
+            Row columnRow = SystemKeyspace.readSchemaRow(SystemKeyspace.SCHEMA_COLUMNS_CF, cfm.ksName, cfm.cfName);
+            // This may replace some existing definition coming from the old key, column and
+            // value aliases. But that's what we want (see CFMetaData.fromSchemaNoColumnsNoTriggers).
             for (ColumnDefinition cd : ColumnDefinition.fromSchema(columnRow, cfm))
-            {
-                // This may replace some existing definition coming from the old key, column and
-                // value aliases. But that's what we want (see CFMetaData.fromSchemaNoColumns).
                 cfm.addOrReplaceColumnDefinition(cd);
-            }
             cfm.rebuild();
         }
 

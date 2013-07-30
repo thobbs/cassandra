@@ -17,15 +17,11 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.nio.ByteBuffer;
-import java.util.List;
-
 import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public abstract class AuthenticationStatement extends ParsedStatement implements CQLStatement
@@ -41,7 +37,7 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
         return 0;
     }
 
-    public ResultMessage execute(ConsistencyLevel cl, QueryState state, List<ByteBuffer> variables, int pageSize, PagingState pagingState)
+    public ResultMessage execute(QueryState state, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
         return execute(state.getClientState());

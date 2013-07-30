@@ -25,10 +25,8 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.AbstractIterator;
 
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -286,6 +284,12 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>
         for (int i = 0; i < size; i++)
             max = Math.max(max, markedAts[i]);
         return max;
+    }
+
+    public void updateAllTimestamp(long timestamp)
+    {
+        for (int i = 0; i < size; i++)
+            markedAts[i] = timestamp;
     }
 
     /**
@@ -736,7 +740,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>
                 }
                 else
                 {
-                    if (comparator.compare(name, ends[idx]) < 0)
+                    if (comparator.compare(name, ends[idx]) <= 0)
                         return markedAts[idx] >= timestamp;
                     else
                         idx++;

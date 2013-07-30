@@ -22,13 +22,13 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.ExecutionException;
 
 import com.google.common.base.Function;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
+import org.apache.cassandra.transport.Server;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -116,13 +116,14 @@ public class SystemKeyspace
 
     private static void setupVersion()
     {
-        String req = "INSERT INTO system.%s (key, release_version, cql_version, thrift_version, data_center, rack, partitioner) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s')";
+        String req = "INSERT INTO system.%s (key, release_version, cql_version, thrift_version, native_protocol_version, data_center, rack, partitioner) VALUES ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')";
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         processInternal(String.format(req, LOCAL_CF,
                                          LOCAL_KEY,
                                          FBUtilities.getReleaseVersionString(),
                                          QueryProcessor.CQL_VERSION.toString(),
                                          cassandraConstants.VERSION,
+                                         Server.CURRENT_VERSION,
                                          snitch.getDatacenter(FBUtilities.getBroadcastAddress()),
                                          snitch.getRack(FBUtilities.getBroadcastAddress()),
                                          DatabaseDescriptor.getPartitioner().getClass().getName()));
@@ -627,13 +628,10 @@ public class SystemKeyspace
     /**
      * Write a new current local node id to the system keyspace.
      *
-     * @param oldCounterId the previous local node id (that {@code newCounterId}
-     * replace) or null if no such node id exists (new node or removed system
-     * keyspace)
      * @param newCounterId the new current local node id to record
      * @param now microsecond time stamp.
      */
-    public static void writeCurrentLocalCounterId(CounterId oldCounterId, CounterId newCounterId, long now)
+    public static void writeCurrentLocalCounterId(CounterId newCounterId, long now)
     {
         ByteBuffer ip = ByteBuffer.wrap(FBUtilities.getBroadcastAddress().getAddress());
 
@@ -676,11 +674,12 @@ public class SystemKeyspace
 
     public static List<Row> serializedSchema()
     {
-        List<Row> schema = new ArrayList<Row>(3);
+        List<Row> schema = new ArrayList<>();
 
         schema.addAll(serializedSchema(SCHEMA_KEYSPACES_CF));
         schema.addAll(serializedSchema(SCHEMA_COLUMNFAMILIES_CF));
         schema.addAll(serializedSchema(SCHEMA_COLUMNS_CF));
+        schema.addAll(serializedSchema(SCHEMA_TRIGGERS_CF));
 
         return schema;
     }
@@ -702,11 +701,12 @@ public class SystemKeyspace
 
     public static Collection<RowMutation> serializeSchema()
     {
-        Map<DecoratedKey, RowMutation> mutationMap = new HashMap<DecoratedKey, RowMutation>();
+        Map<DecoratedKey, RowMutation> mutationMap = new HashMap<>();
 
         serializeSchema(mutationMap, SCHEMA_KEYSPACES_CF);
         serializeSchema(mutationMap, SCHEMA_COLUMNFAMILIES_CF);
         serializeSchema(mutationMap, SCHEMA_COLUMNS_CF);
+        serializeSchema(mutationMap, SCHEMA_TRIGGERS_CF);
 
         return mutationMap.values();
     }
@@ -754,19 +754,25 @@ public class SystemKeyspace
         return new Row(key, result);
     }
 
-    public static Row readSchemaRow(String ksName, String cfName)
+    /**
+     * Fetches a subset of schema (table data, columns metadata or triggers) for the keyspace+table pair.
+     *
+     * @param schemaCfName the schema table to get the data from (schema_columnfamilies, schema_columns or schema_triggers)
+     * @param ksName the keyspace of the table we are interested in
+     * @param cfName the table we are interested in
+     * @return a Row containing the schema data of a particular type for the table
+     */
+    public static Row readSchemaRow(String schemaCfName, String ksName, String cfName)
     {
         DecoratedKey key = StorageService.getPartitioner().decorateKey(getSchemaKSKey(ksName));
-
-        ColumnFamilyStore schemaCFS = SystemKeyspace.schemaCFS(SCHEMA_COLUMNFAMILIES_CF);
-        ColumnFamily result = schemaCFS.getColumnFamily(key,
-                                                        DefsTables.searchComposite(cfName, true),
-                                                        DefsTables.searchComposite(cfName, false),
-                                                        false,
-                                                        Integer.MAX_VALUE,
-                                                        System.currentTimeMillis());
-
-        return new Row(key, result);
+        ColumnFamilyStore schemaCFS = SystemKeyspace.schemaCFS(schemaCfName);
+        ColumnFamily cf = schemaCFS.getColumnFamily(key,
+                                                    DefsTables.searchComposite(cfName, true),
+                                                    DefsTables.searchComposite(cfName, false),
+                                                    false,
+                                                    Integer.MAX_VALUE,
+                                                    System.currentTimeMillis());
+        return new Row(key, cf);
     }
 
     public static PaxosState loadPaxosState(ByteBuffer key, CFMetaData metadata)

@@ -34,7 +34,6 @@ import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.Pair;
@@ -191,7 +190,7 @@ public abstract class ModificationStatement implements CQLStatement
         for (CFDefinition.Name name : cfDef.keys.values())
         {
             List<Term> values = processedKeys.get(name.name);
-            if (values == null || values.isEmpty())
+            if (values == null)
                 throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s", name));
 
             if (keyBuilder.remainingCount() == 1)
@@ -206,7 +205,7 @@ public abstract class ModificationStatement implements CQLStatement
             }
             else
             {
-                if (values.size() > 1)
+                if (values.isEmpty() || values.size() > 1)
                     throw new InvalidRequestException("IN is only supported on the last column of the partition key");
                 ByteBuffer val = values.get(0).bindAndGet(variables);
                 if (val == null)
@@ -226,7 +225,7 @@ public abstract class ModificationStatement implements CQLStatement
         for (CFDefinition.Name name : cfDef.columns.values())
         {
             List<Term> values = processedKeys.get(name.name);
-            if (values == null || values.isEmpty())
+            if (values == null)
             {
                 firstEmptyKey = name;
                 if (requireFullClusteringKey() && cfDef.isComposite && !cfDef.isCompact)
@@ -334,32 +333,37 @@ public abstract class ModificationStatement implements CQLStatement
         return ifNotExists || (columnConditions != null && !columnConditions.isEmpty());
     }
 
-    public ResultMessage execute(ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables, int pageSize, PagingState pagingState)
+    public ResultMessage execute(QueryState queryState, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
-        if (cl == null)
+        if (options.getConsistency() == null)
             throw new InvalidRequestException("Invalid empty consistency level");
 
         return hasConditions()
-             ? executeWithCondition(cl, queryState, variables)
-             : executeWithoutCondition(cl, queryState, variables);
+             ? executeWithCondition(queryState, options)
+             : executeWithoutCondition(queryState, options);
     }
 
-    private ResultMessage executeWithoutCondition(ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables)
+    private ResultMessage executeWithoutCondition(QueryState queryState, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
+        ConsistencyLevel cl = options.getConsistency();
         if (isCounter())
             cl.validateCounterForWrite(cfm);
         else
             cl.validateForWrite(cfm.ksName);
 
-        StorageProxy.mutateWithTriggers(getMutations(variables, false, cl, queryState.getTimestamp(), false), cl, false);
+        Collection<? extends IMutation> mutations = getMutations(options.getValues(), false, cl, queryState.getTimestamp(), false);
+        if (!mutations.isEmpty())
+            StorageProxy.mutateWithTriggers(mutations, cl, false);
+
         return null;
     }
 
-    public ResultMessage executeWithCondition(ConsistencyLevel cl, QueryState queryState, List<ByteBuffer> variables)
+    public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
+        List<ByteBuffer> variables = options.getValues();
         List<ByteBuffer> keys = buildPartitionKeyNames(variables);
         // We don't support IN for CAS operation so far
         if (keys.size() > 1)
@@ -374,7 +378,14 @@ public abstract class ModificationStatement implements CQLStatement
         ColumnFamily updates = updateForKey(key, clusteringPrefix, params);
         ColumnFamily expected = buildConditions(key, clusteringPrefix, params);
 
-        ColumnFamily result = StorageProxy.cas(keyspace(), columnFamily(), key, clusteringPrefix, expected, updates, cl);
+        ColumnFamily result = StorageProxy.cas(keyspace(),
+                                               columnFamily(),
+                                               key,
+                                               clusteringPrefix,
+                                               expected,
+                                               updates,
+                                               options.getSerialConsistency(),
+                                               options.getConsistency());
         return new ResultMessage.Rows(buildCasResultSet(key, result));
     }
 
@@ -523,7 +534,7 @@ public abstract class ModificationStatement implements CQLStatement
         {
             super(name);
             this.attrs = attrs;
-            this.conditions = conditions;
+            this.conditions = conditions == null ? Collections.<Pair<ColumnIdentifier, Operation.RawUpdate>>emptyList() : conditions;
             this.ifNotExists = ifNotExists;
         }
 

@@ -32,6 +32,7 @@ import javax.net.ssl.SSLEngine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.transport.messages.CredentialsMessage;
@@ -41,6 +42,7 @@ import org.apache.cassandra.transport.messages.PrepareMessage;
 import org.apache.cassandra.transport.messages.QueryMessage;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.transport.messages.StartupMessage;
+import org.apache.cassandra.utils.MD5Digest;
 import org.jboss.netty.bootstrap.ClientBootstrap;
 import org.jboss.netty.channel.Channel;
 import org.jboss.netty.channel.ChannelFuture;
@@ -71,15 +73,17 @@ public class SimpleClient
 
     protected final ResponseHandler responseHandler = new ResponseHandler();
     protected final Connection.Tracker tracker = new ConnectionTracker();
-    protected final Connection connection = new Connection(tracker);
+    // We don't track connection really, so we don't need one Connection per channel
+    protected final Connection connection = new Connection(null, Server.CURRENT_VERSION, tracker);
     protected ClientBootstrap bootstrap;
     protected Channel channel;
     protected ChannelFuture lastWriteFuture;
 
     private final Connection.Factory connectionFactory = new Connection.Factory()
     {
-        public Connection newConnection(Connection.Tracker tracker)
+        public Connection newConnection(Channel channel, int version)
         {
+            assert version == Server.CURRENT_VERSION;
             return connection;
         }
     };
@@ -156,7 +160,7 @@ public class SimpleClient
 
     public ResultMessage execute(String query, List<ByteBuffer> values, ConsistencyLevel consistencyLevel)
     {
-        Message.Response msg = execute(new QueryMessage(query, consistencyLevel, values, -1));
+        Message.Response msg = execute(new QueryMessage(query, new QueryOptions(consistencyLevel, values)));
         assert msg instanceof ResultMessage;
         return (ResultMessage)msg;
     }
@@ -170,7 +174,7 @@ public class SimpleClient
 
     public ResultMessage executePrepared(byte[] statementId, List<ByteBuffer> values, ConsistencyLevel consistency)
     {
-        Message.Response msg = execute(new ExecuteMessage(statementId, values, consistency, -1));
+        Message.Response msg = execute(new ExecuteMessage(MD5Digest.wrap(statementId), new QueryOptions(consistency, values)));
         assert msg instanceof ResultMessage;
         return (ResultMessage)msg;
     }
@@ -227,7 +231,7 @@ public class SimpleClient
 
             //pipeline.addLast("debug", new LoggingHandler());
 
-            pipeline.addLast("frameDecoder", new Frame.Decoder(tracker, connectionFactory));
+            pipeline.addLast("frameDecoder", new Frame.Decoder(connectionFactory));
             pipeline.addLast("frameEncoder", frameEncoder);
 
             pipeline.addLast("frameDecompressor", frameDecompressor);

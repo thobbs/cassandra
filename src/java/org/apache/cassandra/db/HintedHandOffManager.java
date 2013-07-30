@@ -119,9 +119,17 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
      * Returns a mutation representing a Hint to be sent to <code>targetId</code>
      * as soon as it becomes available again.
      */
-    public static RowMutation hintFor(RowMutation mutation, int ttl, UUID targetId)
+    public RowMutation hintFor(RowMutation mutation, int ttl, UUID targetId)
     {
         assert ttl > 0;
+
+        InetAddress endpoint = StorageService.instance.getTokenMetadata().getEndpointForHostId(targetId);
+        // during tests we may not have a matching endpoint, but this would be unexpected in real clusters
+        if (endpoint != null)
+            metrics.incrCreatedHints(endpoint);
+        else
+            logger.warn("Unable to find matching endpoint for target {} when storing a hint", targetId);
+
         UUID hintId = UUIDGen.getTimeUUID();
         // serialize the hint with id and version as a composite column name
         ByteBuffer name = comparator.decompose(hintId, MessagingService.current_version);
@@ -543,23 +551,6 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
         {
             if (row.cf != null) //ignore removed rows
                 result.addFirst(tokenFactory.toString(row.key.token));
-        }
-        return result;
-    }
-
-    public Map<String, Integer> countPendingHints()
-    {
-        Token.TokenFactory tokenFactory = StorageService.getPartitioner().getTokenFactory();
-
-        Map<String, Integer> result = new HashMap<String, Integer>();
-        for (Row row : getHintsSlice(Integer.MAX_VALUE))
-        {
-            if (row.cf == null) // ignore removed rows
-                continue;
-
-            int count = row.cf.getColumnCount();
-            if (count > 0)
-                result.put(tokenFactory.toString(row.key.token), count);
         }
         return result;
     }

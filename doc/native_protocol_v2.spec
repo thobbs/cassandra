@@ -69,10 +69,8 @@ Table of Contents
 
   The protocol distinguishes 2 types of frames: requests and responses. Requests
   are those frame sent by the clients to the server, response are the ones sent
-  by the server. Note however that while communication are initiated by the
-  client with the server responding to request, the protocol may likely add
-  server pushes in the future, so responses does not obligatory come right after
-  a client request.
+  by the server. Note however that the protocol supports server pushes (events)
+  so responses does not necessarily come right after a client request.
 
   Note to client implementors: clients library should always assume that the
   body of a given frame may contain more data than what is described in this
@@ -97,6 +95,11 @@ Table of Contents
   have one of:
     0x02    Request frame for this protocol version
     0x82    Response frame for this protocol version
+
+  Please note that the while every message ship with the version, only one version
+  of messages is accepted on a given connection. In other words, the first message
+  exchanged (STARTUP) sets the version for the connection for the lifetime of this
+  connection.
 
   This document describe the version 2 of the protocol. For the changes made since
   version 1, see Section 9.
@@ -215,6 +218,8 @@ Table of Contents
                      0x0005    ALL
                      0x0006    LOCAL_QUORUM
                      0x0007    EACH_QUORUM
+                     0x0008    SERIAL
+                     0x0009    LOCAL_SERIAL
 
     [string map]      A [short] n, followed by n pair <k><v> where <k> and <v>
                       are [string].
@@ -277,29 +282,37 @@ Table of Contents
 4.1.4. QUERY
 
   Performs a CQL query. The body of the message must be:
-    <query><consistency><flags>[<result_page_size>][<n><value_1>...<value_n>][<paging_state>]
+    <query><query_parameters>
+  where <query> is a [long string] representing the query and
+  <query_parameters> must be
+    <consistency><flags>[<n><value_1>...<value_n>][<result_page_size>][<paging_state>][<serial_consistency>]
   where:
+    - <consistency> is the [consistency] level for the operation.
     - <flags> is a [byte] whose bits define the options for this query and
       in particular influence what the remainder of the message contains.
       A flag is set if the bit corresponding to its `mask` is set. Supported
       flags are, given there mask:
-        0x01: Page_size. In that case, <result_page_size> is an [int]
-              controlling the desired page size of the result (in CQL3 rows).
-              See the section on paging (Section 7) for more details.
-        0x02: Values. In that case, a [short] <n> followed by <n> [bytes]
+        0x01: Values. In that case, a [short] <n> followed by <n> [bytes]
               values are provided. Those value are used for bound variables in
               the query.
-        0x04: Skip_metadata. If present, the Result Set returned as a response
+        0x02: Skip_metadata. If present, the Result Set returned as a response
               to that query (if any) will have the NO_METADATA flag (see
               Section 4.2.5.2).
+        0x03: Page_size. In that case, <result_page_size> is an [int]
+              controlling the desired page size of the result (in CQL3 rows).
+              See the section on paging (Section 7) for more details.
         0x04: With_paging_state. If present, <paging_state> should be present.
               <paging_state> is a [bytes] value that should have been returned
               in a result set (Section 4.2.5.2). If provided, the query will be
               executed but starting from a given paging state. This also to
               continue paging on a different node from the one it has been
               started (See Section 7 for more details).
-    - <query> the query, [long string].
-    - <consistency> is the [consistency] level for the operation.
+        0x05: With serial consistency. If present, <serial_consistency> should be
+              present. <serial_consistency> is the [consistency] level for the
+              serial phase of conditional updates. That consitency can only be
+              either SERIAL or LOCAL_SERIAL and if not present, it defaults to
+              SERIAL. This option will be ignored for anything else that a
+              conditional update/insert.
 
   Note that the consistency is ignored by some queries (USE, CREATE, ALTER,
   TRUNCATE, ...).
@@ -320,35 +333,13 @@ Table of Contents
 4.1.6. EXECUTE
 
   Executes a prepared query. The body of the message must be:
-    <id><n><value_1>....<value_n><consistency><flags>[<result_page_size>][<paging_state>]
-  where:
-    - <id> is the prepared query ID. It's the [short bytes] returned as a
-      response to a PREPARE message.
-    - <n> is a [short] indicating the number of following values.
-    - <value_1>...<value_n> are the [bytes] to use for bound variables in the
-      prepared query.
-    - <consistency> is the [consistency] level for the operation.
-    - <flags> is a [byte] whose bits define the options for this query and
-      in particular influence what the remainder of the message contains.
-      A flag is set if the bit corresponding to its `mask` is set. Supported
-      flags are, given there mask:
-        0x01: Page size. In that case, <result_page_size> is an [int]
-              controlling the desired page size of the result (in CQL3 rows).
-              See the section on paging (Section 7) for more details.
-        0x02: Skip metadata. If present, the Result Set returned as a response
-              to that query (if any) will have the NO_METADATA flag (see
-              Section 4.2.5.2).
-        0x03: With_paging_state. If present, <paging_state> should be present.
-              <paging_state> is a [bytes] value that should have been returned
-              in a result set (Section 4.2.5.2). If provided, the query will be
-              executed but starting from a given paging state. This also to
-              continue paging on a different node from the one it has been
-              started (See Section 7 for more details).
-
-  Note that the consistency is ignored by some (prepared) queries (USE, CREATE,
-  ALTER, TRUNCATE, ...).
+    <id><query_parameters>
+  where <id> is the prepared query ID. It's the [short bytes] returned as a
+  response to a PREPARE message. As for <query_parameters>, it has the exact
+  same definition than in QUERY (see Section 4.1.4).
 
   The response from the server will be a RESULT message.
+
 
 4.1.7. BATCH
 
@@ -662,6 +653,14 @@ Table of Contents
   discretion). A frame body should be compressed if and only if the compressed
   flag (see Section 2.2) is set.
 
+  As of this version 2 of the protocol, the following compressions are available:
+    - lz4 (https://code.google.com/p/lz4/). In that, note that the 4 first bytes
+      of the body will be the uncompressed length (followed by the compressed
+      bytes).
+    - snappy (https://code.google.com/p/snappy/). This compression might not be
+      available as it depends on a native lib (server-side) that might not be
+      avaivable on some installation.
+
 
 6. Collection types
 
@@ -825,3 +824,8 @@ Table of Contents
     value. Note that paging is optional, and a client that do not want to handle
     can simply avoid including the Page_size flag and parameter in QUERY and
     EXECUTE.
+  * QUERY and EXECUTE statements can request for the metadata to be skipped in
+    the result set returned (for efficiency reasons) if said metadata are known
+    in advance. Furthermore, the result to a PREPARE (section 4.2.5.4) now
+    includes the metadata for the result of executing the statement just
+    prepared (though those metadata will be empty for non SELECT statements).

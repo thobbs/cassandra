@@ -287,14 +287,21 @@ insertStatement returns [UpdateStatement.ParsedInsert expr]
         Attributes.Raw attrs = new Attributes.Raw();
         List<ColumnIdentifier> columnNames  = new ArrayList<ColumnIdentifier>();
         List<Term.Raw> values = new ArrayList<Term.Raw>();
+        boolean ifNotExists = false;
     }
     : K_INSERT K_INTO cf=columnFamilyName
           '(' c1=cident { columnNames.add(c1); }  ( ',' cn=cident { columnNames.add(cn); } )* ')'
         K_VALUES
           '(' v1=term { values.add(v1); } ( ',' vn=term { values.add(vn); } )* ')'
+
+        ( K_IF K_NOT K_EXISTS { ifNotExists = true; } )?
         ( usingClause[attrs] )?
       {
-          $expr = new UpdateStatement.ParsedInsert(cf, attrs, columnNames, values);
+          $expr = new UpdateStatement.ParsedInsert(cf,
+                                                   attrs,
+                                                   columnNames,
+                                                   values,
+                                                   ifNotExists);
       }
     ;
 
@@ -325,21 +332,19 @@ updateStatement returns [UpdateStatement.ParsedUpdate expr]
     @init {
         Attributes.Raw attrs = new Attributes.Raw();
         List<Pair<ColumnIdentifier, Operation.RawUpdate>> operations = new ArrayList<Pair<ColumnIdentifier, Operation.RawUpdate>>();
-        boolean ifNotExists = false;
     }
     : K_UPDATE cf=columnFamilyName
       ( usingClause[attrs] )?
       K_SET columnOperation[operations] (',' columnOperation[operations])*
       K_WHERE wclause=whereClause
-      ( K_IF (K_NOT K_EXISTS { ifNotExists = true; } | conditions=updateCondition) )?
+      ( K_IF conditions=updateCondition )?
       {
           return new UpdateStatement.ParsedUpdate(cf,
                                                   attrs,
                                                   operations,
                                                   wclause,
-                                                  conditions == null ? Collections.<Pair<ColumnIdentifier, Operation.RawUpdate>>emptyList() : conditions,
-                                                  ifNotExists);
-      }
+                                                  conditions == null ? Collections.<Pair<ColumnIdentifier, Operation.RawUpdate>>emptyList() : conditions);
+     }
     ;
 
 updateCondition returns [List<Pair<ColumnIdentifier, Operation.RawUpdate>> conditions]
@@ -497,19 +502,19 @@ createIndexStatement returns [CreateIndexStatement expr]
     ;
 
 /**
- * CREATE TRIGGER [triggerName] ON columnFamily (columnName) EXECUTE (class, class);
+ * CREATE TRIGGER triggerName ON columnFamily USING 'triggerClass';
  */
 createTriggerStatement returns [CreateTriggerStatement expr]
-    : K_CREATE K_TRIGGER (tn=IDENT) K_ON cf=columnFamilyName K_USING tc1=STRING_LITERAL
-      { $expr = new CreateTriggerStatement(cf, $tn.text, $tc1.text); }
+    : K_CREATE K_TRIGGER (name=IDENT) K_ON cf=columnFamilyName K_USING cls=STRING_LITERAL
+      { $expr = new CreateTriggerStatement(cf, $name.text, $cls.text); }
     ;
 
 /**
- * DROP TRIGGER [triggerName] ON columnFamily (columnName);
+ * DROP TRIGGER triggerName ON columnFamily;
  */
 dropTriggerStatement returns [DropTriggerStatement expr]
-    : K_DROP K_TRIGGER (tn=IDENT) K_ON cf=columnFamilyName
-      { $expr = new DropTriggerStatement(cf, $tn.text); }
+    : K_DROP K_TRIGGER (name=IDENT) K_ON cf=columnFamilyName
+      { $expr = new DropTriggerStatement(cf, $name.text); }
     ;
 
 /**
@@ -856,7 +861,7 @@ relation[List<Relation> clauses]
                 $clauses.add(new Relation(id, type, t, true));
         }
     | name=cident K_IN { Relation rel = Relation.createInRelation($name.id); }
-       '(' f1=term { rel.addInValue(f1); } (',' fN=term { rel.addInValue(fN); } )* ')' { $clauses.add(rel); }
+       '(' ( f1=term { rel.addInValue(f1); } (',' fN=term { rel.addInValue(fN); } )* )? ')' { $clauses.add(rel); }
     ;
 
 comparatorType returns [CQL3Type t]

@@ -893,6 +893,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // Dont set any state for the node which is bootstrapping the existing token...
             tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
         }
+        if (!Gossiper.instance.seenAnySeed())
+            throw new IllegalStateException("Unable to contact any seeds!");
         setMode(Mode.JOINING, "Starting to bootstrap...", true);
         new BootStrapper(FBUtilities.getBroadcastAddress(), tokens, tokenMetadata).bootstrap(); // handles token update
         logger.info("Bootstrap completed! for the tokens {}", tokens);
@@ -1291,20 +1293,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.debug("Node " + endpoint + " state normal, token " + tokens);
 
         if (tokenMetadata.isMember(endpoint))
-        {
             logger.info("Node " + endpoint + " state jump to normal");
-
-            if (!isClientMode)
-            {
-                for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
-                    subscriber.onUp(endpoint);
-            }
-        }
-        else if (!isClientMode)
-        {
-            for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
-                subscriber.onJoinCluster(endpoint);
-        }
 
         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
         if (Gossiper.instance.usesHostId(endpoint))
@@ -1902,8 +1891,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void onAlive(InetAddress endpoint, EndpointState state)
     {
-        if (!isClientMode && getTokenMetadata().isMember(endpoint))
+        if (isClientMode)
+            return;
+
+        if (tokenMetadata.isMember(endpoint))
+        {
             HintedHandOffManager.instance.scheduleHintDelivery(endpoint);
+            for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
+                subscriber.onUp(endpoint);
+        }
+        else
+        {
+            for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
+                subscriber.onJoinCluster(endpoint);
+        }
     }
 
     public void onRemove(InetAddress endpoint)
@@ -2092,7 +2093,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void forceKeyspaceCompaction(String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException
     {
-        for (ColumnFamilyStore cfStore : getValidColumnFamilies(false, false, keyspaceName, columnFamilies))
+        for (ColumnFamilyStore cfStore : getValidColumnFamilies(true, false, keyspaceName, columnFamilies))
         {
             cfStore.forceMajorCompaction();
         }
@@ -3525,7 +3526,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         SSTableLoader.Client client = new SSTableLoader.Client()
         {
-            @Override
             public void init(String keyspace)
             {
                 try
@@ -3544,7 +3544,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 }
             }
 
-            @Override
             public CFMetaData getCFMetaData(String keyspace, String cfName)
             {
                 return Schema.instance.getCFMetaData(keyspace, cfName);

@@ -17,16 +17,12 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import java.nio.ByteBuffer;
-import java.util.List;
-
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 /**
@@ -65,7 +61,7 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
 
     public abstract void announceMigration() throws RequestValidationException;
 
-    public ResultMessage execute(ConsistencyLevel cl, QueryState state, List<ByteBuffer> variables, int pageSize, PagingState pagingState) throws RequestValidationException
+    public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException
     {
         announceMigration();
         String tableName = cfName == null || columnFamily() == null ? "" : columnFamily();

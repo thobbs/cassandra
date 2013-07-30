@@ -19,7 +19,6 @@ package org.apache.cassandra.streaming;
 
 import java.io.IOException;
 import java.net.InetAddress;
-import java.net.Socket;
 import java.util.*;
 import java.util.concurrent.Future;
 
@@ -186,7 +185,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
     {
         if (requests.isEmpty() && transfers.isEmpty())
         {
-            logger.debug("Session does not have any tasks.");
+            logger.info("[Stream #{}] Session does not have any tasks.", planId());
             closeSession(State.COMPLETE);
             return;
         }
@@ -265,24 +264,46 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
      */
     public void addTransferFiles(Collection<Range<Token>> ranges, Collection<SSTableReader> sstables)
     {
+        List<SSTableStreamingSections> sstableDetails = new ArrayList<>(sstables.size());
         for (SSTableReader sstable : sstables)
+            sstableDetails.add(new SSTableStreamingSections(sstable, sstable.getPositionsForRanges(ranges), sstable.estimatedKeysForRanges(ranges)));
+
+        addTransferFiles(sstableDetails);
+    }
+
+    public void addTransferFiles(Collection<SSTableStreamingSections> sstableDetails)
+    {
+        for (SSTableStreamingSections details : sstableDetails)
         {
-            List<Pair<Long, Long>> sections = sstable.getPositionsForRanges(ranges);
-            if (sections.isEmpty())
+            if (details.sections.isEmpty())
             {
                 // A reference was acquired on the sstable and we won't stream it
-                sstable.releaseReference();
+                details.sstable.releaseReference();
                 continue;
             }
-            long estimatedKeys = sstable.estimatedKeysForRanges(ranges);
-            UUID cfId = sstable.metadata.cfId;
+
+            UUID cfId = details.sstable.metadata.cfId;
             StreamTransferTask task = transfers.get(cfId);
             if (task == null)
             {
                 task = new StreamTransferTask(this, cfId);
                 transfers.put(cfId, task);
             }
-            task.addTransferFile(sstable, estimatedKeys, sections);
+            task.addTransferFile(details.sstable, details.estimatedKeys, details.sections);
+        }
+    }
+
+    public static class SSTableStreamingSections
+    {
+        public final SSTableReader sstable;
+        public final List<Pair<Long, Long>> sections;
+        public final long estimatedKeys;
+
+        public SSTableStreamingSections(SSTableReader sstable, List<Pair<Long, Long>> sections, long estimatedKeys)
+        {
+            this.sstable = sstable;
+            this.sections = sections;
+            this.estimatedKeys = estimatedKeys;
         }
     }
 
@@ -337,7 +358,12 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
                 break;
 
             case FILE:
-                received((FileMessage) message);
+                receive((FileMessage) message);
+                break;
+
+            case RECEIVED:
+                ReceivedMessage received = (ReceivedMessage) message;
+                received(received.cfId, received.sequenceNumber);
                 break;
 
             case RETRY:
@@ -360,8 +386,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
      */
     public void onInitializationComplete()
     {
-        logger.debug("Connected. Sending prepare...");
-
         // send prepare message
         state(State.PREPARING);
         PrepareMessage prepare = new PrepareMessage();
@@ -372,10 +396,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
 
         // if we don't need to prepare for receiving stream, start sending files immediately
         if (requests.isEmpty())
-        {
-            logger.debug("Prepare complete. Start streaming files.");
             startStreamingFiles();
-        }
     }
 
     /**
@@ -385,7 +406,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
      */
     public void onError(Throwable e)
     {
-        logger.error("Streaming error occurred", e);
+        logger.error("[Stream #" + planId() + "] Streaming error occurred", e);
         // send session failure message
         if (handler.isOutgoingConnected())
             handler.sendMessage(new SessionFailedMessage());
@@ -398,8 +419,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
      */
     public void prepare(Collection<StreamRequest> requests, Collection<StreamSummary> summaries)
     {
-        logger.debug("Start preparing this session (" + requests.size() + " to send, " + summaries.size() + " to receive)");
-
         // prepare tasks
         state(State.PREPARING);
         for (StreamRequest request : requests)
@@ -418,10 +437,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
 
         // if there are files to stream
         if (!maybeCompleted())
-        {
-            logger.debug("Prepare complete. Start streaming files.");
             startStreamingFiles();
-        }
     }
 
     /**
@@ -431,9 +447,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
      */
     public void fileSent(FileMessageHeader header)
     {
-        StreamingMetrics.totalOutgoingBytes.inc(header.size());
-        metrics.outgoingBytes.inc(header.size());
-        transfers.get(header.cfId).complete(header.sequenceNumber);
+        long headerSize = header.size();
+        StreamingMetrics.totalOutgoingBytes.inc(headerSize);
+        metrics.outgoingBytes.inc(headerSize);
     }
 
     /**
@@ -441,10 +457,13 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
      *
      * @param message received file
      */
-    public void received(FileMessage message)
+    public void receive(FileMessage message)
     {
-        StreamingMetrics.totalIncomingBytes.inc(message.header.size());
-        metrics.incomingBytes.inc(message.header.size());
+        long headerSize = message.header.size();
+        StreamingMetrics.totalIncomingBytes.inc(headerSize);
+        metrics.incomingBytes.inc(headerSize);
+        // send back file received message
+        handler.sendMessage(new ReceivedMessage(message.header.cfId, message.header.sequenceNumber));
         receivers.get(message.header.cfId).received(message.sstable);
     }
 
@@ -452,6 +471,11 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
     {
         ProgressInfo progress = new ProgressInfo(peer, desc.filenameFor(Component.DATA), direction, bytes, total);
         streamResult.handleProgress(progress);
+    }
+
+    public void received(UUID cfId, int sequenceNumber)
+    {
+        transfers.get(cfId).complete(sequenceNumber);
     }
 
     /**
@@ -491,6 +515,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
 
     public void doRetry(FileMessageHeader header, Throwable e)
     {
+        logger.warn("[Stream #" + planId() + "] Retrying for following error", e);
         // retry
         retries++;
         if (retries > DatabaseDescriptor.getMaxStreamingRetries())
@@ -577,7 +602,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
      */
     private void flushSSTables(Iterable<ColumnFamilyStore> stores)
     {
-        logger.info("Flushing memtables for {}...", stores);
         List<Future<?>> flushes = new ArrayList<>();
         for (ColumnFamilyStore cfs : stores)
             flushes.add(cfs.forceFlush());
@@ -586,7 +610,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
 
     private void prepareReceiving(StreamSummary summary)
     {
-        logger.debug("Prepare for receiving " + summary);
         if (summary.files > 0)
             receivers.put(summary.cfId, new StreamReceiveTask(this, summary.cfId, summary.files, summary.totalSize));
     }
@@ -598,8 +621,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber, IFailureDe
         state(State.STREAMING);
         for (StreamTransferTask task : transfers.values())
         {
-            if (task.getFileMessages().size() > 0)
-                handler.sendMessages(task.getFileMessages());
+            Collection<FileMessage> messages = task.getFileMessages();
+            if (messages.size() > 0)
+                handler.sendMessages(messages);
             else
                 taskCompleted(task); // there is no file to send
         }

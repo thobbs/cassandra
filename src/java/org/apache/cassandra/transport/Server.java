@@ -64,7 +64,18 @@ public class Server implements CassandraDaemon.Server
 
     private static final Logger logger = LoggerFactory.getLogger(Server.class);
 
+    /** current version of the native protocol we support */
+    public static final int CURRENT_VERSION = 2;
+
     private final ConnectionTracker connectionTracker = new ConnectionTracker();
+
+    private final Connection.Factory connectionFactory = new Connection.Factory()
+    {
+        public Connection newConnection(Channel channel, int version)
+        {
+            return new ServerConnection(channel, version, connectionTracker);
+        }
+    };
 
     public final InetSocketAddress socket;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -163,6 +174,7 @@ public class Server implements CassandraDaemon.Server
         logger.info("Stop listening for CQL clients");
     }
 
+
     public static class ConnectionTracker implements Connection.Tracker
     {
         public final ChannelGroup allChannels = new DefaultChannelGroup();
@@ -224,7 +236,7 @@ public class Server implements CassandraDaemon.Server
 
             //pipeline.addLast("debug", new LoggingHandler());
 
-            pipeline.addLast("frameDecoder", new Frame.Decoder(server.connectionTracker, ServerConnection.FACTORY));
+            pipeline.addLast("frameDecoder", new Frame.Decoder(server.connectionFactory));
             pipeline.addLast("frameEncoder", frameEncoder);
 
             pipeline.addLast("frameDecompressor", frameDecompressor);

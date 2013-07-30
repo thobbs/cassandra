@@ -22,9 +22,9 @@ Upgrading
       timestamps are microseconds-since-epoch.  Do not use these
       features if you are using client-specified timestamps with some
       other source.
-    - Upgrading is ONLY supported from Cassandra 1.2.6 or later.  This
+    - Upgrading is ONLY supported from Cassandra 1.2.7 or later.  This
       goes for sstable compatibility as well as network.  When
-      upgrading from an earlier release, upgrade to 1.2.6 first and
+      upgrading from an earlier release, upgrade to 1.2.7 first and
       run upgradesstables before proceeding to 2.0.
     - Replication and strategy options do not accept unknown options anymore.
       This was already the case for CQL3 in 1.2 but this is now the case for
@@ -42,10 +42,15 @@ Upgrading
     - ASSUME command has been removed from cqlsh. Use CQL3 blobAsType() and
       typeAsBlob() conversion functions instead.
       See https://cassandra.apache.org/doc/cql3/CQL.html#blobFun for details.
-    - Inputing blobs as string constants is now fully deprecated in
+    - Inputting blobs as string constants is now fully deprecated in
       favor of blob constants. Make sure to update your applications to use
       the new syntax while you are still on 1.2 (which supports both string
       and blob constants for blob input) before upgrading to 2.0.
+    - index_interval is now moved to ColumnFamily property. You can change value
+      with ALTER TABLE ... WITH statement and SSTables written after that will
+      have new value. When upgrading, Cassandra will pick up the value defined in
+      cassanda.yaml as the default for existing ColumnFamilies, until you explicitly
+      set the value for those.
 
 Operations
 ----------
@@ -59,6 +64,9 @@ Operations
       https://issues.apache.org/jira/browse/CASSANDRA-3919 for details.
     - CAS uses gc_grace_seconds to determine how long to keep unused paxos
       state around for, or a minimum of three hours.
+    - A new hints created metric is tracked per target, replacing countPendingHints
+    - After performance testing for CASSANDRA-5727, the default LCS filesize
+      has been changed from 5MB to 160MB.
 
 Features
 --------

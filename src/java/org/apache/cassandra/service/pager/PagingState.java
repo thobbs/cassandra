@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service.pager;
 
-import java.io.DataInput;
 import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
@@ -69,6 +68,7 @@ public class PagingState
             ByteBufferUtil.writeWithShortLength(partitionKey, out);
             ByteBufferUtil.writeWithShortLength(cellName, out);
             out.writeInt(remaining);
+            result.flip();
             return result;
         }
         catch (IOException e)
