@@ -1050,12 +1050,10 @@ public class SSTableReader extends SSTable
         return getScanner((RateLimiter) null);
     }
 
-
     public SSTableScanner getScanner(RateLimiter limiter)
     {
         return new SSTableScanner(this, DataRange.allData(partitioner), limiter);
     }
-
 
     /**
      * Direct I/O SSTableScanner over a defined range of tokens.
@@ -1073,7 +1071,7 @@ public class SSTableReader extends SSTable
    /**
     * Direct I/O SSTableScanner over a defined collection of ranges of tokens.
     *
-    * @param ranges the range of keys to cover
+    * @param ranges the range of keys to cover; an empty set of ranges implies a full scan
     * @return A Scanner for seeking over the rows of the SSTable.
     */
     public ICompactionScanner getScanner(Collection<Range<Token>> ranges, RateLimiter limiter)

@@ -18,7 +18,12 @@
 package org.apache.cassandra.io.sstable;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.util.concurrent.RateLimiter;
