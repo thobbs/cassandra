@@ -28,6 +28,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.IdentityQueryFilter;
 import org.apache.cassandra.db.compaction.ICompactionScanner;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.BytesToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -45,6 +46,13 @@ public class SSTableScannerTest extends SchemaLoader
         return String.format("%03d", key);
     }
 
+    private static Bounds<RowPosition> boundsFor(int start, int end)
+    {
+        return new Bounds<RowPosition>(new BytesToken(toKey(start).getBytes()).minKeyBound(),
+                                       new BytesToken(toKey(end).getBytes()).maxKeyBound());
+    }
+
+
     private static Range<Token> rangeFor(int start, int end)
     {
         return new Range<Token>(new BytesToken(toKey(start).getBytes()),
@@ -55,7 +63,7 @@ public class SSTableScannerTest extends SchemaLoader
     {
         Collection<Range<Token>> ranges = new ArrayList<Range<Token>>(keys.length / 2);
         for (int i = 0; i < keys.length; i += 2)
-                ranges.add(rangeFor(keys[i], keys[i + 1]));
+            ranges.add(rangeFor(keys[i], keys[i + 1]));
         return ranges;
     }
 
@@ -70,19 +78,20 @@ public class SSTableScannerTest extends SchemaLoader
 
     private static void assertScanMatches(SSTableReader sstable, int scanStart, int scanEnd, int expectedStart, int expectedEnd)
     {
-        SSTableScanner scanner = sstable.getScanner(new DataRange(rangeFor(scanStart, scanEnd).toRowBounds(), new IdentityQueryFilter()));
+        SSTableScanner scanner = sstable.getScanner(new DataRange(boundsFor(scanStart, scanEnd), new IdentityQueryFilter()));
         for (int i = expectedStart; i <= expectedEnd; i++)
             assertEquals(toKey(i), new String(scanner.next().getKey().key.array()));
+        assertFalse(scanner.hasNext());
     }
 
     private static void assertScanEmpty(SSTableReader sstable, int scanStart, int scanEnd)
     {
-        SSTableScanner scanner = sstable.getScanner(new DataRange(rangeFor(scanStart, scanEnd).toRowBounds(), new IdentityQueryFilter()));
+        SSTableScanner scanner = sstable.getScanner(new DataRange(boundsFor(scanStart, scanEnd), new IdentityQueryFilter()));
         assertFalse(String.format("scan of (%03d, %03d] should be empty", scanStart, scanEnd), scanner.hasNext());
     }
 
     @Test
-    public void testSingleRange()
+    public void testSingleDataRange()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(TABLE);
@@ -104,12 +113,12 @@ public class SSTableScannerTest extends SchemaLoader
             assertEquals(toKey(i), new String(scanner.next().getKey().key.array()));
 
         // a simple read of a chunk in the middle
-        assertScanMatches(sstable, 3, 6, 4, 6);
+        assertScanMatches(sstable, 3, 6, 3, 6);
 
         // start of range edge conditions
-        assertScanMatches(sstable, 0, 9, 2, 9);
         assertScanMatches(sstable, 1, 9, 2, 9);
-        assertScanMatches(sstable, 2, 9, 3, 9);
+        assertScanMatches(sstable, 2, 9, 2, 9);
+        assertScanMatches(sstable, 3, 9, 3, 9);
 
         // end of range edge conditions
         assertScanMatches(sstable, 1, 8, 2, 8);
@@ -117,13 +126,12 @@ public class SSTableScannerTest extends SchemaLoader
         assertScanMatches(sstable, 1, 9, 2, 9);
 
         // single item ranges
-        assertScanMatches(sstable, 1, 2, 2, 2);
-        assertScanMatches(sstable, 4, 5, 5, 5);
-        assertScanMatches(sstable, 8, 9, 9, 9);
+        assertScanMatches(sstable, 2, 2, 2, 2);
+        assertScanMatches(sstable, 5, 5, 5, 5);
+        assertScanMatches(sstable, 9, 9, 9, 9);
 
         // empty ranges
         assertScanEmpty(sstable, 0, 1);
-        assertScanEmpty(sstable, 9, 10);
         assertScanEmpty(sstable, 10, 11);
     }
 
@@ -137,7 +145,10 @@ public class SSTableScannerTest extends SchemaLoader
             int rangeEnd = rangePairs[pairIdx + 1];
 
             for (int expected = rangeStart; expected <= rangeEnd; expected++)
+            {
+                assertTrue(String.format("Expected to see key %03d", expected), scanner.hasNext());
                 assertEquals(toKey(expected), new String(scanner.next().getKey().key.array()));
+            }
         }
         assertFalse(scanner.hasNext());
     }

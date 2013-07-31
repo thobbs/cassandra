@@ -19,9 +19,7 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -36,6 +34,8 @@ import org.apache.cassandra.db.columniterator.IColumnIteratorFactory;
 import org.apache.cassandra.db.columniterator.LazyColumnIterator;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.compaction.ICompactionScanner;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.FileUtils;
@@ -48,8 +48,8 @@ public class SSTableScanner implements ICompactionScanner
     protected final RandomAccessReader ifile;
     public final SSTableReader sstable;
 
-    private final Iterator<Range<RowPosition>> rangeIterator;
-    private Range<RowPosition> currentRange;
+    private final Iterator<AbstractBounds<RowPosition>> rangeIterator;
+    private AbstractBounds<RowPosition> currentRange;
 
     private final DataRange dataRange;
 
@@ -69,17 +69,19 @@ public class SSTableScanner implements ICompactionScanner
         this.sstable = sstable;
         this.dataRange = dataRange;
 
+        List<AbstractBounds<RowPosition>> boundsList = new ArrayList<>(2);
         if (dataRange.isWrapAround() && !dataRange.stopKey().isMinimum(sstable.partitioner))
         {
             // split the wrapping range into two parts: 1) the part that starts at the beginning of the sstable, and
             // 2) the part that comes before the wrap-around
-            this.rangeIterator = Arrays.asList(new Range<>(sstable.partitioner.getMinimumToken().minKeyBound(), dataRange.stopKey()),
-                                               new Range<>(dataRange.startKey(), sstable.partitioner.getMinimumToken().maxKeyBound())).iterator();
+            boundsList.add(new Bounds<>(sstable.partitioner.getMinimumToken().minKeyBound(), dataRange.stopKey()));
+            boundsList.add(new Bounds<>(dataRange.startKey(), sstable.partitioner.getMinimumToken().maxKeyBound()));
         }
         else
         {
-            this.rangeIterator = Collections.singleton(new Range<>(dataRange.startKey(), dataRange.stopKey())).iterator();
+            boundsList.add(new Bounds<>(dataRange.startKey(), dataRange.stopKey()));
         }
+        this.rangeIterator = boundsList.iterator();
     }
 
     /**
@@ -97,11 +99,11 @@ public class SSTableScanner implements ICompactionScanner
         this.dataRange = null;
 
         List<Range<Token>> normalized = Range.normalize(tokenRanges);
-        List<Range<RowPosition>> keys = new ArrayList<>(normalized.size());
+        List<AbstractBounds<RowPosition>> boundsList = new ArrayList<>(normalized.size());
         for (Range<Token> range : normalized)
-            keys.add(new Range<RowPosition>(range.left.maxKeyBound(sstable.partitioner), range.right.maxKeyBound(sstable.partitioner)));
+            boundsList.add(new Range<RowPosition>(range.left.maxKeyBound(sstable.partitioner), range.right.maxKeyBound(sstable.partitioner)));
 
-        this.rangeIterator = keys.iterator();
+        this.rangeIterator = boundsList.iterator();
     }
 
     private void seekToCurrentRangeStart()
@@ -117,12 +119,15 @@ public class SSTableScanner implements ICompactionScanner
         ifile.seek(indexPosition);
         try
         {
+
             while (!ifile.isEOF())
             {
                 indexPosition = ifile.getFilePointer();
                 DecoratedKey indexDecoratedKey = sstable.partitioner.decorateKey(ByteBufferUtil.readWithShortLength(ifile));
                 int comparison = indexDecoratedKey.compareTo(currentRange.left);
-                if ((dataRange != null && comparison >= 0) || (dataRange == null && comparison > 0))
+                // because our range start may be inclusive or exclusive, we need to also contains()
+                // instead of just checking (comparison >= 0)
+                if (comparison > 0 || currentRange.contains(indexDecoratedKey))
                 {
                     // Found, just read the dataPosition and seek into index and data files
                     long dataPosition = ifile.readLong();
