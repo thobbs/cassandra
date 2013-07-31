@@ -178,18 +178,12 @@ public class SSTableScannerTest extends SchemaLoader
                                  102, 109,
                                  202, 209);
 
-        // no ranges is equivalent to a full scan
-        ICompactionScanner scanner = sstable.getScanner(new ArrayList<Range<Token>>(), null);
-        assertScanContainsRanges(scanner,
-                                 2, 9,
-                                 102, 109,
-                                 202, 209);
 
         // scan all three ranges separately
-        scanner = sstable.getScanner(makeRanges(1, 9,
-                                                101, 109,
-                                                201, 209),
-                                     null);
+        ICompactionScanner scanner = sstable.getScanner(makeRanges(1, 9,
+                                                                   101, 109,
+                                                                   201, 209),
+                                                        null);
         assertScanContainsRanges(scanner,
                                  2, 9,
                                  102, 109,
@@ -284,6 +278,10 @@ public class SSTableScannerTest extends SchemaLoader
                                                 150, 159,
                                                 250, 259),
                                      null);
+        assertFalse(scanner.hasNext());
+
+        // no ranges is equivalent to a full scan
+        scanner = sstable.getScanner(new ArrayList<Range<Token>>(), null);
         assertFalse(scanner.hasNext());
     }
 }

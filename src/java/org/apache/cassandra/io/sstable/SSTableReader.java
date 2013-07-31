@@ -1071,14 +1071,11 @@ public class SSTableReader extends SSTable
    /**
     * Direct I/O SSTableScanner over a defined collection of ranges of tokens.
     *
-    * @param ranges the range of keys to cover; an empty set of ranges implies a full scan
+    * @param ranges the range of keys to cover
     * @return A Scanner for seeking over the rows of the SSTable.
     */
     public ICompactionScanner getScanner(Collection<Range<Token>> ranges, RateLimiter limiter)
     {
-        if (ranges.size() == 0)
-            return getScanner(limiter);
-
         // We want to avoid allocating a SSTableScanner if the range don't overlap the sstable (#5249)
         List<Pair<Long, Long>> positions = getPositionsForRanges(Range.normalize(ranges));
         if (positions.isEmpty())
