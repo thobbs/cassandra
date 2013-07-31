@@ -18,6 +18,7 @@
 package org.apache.cassandra.utils;
 
 import java.lang.management.ManagementFactory;
+import java.util.Map;
 import java.util.Set;
 import javax.management.JMX;
 import javax.management.MBeanServer;
@@ -89,6 +90,11 @@ public class StatusLogger
         }
         logger.info(String.format("%-25s%10s%10s",
                                   "MessagingService", "n/a", pendingCommands + "," + pendingResponses));
+
+        // dropped message counts by type
+        logger.info(String.format("%-20s%10s", "Message Type", "Dropped"));
+        for (Map.Entry<String, Integer> entry : MessagingService.instance().getDroppedMessages().entrySet())
+            logger.info(String.format("%-20s%10s", entry.getKey(), entry.getValue()));
 
         // Global key/row cache information
         AutoSavingCache<KeyCacheKey, RowIndexEntry> keyCache = CacheService.instance.keyCache;
