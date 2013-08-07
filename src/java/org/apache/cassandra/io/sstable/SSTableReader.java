@@ -947,6 +947,8 @@ public class SSTableReader extends SSTable
     public DecoratedKey firstKeyBeyond(RowPosition token)
     {
         long sampledPosition = getIndexScanPosition(token);
+        if (sampledPosition == -1)
+            sampledPosition = 0;
 
         Iterator<FileDataInput> segments = ifile.iterator(sampledPosition);
         while (segments.hasNext())
