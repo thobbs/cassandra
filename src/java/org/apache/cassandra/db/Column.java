@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.cql3.CFDefinition;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.utils.Allocator;
@@ -277,7 +278,15 @@ public class Column implements IColumn
     public void validateFields(CFMetaData metadata) throws MarshalException
     {
         validateName(metadata);
-        AbstractType<?> valueValidator = metadata.getValueValidator(name());
+        ByteBuffer validationName = name();
+        CFDefinition cfdef = metadata.getCfDef();
+        if (cfdef.isComposite && !cfdef.isCompact) {
+            AbstractCompositeType comparator = (AbstractCompositeType)metadata.comparator;
+            List<AbstractCompositeType.CompositeComponent> components = comparator.deconstruct(validationName);
+            validationName = components.get(components.size() - 1).value;
+        }
+
+        AbstractType<?> valueValidator = metadata.getValueValidator(validationName);
         if (valueValidator != null)
             valueValidator.validate(value());
     }
