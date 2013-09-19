@@ -21,6 +21,8 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -287,16 +289,8 @@ public class CassandraDaemon
 
         // Metrics
         String metricsReporterConfigFile = System.getProperty("cassandra.metricsReporterConfigFile");
-        logger.info("Trying to load metrics-reporter-config from file: {}", metricsReporterConfigFile);
-        try
-        {
-            String reportFileLocation = CassandraDaemon.class.getClassLoader().getResource(metricsReporterConfigFile).getFile();
-            ReporterConfig.loadFromFileAndValidate(reportFileLocation).enableAll();
-        }
-        catch (Exception e)
-        {
-            logger.warn("Failed to load metrics-reporter-config, metric sinks will not be activated", e);
-        }
+        if (metricsReporterConfigFile != null)
+            loadMetricsReporterConfig(metricsReporterConfigFile);
 
         // Thift
         InetAddress rpcAddr = DatabaseDescriptor.getRpcAddress();
@@ -307,6 +301,45 @@ public class CassandraDaemon
         InetAddress nativeAddr = DatabaseDescriptor.getNativeTransportAddress();
         int nativePort = DatabaseDescriptor.getNativeTransportPort();
         nativeServer = new org.apache.cassandra.transport.Server(nativeAddr, nativePort);
+    }
+
+    private void loadMetricsReporterConfig(String metricsReporterConfigFile)
+    {
+        logger.info("Trying to load metrics-reporter-config from file: {}", metricsReporterConfigFile);
+        URL configLocation = null;
+        try
+        {
+            // try loading from a physical location first.
+            configLocation = new URL(metricsReporterConfigFile);
+        }
+        catch (MalformedURLException ex)
+        {
+            // then try loading from the classpath.
+            configLocation = CassandraDaemon.class.getClassLoader().getResource(metricsReporterConfigFile);
+        }
+
+        if (configLocation == null)
+        {
+            logger.warn("Failed to find metrics reporter config file ({}), metric sinks will not be activated", metricsReporterConfigFile);
+            return;
+        }
+
+        // Now convert URL to a filename
+        String configFileName = null;
+        try
+        {
+            // first try URL.getFile() which works for opaque URLs (file:foo) and paths without spaces
+            configFileName = configLocation.getFile();
+            File configFile = new File(configFileName);
+            // then try alternative approach which works for all hierarchical URLs with or without spaces
+            if (!configFile.exists())
+                configFileName = new File(configLocation.toURI()).getCanonicalPath();
+            ReporterConfig.loadFromFileAndValidate(configFileName).enableAll();
+        }
+        catch (Exception e)
+        {
+            logger.warn("Failed to load metrics-reporter-config, metric sinks will not be activated", e);
+        }
     }
 
     /**
