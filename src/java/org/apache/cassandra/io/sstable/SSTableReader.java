@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -44,6 +45,7 @@ import org.apache.cassandra.db.DataTracker;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RowIndexEntry;
 import org.apache.cassandra.db.RowPosition;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.ICompactionScanner;
@@ -53,6 +55,7 @@ import org.apache.cassandra.io.compress.CompressedRandomAccessReader;
 import org.apache.cassandra.io.compress.CompressedThrottledReader;
 import org.apache.cassandra.io.compress.CompressionMetadata;
 import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
@@ -67,6 +70,9 @@ import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR
 public class SSTableReader extends SSTable implements Closeable
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
+
+    private static final ScheduledThreadPoolExecutor syncExecutor = new ScheduledThreadPoolExecutor(1);
+    private static final RateLimiter meterSyncThrottle = RateLimiter.create(100.0);
 
     /**
      * maxDataAge is a timestamp in local server time (e.g. System.currentTimeMilli) which represents an uppper bound
@@ -104,6 +110,8 @@ public class SSTableReader extends SSTable implements Closeable
 
     private final AtomicLong keyCacheHit = new AtomicLong(0);
     private final AtomicLong keyCacheRequest = new AtomicLong(0);
+
+    private final RestorableMeter readMeter;
 
     public static long getApproximateKeyCount(Iterable<SSTableReader> sstables, CFMetaData metadata)
     {
@@ -311,7 +319,7 @@ public class SSTableReader extends SSTable implements Closeable
     }
 
 
-    private SSTableReader(Descriptor desc,
+    private SSTableReader(final Descriptor desc,
                           Set<Component> components,
                           CFMetaData metadata,
                           IPartitioner partitioner,
@@ -323,6 +331,24 @@ public class SSTableReader extends SSTable implements Closeable
         this.maxDataAge = maxDataAge;
 
         this.deletingTask = new SSTableDeletingTask(this);
+
+        // Don't track read rates for tables in the system keyspace
+        if ("system".equals(desc.ksname))
+        {
+            this.readMeter = null;
+            return;
+        }
+
+        this.readMeter = SystemKeyspace.getSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
+        // sync the average read rate to system.sstable_activity every five minutes, starting one minute from now
+        syncExecutor.scheduleAtFixedRate(new Runnable()
+        {
+            public void run()
+            {
+                meterSyncThrottle.acquire();
+                SystemKeyspace.persistSSTableReadMeter(desc.ksname, desc.cfname, desc.generation, readMeter);
+            }
+        }, 1, 5, TimeUnit.MINUTES);
     }
 
     private SSTableReader(Descriptor desc,
@@ -1431,6 +1457,25 @@ public class SSTableReader extends SSTable implements Closeable
             FileUtils.closeQuietly(file);
         }
     }
+
+    /**
+     * Increment the total row read count and read rate for this SSTable.  This should not be incremented for range
+     * slice queries, row cache hits, or non-query reads, like compaction.
+     */
+    public void incrementReadCount()
+    {
+        if (readMeter != null)
+            readMeter.mark();
+    }
+
+    /**
+     * Returns the RestorableMeter that tracks read rates for this sstable.  If this table is in the system keyspace,
+     * null will be returned.
+     */
+     public RestorableMeter getReadMeter()
+     {
+         return readMeter;
+     }
 
     protected class EmptyCompactionScanner implements ICompactionScanner
     {
