@@ -899,7 +899,8 @@ public class SystemKeyspace
      */
     public static void persistSSTableReadMeter(String keyspace, String table, int generation, RestorableMeter meter)
     {
-        String cql = "INSERT INTO system.%s (keyspace_name, columnfamily_name, generation, rate_15m, rate_120m) VALUES ('%s', '%s', %d, %f, %f)";
+        // Store values with a one-day TTL to handle corner cases where cleanup might not occur
+        String cql = "INSERT INTO system.%s (keyspace_name, columnfamily_name, generation, rate_15m, rate_120m) VALUES ('%s', '%s', %d, %f, %f) USING TTL 864000";
         processInternal(String.format(cql,
                                       SSTABLE_ACTIVITY_CF,
                                       keyspace,
@@ -907,5 +908,14 @@ public class SystemKeyspace
                                       generation,
                                       meter.fifteenMinuteRate(),
                                       meter.twoHourRate()));
+    }
+
+    /**
+     * Clears persisted read rates from system.sstable_activity for SSTables that have been deleted.
+     */
+    public static void clearSSTableReadMeter(String keyspace, String table, int generation)
+    {
+        String cql = "DELETE FROM system.%s WHERE keyspace_name='%s' AND columnfamily_name='%s' and generation=%d";
+        processInternal(String.format(cql, SSTABLE_ACTIVITY_CF, keyspace, table, generation));
     }
 }
