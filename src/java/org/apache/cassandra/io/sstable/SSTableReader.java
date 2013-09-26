@@ -40,12 +40,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.DataRange;
-import org.apache.cassandra.db.DataTracker;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowIndexEntry;
-import org.apache.cassandra.db.RowPosition;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.ICompactionScanner;
@@ -333,7 +328,7 @@ public class SSTableReader extends SSTable implements Closeable
         this.deletingTask = new SSTableDeletingTask(this);
 
         // Don't track read rates for tables in the system keyspace
-        if ("system".equals(desc.ksname))
+        if (Keyspace.SYSTEM_KS.equals(desc.ksname))
         {
             this.readMeter = null;
             return;
