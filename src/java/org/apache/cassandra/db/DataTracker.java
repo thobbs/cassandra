@@ -53,8 +53,6 @@ public class DataTracker
     {
         this.cfstore = cfstore;
         this.view = new AtomicReference<>();
-        this.addSSTableDeletionHook();
-
         this.init();
     }
 
@@ -457,33 +455,6 @@ public class DataTracker
     public Set<SSTableReader> getCompacting()
     {
         return getView().compacting;
-    }
-
-    /**
-     * When sstables are deleted, remove their read rate meters from system.sstable_activity
-     */
-    public void addSSTableDeletionHook()
-    {
-        this.subscribe(new INotificationConsumer()
-        {
-            public void handleNotification(INotification notification, Object sender)
-            {
-                if (notification instanceof SSTableDeletingNotification)
-                {
-                    Descriptor desc = ((SSTableDeletingNotification) notification).deleting.descriptor;
-                    try
-                    {
-                        if (!"system".equals(desc.ksname)) // we don't track rates for the system keyspace
-                            SystemKeyspace.clearSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
-                    }
-                    catch (Exception e)
-                    {
-                        logger.warn("Failed to clear SSTable read rates for {}.{}-{}:", desc.ksname, desc.cfname, desc.generation, e);
-                    }
-
-                }
-            }
-        });
     }
 
     public static class SSTableIntervalTree extends IntervalTree<RowPosition, SSTableReader, Interval<RowPosition, SSTableReader>>

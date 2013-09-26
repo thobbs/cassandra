@@ -28,6 +28,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DataTracker;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -69,6 +71,7 @@ public class SSTableDeletingTask implements Runnable
     {
         if (tracker != null)
             tracker.notifyDeleting(referent);
+        clearSSTableReadMeter(referent);
 
         // If we can't successfully delete the DATA component, set the task to be retried later: see above
         File datafile = new File(desc.filenameFor(Component.DATA));
@@ -82,6 +85,15 @@ public class SSTableDeletingTask implements Runnable
         SSTable.delete(desc, Sets.difference(components, Collections.singleton(Component.DATA)));
         if (tracker != null)
             tracker.spaceReclaimed(size);
+    }
+
+    /**
+     * When sstables are deleted, remove their read rate meters from system.sstable_activity
+     */
+    private static void clearSSTableReadMeter(SSTableReader sstable)
+    {
+        if (Keyspace.SYSTEM_KS.equals(sstable.getKeyspaceName())) // we don't track rates for the system keyspace
+            SystemKeyspace.clearSSTableReadMeter(sstable.getKeyspaceName(), sstable.getColumnFamilyName(), sstable.descriptor.generation);
     }
 
     /**
