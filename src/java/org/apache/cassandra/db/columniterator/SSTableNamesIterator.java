@@ -100,8 +100,6 @@ public class SSTableNamesIterator extends AbstractIterator<OnDiskAtom> implement
     private void read(SSTableReader sstable, FileDataInput file, RowIndexEntry indexEntry)
     throws IOException
     {
-        sstable.incrementReadCount();
-
         List<IndexHelper.IndexInfo> indexList;
 
         // If the entry is not indexed or the index is not promoted, read from the row start
