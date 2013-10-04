@@ -21,7 +21,6 @@ import java.util.*;
 import java.util.Map.Entry;
 
 import com.google.common.collect.Iterables;
-import com.google.common.primitives.Longs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +36,9 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
     protected SizeTieredCompactionStrategyOptions options;
     protected volatile int estimatedRemainingTasks;
+
+    // if an sstable falls below this percentage of the average bucket "hotness", it will be considered cold
+    private static final double SSTABLE_COLDNESS_THRESHOLD = 0.25;
 
     public SizeTieredCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
     {
@@ -80,31 +82,28 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
     public static List<SSTableReader> mostInterestingBucket(List<List<SSTableReader>> buckets, int minThreshold, int maxThreshold)
     {
         // skip buckets containing less than minThreshold sstables, and limit other buckets to maxThreshold entries
-        List<List<SSTableReader>> prunedBuckets = new ArrayList<List<SSTableReader>>();
+        final List<Pair<List<SSTableReader>, Double>> prunedBucketsAndHotness = new ArrayList<>(buckets.size());
         for (List<SSTableReader> bucket : buckets)
         {
-            if (bucket.size() < minThreshold)
-                continue;
-
-            Collections.sort(bucket, new Comparator<SSTableReader>()
-            {
-                public int compare(SSTableReader o1, SSTableReader o2)
-                {
-                    return o1.descriptor.generation - o2.descriptor.generation;
-                }
-            });
-            List<SSTableReader> prunedBucket = bucket.subList(0, Math.min(bucket.size(), maxThreshold));
-            prunedBuckets.add(prunedBucket);
+            Pair<List<SSTableReader>, Double> bucketAndHotness = prepBucket(bucket, minThreshold, maxThreshold);
+            if (bucketAndHotness != null)
+                prunedBucketsAndHotness.add(bucketAndHotness);
         }
-        if (prunedBuckets.isEmpty())
+        if (prunedBucketsAndHotness.isEmpty())
             return Collections.emptyList();
 
-        // prefer compacting buckets with smallest average size; that will yield the fastest improvement for read performance
-        return Collections.min(prunedBuckets, new Comparator<List<SSTableReader>>()
+        // prefer compacting the hottest bucket
+        Pair<List<SSTableReader>, Double> hottest = Collections.max(prunedBucketsAndHotness, new Comparator<Pair<List<SSTableReader>, Double>>()
         {
-            public int compare(List<SSTableReader> o1, List<SSTableReader> o2)
+            public int compare(Pair<List<SSTableReader>, Double> o1, Pair<List<SSTableReader>, Double> o2)
             {
-                return Longs.compare(avgSize(o1), avgSize(o2));
+                int comparison = Double.compare(o1.right, o2.right);
+                if (comparison != 0)
+                    return comparison;
+
+                // break ties by compacting the smallest sstables first (this will probably only happen for
+                // system tables and new/unread sstables)
+                return Long.compare(avgSize(o1.left), avgSize(o2.left));
             }
 
             private long avgSize(List<SSTableReader> sstables)
@@ -115,6 +114,59 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
                 return n / sstables.size();
             }
         });
+
+        return hottest.left;
+    }
+
+    /**
+     * Removes cold sstables from the bucket and returns a (bucket, hotness) pair or null if there were not enough
+     * hot sstables in the bucket to meet minThreshold.
+     **/
+    private static Pair<List<SSTableReader>, Double> prepBucket(List<SSTableReader> bucket, int minThreshold, int maxThreshold)
+    {
+        if (bucket.size() < minThreshold)
+            return null;
+
+        // calculate the average SSTable hotness across the bucket
+        double averageSSTableHotness = 0.0;
+        for (SSTableReader sstr : bucket)
+            averageSSTableHotness += hotness(sstr);
+        averageSSTableHotness /= bucket.size();
+
+        // sort by sstable hotness
+        Collections.sort(bucket, new Comparator<SSTableReader>()
+        {
+            public int compare(SSTableReader o1, SSTableReader o2)
+            {
+                return Double.compare(hotness(o1), hotness(o2));
+            }
+        });
+
+        // remove SSTables that are below 25% of the average hotness and calculate the full bucket hotness (the sum
+        // of the hotness of all sstable members)
+        int bucketEndIndex = 0;
+        double bucketHotness = 0.0;
+        for (SSTableReader sstr : bucket)
+        {
+            double hotness = hotness(sstr);
+            if (hotness < SSTABLE_COLDNESS_THRESHOLD * averageSSTableHotness)
+                break; // because they're sorted, all sstables after this will be colder
+
+            bucketEndIndex++;
+            bucketHotness += hotness;
+        }
+
+        if (bucketEndIndex < minThreshold)
+            return null;
+
+        // cut off the bucket where it becomes cold or at the maxThreshold, whichever is lower
+        return Pair.create(bucket.subList(0, Math.min(bucketEndIndex, maxThreshold)), bucketHotness);
+    }
+
+    private static double hotness(SSTableReader sstr)
+    {
+        // system tables don't have read meters, just use 0.0 for the hotness
+        return sstr.readMeter == null ? 0.0 : sstr.readMeter.twoHourRate() / sstr.estimatedKeys();
     }
 
     public synchronized AbstractCompactionTask getNextBackgroundTask(int gcBefore)
@@ -124,13 +176,13 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
         while (true)
         {
-            List<SSTableReader> smallestBucket = getNextBackgroundSSTables(gcBefore);
+            List<SSTableReader> hottestBucket = getNextBackgroundSSTables(gcBefore);
 
-            if (smallestBucket.isEmpty())
+            if (hottestBucket.isEmpty())
                 return null;
 
-            if (cfs.getDataTracker().markCompacting(smallestBucket))
-                return new CompactionTask(cfs, smallestBucket, gcBefore);
+            if (cfs.getDataTracker().markCompacting(hottestBucket))
+                return new CompactionTask(cfs, hottestBucket, gcBefore);
         }
     }
 
