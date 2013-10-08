@@ -18,16 +18,58 @@
 package org.apache.cassandra.db.compaction;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.Test;
 
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.Pair;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 
 public class SizeTieredCompactionStrategyTest
 {
+
+    @Test
+    public void testOptionsValidation() throws ConfigurationException
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(SizeTieredCompactionStrategyOptions.COLDNESS_THRESHOLD_KEY, "0.35");
+        options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, "0.5");
+        options.put(SizeTieredCompactionStrategyOptions.BUCKET_HIGH_KEY, "1.5");
+        options.put(SizeTieredCompactionStrategyOptions.MIN_SSTABLE_SIZE_KEY, "10000");
+        Map<String, String> unvalidated = SizeTieredCompactionStrategy.validateOptions(options);
+        assertTrue(unvalidated.isEmpty());
+
+        try
+        {
+            options.put(SizeTieredCompactionStrategyOptions.COLDNESS_THRESHOLD_KEY, "-0.5");
+            SizeTieredCompactionStrategy.validateOptions(options);
+            fail("Negative coldness_threshold should be rejected");
+        }
+        catch (ConfigurationException e)
+        {
+            options.put(SizeTieredCompactionStrategyOptions.COLDNESS_THRESHOLD_KEY, "0.25");
+        }
+
+        try
+        {
+            options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, "1000.0");
+            SizeTieredCompactionStrategy.validateOptions(options);
+            fail("bucket_low greater than bucket_high should be rejected");
+        }
+        catch (ConfigurationException e)
+        {
+            options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, "0.5");
+        }
+
+        options.put("bad_option", "1.0");
+        unvalidated = SizeTieredCompactionStrategy.validateOptions(options);
+        assertTrue(unvalidated.containsKey("bad_option"));
+    }
+
     @Test
     public void testGetBuckets()
     {

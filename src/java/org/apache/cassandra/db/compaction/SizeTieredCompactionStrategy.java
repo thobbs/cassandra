@@ -37,9 +37,6 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
     protected SizeTieredCompactionStrategyOptions options;
     protected volatile int estimatedRemainingTasks;
 
-    // if an sstable falls below this percentage of the average bucket "hotness", it will be considered cold
-    private static final double SSTABLE_COLDNESS_THRESHOLD = 0.25;
-
     public SizeTieredCompactionStrategy(ColumnFamilyStore cfs, Map<String, String> options)
     {
         super(cfs, options);
@@ -60,7 +57,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         List<List<SSTableReader>> buckets = getBuckets(createSSTableAndLengthPairs(filterSuspectSSTables(candidates)), options.bucketHigh, options.bucketLow, options.minSSTableSize);
         logger.debug("Compaction buckets are {}", buckets);
         updateEstimatedCompactionsByTasks(buckets);
-        List<SSTableReader> mostInteresting = mostInterestingBucket(buckets, minThreshold, maxThreshold);
+        List<SSTableReader> mostInteresting = mostInterestingBucket(buckets, minThreshold, maxThreshold, options.coldnessThreshold);
         if (!mostInteresting.isEmpty())
             return mostInteresting;
 
@@ -79,13 +76,13 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         return Collections.singletonList(sstablesWithTombstones.get(0));
     }
 
-    public static List<SSTableReader> mostInterestingBucket(List<List<SSTableReader>> buckets, int minThreshold, int maxThreshold)
+    public static List<SSTableReader> mostInterestingBucket(List<List<SSTableReader>> buckets, int minThreshold, int maxThreshold, double coldnessThreshold)
     {
         // skip buckets containing less than minThreshold sstables, and limit other buckets to maxThreshold entries
         final List<Pair<List<SSTableReader>, Double>> prunedBucketsAndHotness = new ArrayList<>(buckets.size());
         for (List<SSTableReader> bucket : buckets)
         {
-            Pair<List<SSTableReader>, Double> bucketAndHotness = prepBucket(bucket, minThreshold, maxThreshold);
+            Pair<List<SSTableReader>, Double> bucketAndHotness = prepBucket(bucket, minThreshold, maxThreshold, coldnessThreshold);
             if (bucketAndHotness != null)
                 prunedBucketsAndHotness.add(bucketAndHotness);
         }
@@ -122,7 +119,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
      * Removes cold sstables from the bucket and returns a (bucket, hotness) pair or null if there were not enough
      * hot sstables in the bucket to meet minThreshold.
      **/
-    private static Pair<List<SSTableReader>, Double> prepBucket(List<SSTableReader> bucket, int minThreshold, int maxThreshold)
+    private static Pair<List<SSTableReader>, Double> prepBucket(List<SSTableReader> bucket, int minThreshold, int maxThreshold, double coldnessThreshold)
     {
         if (bucket.size() < minThreshold)
             return null;
@@ -149,7 +146,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         for (SSTableReader sstr : bucket)
         {
             double hotness = hotness(sstr);
-            if (hotness < SSTABLE_COLDNESS_THRESHOLD * averageSSTableHotness)
+            if (hotness < coldnessThreshold * averageSSTableHotness)
                 break; // because they're sorted, all sstables after this will be colder
 
             bucketEndIndex++;
