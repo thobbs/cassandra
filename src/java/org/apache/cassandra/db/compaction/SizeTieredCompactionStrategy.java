@@ -119,7 +119,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
      * Removes cold sstables from the bucket and returns a (bucket, hotness) pair or null if there were not enough
      * hot sstables in the bucket to meet minThreshold.
      **/
-    private static Pair<List<SSTableReader>, Double> prepBucket(List<SSTableReader> bucket, int minThreshold, int maxThreshold, double coldnessThreshold)
+    static Pair<List<SSTableReader>, Double> prepBucket(List<SSTableReader> bucket, int minThreshold, int maxThreshold, double coldnessThreshold)
     {
         if (bucket.size() < minThreshold)
             return null;
@@ -130,12 +130,12 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
             averageSSTableHotness += hotness(sstr);
         averageSSTableHotness /= bucket.size();
 
-        // sort by sstable hotness
+        // sort by sstable hotness (descending)
         Collections.sort(bucket, new Comparator<SSTableReader>()
         {
             public int compare(SSTableReader o1, SSTableReader o2)
             {
-                return Double.compare(hotness(o1), hotness(o2));
+                return -1 * Double.compare(hotness(o1), hotness(o2));
             }
         });
 
@@ -145,6 +145,9 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         double bucketHotness = 0.0;
         for (SSTableReader sstr : bucket)
         {
+            if (bucketEndIndex >= maxThreshold)
+                break;
+
             double hotness = hotness(sstr);
             if (hotness < coldnessThreshold * averageSSTableHotness)
                 break; // because they're sorted, all sstables after this will be colder
@@ -157,7 +160,7 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
             return null;
 
         // cut off the bucket where it becomes cold or at the maxThreshold, whichever is lower
-        return Pair.create(bucket.subList(0, Math.min(bucketEndIndex, maxThreshold)), bucketHotness);
+        return Pair.create(bucket.subList(0, bucketEndIndex), bucketHotness);
     }
 
     private static double hotness(SSTableReader sstr)
