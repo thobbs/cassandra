@@ -487,18 +487,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         Directories directories = Directories.create(keyspace, columnfamily);
 
         // sanity-check unfinishedGenerations
-        Set<Integer> allGenerations = new HashSet<Integer>();
+        Set<Integer> allGenerations = new HashSet<>();
         for (Descriptor desc : directories.sstableLister().list().keySet())
             allGenerations.add(desc.generation);
         if (!allGenerations.containsAll(unfinishedGenerations))
         {
-            throw new IllegalStateException("Unfinished compactions reference missing sstables."
-                                            + " This should never happen since compactions are marked finished before we start removing the old sstables.");
+            HashSet<Integer> missingGenerations = new HashSet<>(unfinishedGenerations);
+            missingGenerations.removeAll(allGenerations);
+            logger.warn("Unfinished compactions of {}.{} reference missing sstables of generations {}. (No user action needed)",
+                        keyspace, columnfamily, missingGenerations);
         }
 
         // remove new sstables from compactions that didn't complete, and compute
         // set of ancestors that shouldn't exist anymore
-        Set<Integer> completedAncestors = new HashSet<Integer>();
+        Set<Integer> completedAncestors = new HashSet<>();
         for (Map.Entry<Descriptor, Set<Component>> sstableFiles : directories.sstableLister().list().entrySet())
         {
             Descriptor desc = sstableFiles.getKey();
@@ -514,7 +516,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 throw new FSReadError(e, desc.filenameFor(Component.STATS));
             }
 
-            if (!ancestors.isEmpty() && unfinishedGenerations.containsAll(ancestors))
+            if (!ancestors.isEmpty()
+                && unfinishedGenerations.containsAll(ancestors)
+                && allGenerations.containsAll(ancestors))
             {
                 SSTable.delete(desc, components);
             }
