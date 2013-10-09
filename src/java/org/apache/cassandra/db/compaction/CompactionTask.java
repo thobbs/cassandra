@@ -145,7 +145,10 @@ public class CompactionTask extends AbstractCompactionTask
             while (iter.hasNext())
             {
                 if (ci.isStopRequested())
+                {
+                    logger.info("Stopping compaction of {}.{}, sstables={}", cfs.table.name, cfs.getColumnFamilyName(), toCompact);
                     throw new CompactionInterruptedException(ci.getCompactionInfo());
+                }
 
                 AbstractCompactedRow row = iter.next();
                 if (row.isEmpty())
@@ -208,6 +211,9 @@ public class CompactionTask extends AbstractCompactionTask
                 sstable.markCompacted();
                 sstable.releaseReference();
             }
+
+            ci.didStop();
+
             throw Throwables.propagate(t);
         }
         finally
@@ -227,7 +233,10 @@ public class CompactionTask extends AbstractCompactionTask
                 collector.finishCompaction(ci);
         }
 
+        // finish swapping out SSTables before we notify potential watchers that the compaction has stopped
         replaceCompactedSSTables(toCompact, sstables);
+        ci.didStop();
+
         // TODO: this doesn't belong here, it should be part of the reader to load when the tracker is wired up
         for (SSTableReader sstable : sstables)
         {

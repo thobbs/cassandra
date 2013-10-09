@@ -1160,21 +1160,28 @@ public class CompactionManager implements CompactionManagerMBean
     }
 
     /**
-     * Try to stop all of the compactions for given ColumnFamilies.
-     * Note that this method does not wait indefinitely for all compactions to finish, maximum wait time is 30 secs.
+     * Stops all compactions on a set of column families, blocking until they have stopped (normally or otherwise).
      *
-     * @param columnFamilies The ColumnFamilies to try to stop compaction upon.
+     * @param columnFamilies The column families to stop all compactions for.
      */
     public void stopCompactionFor(Collection<CFMetaData> columnFamilies)
     {
         assert columnFamilies != null;
 
+        ArrayList<Holder> stoppedHolders = new ArrayList<Holder>();
         for (Holder compactionHolder : CompactionMetrics.getCompactions())
         {
             CompactionInfo info = compactionHolder.getCompactionInfo();
 
             if (columnFamilies.contains(info.getCFMetaData()))
+            {
+                logger.debug("Requesting that compaction {} stop", info);
                 compactionHolder.stop(); // signal compaction to stop
+                stoppedHolders.add(compactionHolder);
+            }
         }
+
+        for (Holder compactionHolder : stoppedHolders)
+            compactionHolder.waitUntilStopped();
     }
 }

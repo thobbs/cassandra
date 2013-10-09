@@ -21,6 +21,9 @@ import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+
+import com.google.common.util.concurrent.SettableFuture;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.service.StorageService;
@@ -123,6 +126,7 @@ public final class CompactionInfo implements Serializable
         public abstract CompactionInfo getCompactionInfo();
         double load = StorageService.instance.getLoad();
         double reportedSeverity = 0d;
+        private SettableFuture stopFuture = SettableFuture.create();
 
         public void stop()
         {
@@ -133,6 +137,34 @@ public final class CompactionInfo implements Serializable
         {
             return stopRequested;
         }
+
+        /**
+         * Blocks until the compaction has stopped (normally or otherwise)
+         */
+        public void waitUntilStopped()
+        {
+            try
+            {
+                stopFuture.get();
+            }
+            catch (InterruptedException e)
+            {
+                throw new AssertionError(e);
+            }
+            catch (ExecutionException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+
+        /**
+         * Called when the compaction stops (normally or otherwise)
+         */
+        public void didStop()
+        {
+            stopFuture.set(null);
+        }
+
         /**
          * report event on the size of the compaction.
          */

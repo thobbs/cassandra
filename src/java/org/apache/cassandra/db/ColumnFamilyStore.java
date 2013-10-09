@@ -995,6 +995,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             CompactionManager.instance.submitBackground(this);
     }
 
+    /**
+     * Returns false if the table has been dropped, true otherwise.
+     */
     public boolean isValid()
     {
         return valid;
