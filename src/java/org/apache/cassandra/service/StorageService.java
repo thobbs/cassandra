@@ -408,6 +408,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return tokens;
     }
 
+    public synchronized void checkForEndpointCollision() throws ConfigurationException
+    {
+        logger.debug("Starting shadow gossip round to check for endpoint collision");
+        MessagingService.instance().listen(FBUtilities.getLocalAddress());
+        Gossiper.instance.doShadowRound();
+        if (Gossiper.instance.getEndpointStateForEndpoint(FBUtilities.getBroadcastAddress()) != null)
+        {
+            throw new RuntimeException(String.format("A node with address %s already exists, cancelling join. " +
+                                                     "Use cassandra.replace_address if you want to replace this node.",
+                                                     FBUtilities.getBroadcastAddress()));
+        }
+        MessagingService.instance().shutdown();
+        Gossiper.instance.resetEndpointStateMap();
+    }
+
     public synchronized void initClient() throws ConfigurationException
     {
         // We don't wait, because we're going to actually try to work on
@@ -581,6 +596,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
             appStates.put(ApplicationState.TOKENS, valueFactory.tokens(tokens));
         }
+        else if (!DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress()))
+        {
+            checkForEndpointCollision();
+        }
+
         // have to start the gossip service before we can see any info on other nodes.  this is necessary
         // for bootstrap to get the load info it needs.
         // (we won't be part of the storage ring though until we add a counterId to our state, below.)
