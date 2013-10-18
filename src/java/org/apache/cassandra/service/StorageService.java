@@ -596,7 +596,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
             appStates.put(ApplicationState.TOKENS, valueFactory.tokens(tokens));
         }
-        else if (!DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress()))
+        else if (DatabaseDescriptor.isAutoBootstrap() && !SystemKeyspace.bootstrapComplete() &&
+                 !DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress()))
         {
             checkForEndpointCollision();
         }
