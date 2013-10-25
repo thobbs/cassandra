@@ -116,7 +116,7 @@ public class StorageProxy implements StorageProxyMBean
             throws OverloadedException
             {
                 assert mutation instanceof RowMutation;
-                sendToHintedEndpoints((RowMutation) mutation, targets, responseHandler, localDataCenter, consistency_level);
+                sendToHintedEndpoints((RowMutation) mutation, targets, responseHandler, localDataCenter);
             }
         };
 
@@ -530,7 +530,7 @@ public class StorageProxy implements StorageProxyMBean
                     List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(mutation.getKeyspaceName(), tk);
                     Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, mutation.getKeyspaceName());
                     for (InetAddress target : Iterables.concat(naturalEndpoints, pendingEndpoints))
-                        submitHint((RowMutation) mutation, target, null, consistency_level);
+                        submitHint((RowMutation) mutation, target, null);
                 }
                 Tracing.trace("Wrote hint to satisfy CL.ANY after no replicas acknowledged the write");
             }
@@ -689,7 +689,7 @@ public class StorageProxy implements StorageProxyMBean
         for (WriteResponseHandlerWrapper wrapper : wrappers)
         {
             Iterable<InetAddress> endpoints = Iterables.concat(wrapper.handler.naturalEndpoints, wrapper.handler.pendingEndpoints);
-            sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter, consistencyLevel);
+            sendToHintedEndpoints(wrapper.mutation, endpoints, wrapper.handler, localDataCenter);
         }
 
         for (WriteResponseHandlerWrapper wrapper : wrappers)
@@ -736,7 +736,7 @@ public class StorageProxy implements StorageProxyMBean
         return responseHandler;
     }
 
-    // same as above except does not initiate writes (but does perfrom availability checks).
+    // same as above except does not initiate writes (but does perform availability checks).
     private static WriteResponseHandlerWrapper wrapResponseHandler(RowMutation mutation, ConsistencyLevel consistency_level, WriteType writeType)
     {
         AbstractReplicationStrategy rs = Keyspace.open(mutation.getKeyspaceName()).getReplicationStrategy();
@@ -824,8 +824,7 @@ public class StorageProxy implements StorageProxyMBean
     public static void sendToHintedEndpoints(final RowMutation rm,
                                              Iterable<InetAddress> targets,
                                              AbstractWriteResponseHandler responseHandler,
-                                             String localDataCenter,
-                                             ConsistencyLevel consistency_level)
+                                             String localDataCenter)
     throws OverloadedException
     {
         // extra-datacenter replicas, grouped by dc
@@ -884,7 +883,7 @@ public class StorageProxy implements StorageProxyMBean
                     continue;
 
                 // Schedule a local hint
-                submitHint(rm, destination, responseHandler, consistency_level);
+                submitHint(rm, destination, responseHandler);
             }
         }
 
@@ -913,8 +912,7 @@ public class StorageProxy implements StorageProxyMBean
 
     public static Future<Void> submitHint(final RowMutation mutation,
                                           final InetAddress target,
-                                          final AbstractWriteResponseHandler responseHandler,
-                                          final ConsistencyLevel consistencyLevel)
+                                          final AbstractWriteResponseHandler responseHandler)
     {
         // local write that time out should be handled by LocalMutationRunnable
         assert !target.equals(FBUtilities.getBroadcastAddress()) : target;
@@ -929,7 +927,7 @@ public class StorageProxy implements StorageProxyMBean
                     logger.debug("Adding hint for {}", target);
                     writeHintForMutation(mutation, ttl, target);
                     // Notify the handler only for CL == ANY
-                    if (responseHandler != null && consistencyLevel == ConsistencyLevel.ANY)
+                    if (responseHandler != null && responseHandler.consistencyLevel == ConsistencyLevel.ANY)
                         responseHandler.response(null);
                 }
                 else
@@ -958,7 +956,7 @@ public class StorageProxy implements StorageProxyMBean
         StorageMetrics.totalHints.inc();
     }
 
-    private static void sendMessagesToNonlocalDC(MessageOut message, Collection<InetAddress> targets, AbstractWriteResponseHandler handler)
+    private static void sendMessagesToNonlocalDC(MessageOut<? extends IMutation> message, Collection<InetAddress> targets, AbstractWriteResponseHandler handler)
     {
         Iterator<InetAddress> iter = targets.iterator();
         InetAddress target = iter.next();
@@ -978,8 +976,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             message = message.withParameter(RowMutation.FORWARD_TO, out.getData());
             // send the combined message + forward headers
-            int id = MessagingService.instance().addCallback(handler, message, target, message.getTimeout(), handler.consistencyLevel);
-            MessagingService.instance().sendOneWay(message, id, target);
+            int id = MessagingService.instance().sendRR(message, target, handler);
             logger.trace("Sending message to {}@{}", id, target);
         }
         catch (IOException e)
@@ -1039,9 +1036,7 @@ public class StorageProxy implements StorageProxyMBean
             AbstractWriteResponseHandler responseHandler = new WriteResponseHandler(endpoint, WriteType.COUNTER);
 
             Tracing.trace("Enqueuing counter update to {}", endpoint);
-            MessageOut<CounterMutation> message = cm.makeMutationMessage();
-            int id = MessagingService.instance().addCallback(responseHandler, message, endpoint, message.getTimeout(), cm.consistency());
-            MessagingService.instance().sendOneWay(message, id, endpoint);
+            MessagingService.instance().sendRR(cm.makeMutationMessage(), endpoint, responseHandler);
             return responseHandler;
         }
     }
@@ -1127,7 +1122,7 @@ public class StorageProxy implements StorageProxyMBean
                         public void runMayThrow() throws OverloadedException
                         {
                             // send mutation to other replica
-                            sendToHintedEndpoints(cm.makeReplicationMutation(), remotes, responseHandler, localDataCenter, consistency_level);
+                            sendToHintedEndpoints(cm.makeReplicationMutation(), remotes, responseHandler, localDataCenter);
                         }
                     });
                 }
@@ -1297,7 +1292,12 @@ public class StorageProxy implements StorageProxyMBean
 
                     // Do a full data read to resolve the correct response (and repair node that need be)
                     RowDataResolver resolver = new RowDataResolver(exec.command.ksName, exec.command.key, exec.command.filter(), exec.command.timestamp);
-                    ReadCallback<ReadResponse, Row> repairHandler = exec.handler.withNewResolver(resolver);
+                    ReadCallback<ReadResponse, Row> repairHandler = new ReadCallback<>(resolver,
+                                                                                       ConsistencyLevel.ALL,
+                                                                                       exec.getContactedReplicas().size(),
+                                                                                       exec.command,
+                                                                                       Keyspace.open(exec.command.getKeyspace()),
+                                                                                       exec.handler.endpoints);
 
                     if (repairCommands == null)
                     {
@@ -2048,7 +2048,7 @@ public class StorageProxy implements StorageProxyMBean
 
     public Long getTruncateRpcTimeout() { return DatabaseDescriptor.getTruncateRpcTimeout(); }
     public void setTruncateRpcTimeout(Long timeoutInMillis) { DatabaseDescriptor.setTruncateRpcTimeout(timeoutInMillis); }
-    public void reloadTriggerClass() { TriggerExecutor.instance.reloadClasses(); }
+    public void reloadTriggerClasses() { TriggerExecutor.instance.reloadClasses(); }
 
     
     public long getReadRepairAttempted() {

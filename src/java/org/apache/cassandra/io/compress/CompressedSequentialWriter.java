@@ -194,11 +194,10 @@ public class CompressedSequentialWriter extends SequentialWriter
             out.seek(chunkOffset);
             out.readFully(compressed.buffer, 0, chunkSize);
 
-            int validBytes;
             try
             {
-                // decompress data chunk and store its length
-                validBytes = compressor.uncompress(compressed.buffer, 0, chunkSize, buffer, 0);
+                // repopulate buffer
+                compressor.uncompress(compressed.buffer, 0, chunkSize, buffer, 0);
             }
             catch (IOException e)
             {

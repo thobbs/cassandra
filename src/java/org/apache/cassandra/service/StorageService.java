@@ -175,8 +175,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /* the probability for tracing any particular request, 0 disables tracing and 1 enables for all */
     private double tracingProbability = 0.0;
 
-    private static enum Mode { NORMAL, CLIENT, JOINING, LEAVING, DECOMMISSIONED, MOVING, DRAINING, DRAINED, RELOCATING }
-    private Mode operationMode;
+    private static enum Mode { STARTING, NORMAL, CLIENT, JOINING, LEAVING, DECOMMISSIONED, MOVING, DRAINING, DRAINED, RELOCATING }
+    private Mode operationMode = Mode.STARTING;
 
     private final MigrationManager migrationManager = MigrationManager.instance;
 
@@ -309,7 +309,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             throw new IllegalStateException("No configured daemon");
         }
-        daemon.thriftServer.stop();
+        if (daemon.thriftServer != null)
+            daemon.thriftServer.stop();
     }
 
     public boolean isRPCServerRunning()
@@ -376,6 +377,52 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public boolean isInitialized()
     {
         return initialized;
+    }
+
+    public synchronized Collection<Token> prepareReplacementInfo() throws ConfigurationException
+    {
+        logger.info("Gathering node replacement information for {}", DatabaseDescriptor.getReplaceAddress());
+        MessagingService.instance().listen(FBUtilities.getLocalAddress());
+
+        // make magic happen
+        Gossiper.instance.doShadowRound();
+
+        UUID hostId = null;
+        // now that we've gossiped at least once, we should be able to find the node we're replacing
+        if (Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress())== null)
+            throw new RuntimeException("Cannot replace_address " + DatabaseDescriptor.getReplaceAddress() + " because it doesn't exist in gossip");
+        hostId = Gossiper.instance.getHostId(DatabaseDescriptor.getReplaceAddress());
+        try
+        {
+            if (Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()).getApplicationState(ApplicationState.TOKENS) == null)
+                throw new RuntimeException("Could not find tokens for " + DatabaseDescriptor.getReplaceAddress() + " to replace");
+            Collection<Token> tokens = TokenSerializer.deserialize(getPartitioner(), new DataInputStream(new ByteArrayInputStream(getApplicationStateValue(DatabaseDescriptor.getReplaceAddress(), ApplicationState.TOKENS))));
+            
+            SystemKeyspace.setLocalHostId(hostId); // use the replacee's host Id as our own so we receive hints, etc
+            MessagingService.instance().shutdown();
+            Gossiper.instance.resetEndpointStateMap(); // clean up since we have what we need
+            return tokens;        
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public synchronized void checkForEndpointCollision() throws ConfigurationException
+    {
+        logger.debug("Starting shadow gossip round to check for endpoint collision");
+        MessagingService.instance().listen(FBUtilities.getLocalAddress());
+        Gossiper.instance.doShadowRound();
+        EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(FBUtilities.getBroadcastAddress());
+        if (epState != null && !Gossiper.instance.isDeadState(epState))
+        {
+            throw new RuntimeException(String.format("A node with address %s already exists, cancelling join. " +
+                                                     "Use cassandra.replace_address if you want to replace this node.",
+                                                     FBUtilities.getBroadcastAddress()));
+        }
+        MessagingService.instance().shutdown();
+        Gossiper.instance.resetEndpointStateMap();
     }
 
     public synchronized void initClient() throws ConfigurationException
@@ -534,24 +581,43 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
     }
 
+    private boolean shouldBootstrap()
+    {
+        return DatabaseDescriptor.isAutoBootstrap() && !SystemKeyspace.bootstrapComplete() && !DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress());
+    }
+
     private void joinTokenRing(int delay) throws ConfigurationException
     {
-        logger.info("Starting up server gossip");
         joined = true;
 
-        // Seed the host ID-to-endpoint map with our own ID.
-        getTokenMetadata().updateHostId(SystemKeyspace.getLocalHostId(), FBUtilities.getBroadcastAddress());
+        Collection<Token> tokens = null;
+        Map<ApplicationState, VersionedValue> appStates = new HashMap<ApplicationState, VersionedValue>();
+
+        if (DatabaseDescriptor.getReplaceTokens().size() > 0 || DatabaseDescriptor.getReplaceNode() != null)
+            throw new RuntimeException("Replace method removed; use cassandra.replace_address instead");
+        if (DatabaseDescriptor.isReplacing())
+        {
+            if (!DatabaseDescriptor.isAutoBootstrap())
+                throw new RuntimeException("Trying to replace_address with auto_bootstrap disabled will not work, check your configuration");
+            tokens = prepareReplacementInfo();
+            appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
+            appStates.put(ApplicationState.TOKENS, valueFactory.tokens(tokens));
+        }
+        else if (shouldBootstrap())
+        {
+            checkForEndpointCollision();
+        }
 
         // have to start the gossip service before we can see any info on other nodes.  this is necessary
         // for bootstrap to get the load info it needs.
         // (we won't be part of the storage ring though until we add a counterId to our state, below.)
-        Map<ApplicationState, VersionedValue> appStates = new HashMap<ApplicationState, VersionedValue>();
+        // Seed the host ID-to-endpoint map with our own ID.
+        getTokenMetadata().updateHostId(SystemKeyspace.getLocalHostId(), FBUtilities.getBroadcastAddress());
         appStates.put(ApplicationState.NET_VERSION, valueFactory.networkVersion());
         appStates.put(ApplicationState.HOST_ID, valueFactory.hostId(SystemKeyspace.getLocalHostId()));
         appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(DatabaseDescriptor.getRpcAddress()));
-        if (DatabaseDescriptor.isReplacing())
-            appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
         appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
+        logger.info("Starting up server gossip");
         Gossiper.instance.register(this);
         Gossiper.instance.register(migrationManager);
         Gossiper.instance.start(SystemKeyspace.incrementAndGetGeneration(), appStates); // needed for node-ring gathering.
@@ -577,15 +643,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // We attempted to replace this with a schema-presence check, but you need a meaningful sleep
         // to get schema info from gossip which defeats the purpose.  See CASSANDRA-4427 for the gory details.
         Set<InetAddress> current = new HashSet<InetAddress>();
-        Collection<Token> tokens;
         logger.debug("Bootstrap variables: {} {} {} {}",
                      DatabaseDescriptor.isAutoBootstrap(),
                      SystemKeyspace.bootstrapInProgress(),
                      SystemKeyspace.bootstrapComplete(),
                      DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress()));
-        if (DatabaseDescriptor.isAutoBootstrap()
-            && !SystemKeyspace.bootstrapComplete()
-            && !DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddress()))
+        if (shouldBootstrap())
         {
             if (SystemKeyspace.bootstrapInProgress())
                 logger.warn("Detected previous bootstrap failure; retrying");
@@ -624,47 +687,41 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     throw new UnsupportedOperationException(s);
                 }
                 setMode(Mode.JOINING, "getting bootstrap token", true);
-                tokens = BootStrapper.getBootstrapTokens(tokenMetadata, LoadBroadcaster.instance.getLoadInfo());
+                tokens = BootStrapper.getBootstrapTokens(tokenMetadata);
             }
             else
             {
-                // Sleeping additionally to make sure that the server actually is not alive
-                // and giving it more time to gossip if alive.
-                Uninterruptibles.sleepUninterruptibly(LoadBroadcaster.BROADCAST_INTERVAL, TimeUnit.MILLISECONDS);
-                if (DatabaseDescriptor.getReplaceTokens().size() != 0 && DatabaseDescriptor.getReplaceNode() != null)
-                    throw new UnsupportedOperationException("You cannot specify both replace_token and replace_node, choose one or the other");
-                tokens = new ArrayList<Token>();
-                if (DatabaseDescriptor.getReplaceTokens().size() !=0)
+                if (!DatabaseDescriptor.getReplaceAddress().equals(FBUtilities.getBroadcastAddress()))
                 {
-                    for (String token : DatabaseDescriptor.getReplaceTokens())
-                        tokens.add(StorageService.getPartitioner().getTokenFactory().fromString(token));
-                }
-                else
-                {
-                    assert DatabaseDescriptor.getReplaceNode() != null;
-                    InetAddress endpoint = tokenMetadata.getEndpointForHostId(DatabaseDescriptor.getReplaceNode());
-                    if (endpoint == null)
-                        throw new UnsupportedOperationException("Cannot replace host id " + DatabaseDescriptor.getReplaceNode() + " because it does not exist!");
-                    tokens = tokenMetadata.getTokens(endpoint);
-                }
-
-                // check for operator errors...
-                for (Token token : tokens)
-                {
-                    InetAddress existing = tokenMetadata.getEndpoint(token);
-                    if (existing != null)
+                    try
                     {
-                        if (delay > TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - Gossiper.instance.getEndpointStateForEndpoint(existing).getUpdateTimestamp()))
-                            throw new UnsupportedOperationException("Cannnot replace a token for a Live node... ");
-                        current.add(existing);
+                        // Sleep additionally to make sure that the server actually is not alive
+                        // and giving it more time to gossip if alive.
+                        Thread.sleep(LoadBroadcaster.BROADCAST_INTERVAL);
                     }
-                    else
+                    catch (InterruptedException e)
                     {
-                        throw new UnsupportedOperationException("Cannot replace token " + token + " which does not exist!");
+                        throw new AssertionError(e);
+                    }
+
+                    // check for operator errors...
+                    for (Token token : tokens)
+                    {
+                        InetAddress existing = tokenMetadata.getEndpoint(token);
+                        if (existing != null)
+                        {
+                            long nanoDelay = delay * 1000000L;
+                            if (Gossiper.instance.getEndpointStateForEndpoint(existing).getUpdateTimestamp() > (System.nanoTime() - nanoDelay))
+                                throw new UnsupportedOperationException("Cannnot replace a live node... ");
+                            current.add(existing);
+                        }
+                        else
+                        {
+                            throw new UnsupportedOperationException("Cannot replace token " + token + " which does not exist!");
+                        }
                     }
                 }
-
-                setMode(Mode.JOINING, "Replacing a node with token: " + tokens, true);
+                setMode(Mode.JOINING, "Replacing a node with token(s): " + tokens, true);
             }
 
             bootstrap(tokens);
@@ -901,6 +958,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             // Dont set any state for the node which is bootstrapping the existing token...
             tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
+            SystemKeyspace.removeEndpoint(DatabaseDescriptor.getReplaceAddress());
         }
         if (!Gossiper.instance.seenAnySeed())
             throw new IllegalStateException("Unable to contact any seeds!");
@@ -1306,7 +1364,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         // Order Matters, TM.updateHostID() should be called before TM.updateNormalToken(), (see CASSANDRA-4300).
         if (Gossiper.instance.usesHostId(endpoint))
-            tokenMetadata.updateHostId(Gossiper.instance.getHostId(endpoint), endpoint);
+        {
+            UUID hostId = Gossiper.instance.getHostId(endpoint);
+            if (DatabaseDescriptor.isReplacing() && Gossiper.instance.getEndpointStateForEndpoint(DatabaseDescriptor.getReplaceAddress()) != null && (hostId.equals(Gossiper.instance.getHostId(DatabaseDescriptor.getReplaceAddress()))))
+                logger.warn("Not updating token metadata for {} because I am replacing it", endpoint);
+            else
+                tokenMetadata.updateHostId(hostId, endpoint);
+        }
 
         Set<Token> tokensToUpdateInMetadata = new HashSet<Token>();
         Set<Token> tokensToUpdateInSystemKeyspace = new HashSet<Token>();

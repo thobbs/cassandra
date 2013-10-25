@@ -20,25 +20,21 @@ using the provided 'sstableupgrade' tool.
 New features
 ------------
     - Speculative retry defaults to 99th percentile
-      (See blog post at TODO)
+      (See blog post at http://www.datastax.com/dev/blog/rapid-read-protection-in-cassandra-2-0-2)
     - Configurable metrics reporting
       (see conf/metrics-reporter-config-sample.yaml)
     - Compaction history and stats are now saved to system keyspace
       (system.compaction_history table). You can access historiy via
       new 'nodetool compactionhistory' command or CQL.
-
-Upgrading
----------
-    - tombstone_debug_threshold from 1.2.11 has been changed to
-      tombstone_warn_threshold and tombstone_failure_threshold.
-      Adjust these if your application relies on scanning a large
-      number of tombstones; see the comments in cassandra.yaml for why
-      this is dangerous.
+    - Added a new consistency level, LOCAL_ONE, that forces all CL.ONE operations to
+      execute only in the local datacenter.
+    - New replace_address to supplant the (now removed) replace_token and
+      replace_node workflows to replace a dead node in place.  Works like the
+      old options, but takes the IP address of the node to be replaced.
 
 
 2.0.1
 =====
-
 Upgrading
 ---------
     - The default memtable allocation has changed from 1/3 of heap to 1/4
@@ -51,6 +47,7 @@ Upgrading
 
 Upgrading
 ---------
+    - Java 7 is now *required*!
     - Upgrading is ONLY supported from Cassandra 1.2.9 or later. This
       goes for sstable compatibility as well as network.  When
       upgrading from an earlier release, upgrade to 1.2.9 first and
@@ -127,6 +124,16 @@ Features
     - Numerous improvements to CQL3 and a new version of the native protocol. See
       http://www.datastax.com/dev/blog/cql-in-cassandra-2-0 for details.
 
+1.2.11
+======
+
+Features
+--------
+    - Added a new consistenct level, LOCAL_ONE, that forces all CL.ONE operations to
+      execute only in the local datacenter.
+    - New replace_address to supplant the (now removed) replace_token and
+      replace_node workflows to replace a dead node in place.  Works like the
+      old options, but takes the IP address of the node to be replaced.
 
 1.2.9
 =====

@@ -36,10 +36,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.columniterator.OnDiskAtomIterator;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
@@ -327,8 +324,9 @@ public class SSTableReader extends SSTable implements Closeable
 
         deletingTask = new SSTableDeletingTask(this);
 
-        // Don't track read rates for tables in the system keyspace
-        if (Keyspace.SYSTEM_KS.equals(desc.ksname))
+        // Don't track read rates for tables in the system keyspace and don't bother trying to load or persist
+        // the read meter when in client mode
+        if (Keyspace.SYSTEM_KS.equals(desc.ksname) || Config.isClientMode())
         {
             readMeter = null;
             return;
@@ -1102,8 +1100,8 @@ public class SSTableReader extends SSTable implements Closeable
      * When calling this function, the caller must ensure that the SSTableReader is not referenced anywhere
      * except for threads holding a reference.
      *
-     * @return true if the this is the first time the file was marked compacted.  Calling this
-     * multiple times would be buggy.
+     * @return true if the this is the first time the file was marked obsolete.  Calling this
+     * multiple times is usually buggy (see exceptions in DataTracker.unmarkCompacting and removeOldSSTablesSize).
      */
     public boolean markObsolete()
     {

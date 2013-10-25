@@ -230,13 +230,15 @@ public class ColumnDefinition
      * @param cfName     The name of the parent ColumnFamily
      * @param timestamp  The timestamp to use for column modification
      */
-    public void deleteFromSchema(RowMutation rm, String cfName, long timestamp)
+    public void deleteFromSchema(RowMutation rm, String cfName, AbstractType<?> comparator, long timestamp)
     {
         ColumnFamily cf = rm.addOrGet(CFMetaData.SchemaColumnsCf);
         int ldt = (int) (System.currentTimeMillis() / 1000);
 
         ColumnNameBuilder builder = CFMetaData.SchemaColumnsCf.getCfDef().getColumnNameBuilder();
-        builder.add(ByteBufferUtil.bytes(cfName)).add(name);
+        // Note: the following is necessary for backward compatibility. For CQL3, comparator will be UTF8 and nameBytes == name
+        ByteBuffer nameBytes = ByteBufferUtil.bytes(comparator.getString(name));
+        builder.add(ByteBufferUtil.bytes(cfName)).add(nameBytes);
         cf.addAtom(new RangeTombstone(builder.build(), builder.buildAsEndOfRange(), timestamp, ldt));
     }
 
@@ -265,9 +267,9 @@ public class ColumnDefinition
         if (getIndexType() != null && def.getIndexType() != null)
         {
             // If an index is set (and not drop by this update), the validator shouldn't be change to a non-compatible one
+            // (and we want true comparator compatibility, not just value one, since the validator is used by LocalPartitioner to order index rows)
             if (!def.getValidator().isCompatibleWith(getValidator()))
-                throw new ConfigurationException(String.format("Cannot modify validator to a non-compatible one for column %s since an index is set",
-                                                                comparator.getString(name)));
+                throw new ConfigurationException(String.format("Cannot modify validator to a non-order-compatible one for column %s since an index is set", comparator.getString(name)));
 
             assert getIndexName() != null;
             if (!getIndexName().equals(def.getIndexName()))

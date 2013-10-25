@@ -397,11 +397,11 @@ public class SelectStatement implements CQLStatement
         }
         else
         {
-            SortedSet<ByteBuffer> columnNames = getRequestedColumns(variables);
-            if (columnNames == null) // in case of IN () for the last column of the key
+            SortedSet<ByteBuffer> cellNames = getRequestedColumns(variables);
+            if (cellNames == null) // in case of IN () for the last column of the key
                 return null;
-            QueryProcessor.validateColumnNames(columnNames);
-            return new NamesQueryFilter(columnNames, true);
+            QueryProcessor.validateCellNames(cellNames);
+            return new NamesQueryFilter(cellNames, true);
         }
     }
 
@@ -719,7 +719,7 @@ public class SelectStatement implements CQLStatement
         return buildBound(b, cfDef.columns.values(), columnRestrictions, isReversed, cfDef.getColumnNameBuilder(), variables);
     }
 
-    private List<IndexExpression> getIndexExpressions(List<ByteBuffer> variables) throws InvalidRequestException
+    public List<IndexExpression> getIndexExpressions(List<ByteBuffer> variables) throws InvalidRequestException
     {
         if (!usesSecondaryIndexing || restrictedNames.isEmpty())
             return Collections.emptyList();

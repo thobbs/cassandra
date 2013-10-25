@@ -1269,12 +1269,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             int gcBefore = gcBefore(filter.timestamp);
             if (isRowCacheEnabled())
             {
-                UUID cfId = Schema.instance.getId(keyspace.getName(), name);
-                if (cfId == null)
-                {
-                    logger.trace("no id found for {}.{}", keyspace.getName(), name);
-                    return null;
-                }
+                assert !isIndex(); // CASSANDRA-5732
+                UUID cfId = metadata.cfId;
 
                 ColumnFamily cached = getThroughCache(cfId, filter);
                 if (cached == null)
@@ -2172,20 +2168,14 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     "is deprecated, set the compaction strategy option 'enabled' to 'false' instead or use the nodetool command 'disableautocompaction'.");
     }
 
-    public long getTombstonesPerLastRead()
+    public double getTombstonesPerSlice()
     {
-        return metric.tombstoneScannedHistogram.count();
+        return metric.tombstoneScannedHistogram.getSnapshot().getMedian();
     }
 
-    public float getPercentageTombstonesPerLastRead()
+    public double getLiveCellsPerSlice()
     {
-        long total = metric.tombstoneScannedHistogram.count() + metric.liveScannedHistogram.count();
-        return ((float) metric.tombstoneScannedHistogram.count() / total);
-    }
-
-    public long getLiveCellsPerLastRead()
-    {
-        return metric.liveScannedHistogram.count();
+        return metric.liveScannedHistogram.getSnapshot().getMedian();
     }
 
     // End JMX get/set.
