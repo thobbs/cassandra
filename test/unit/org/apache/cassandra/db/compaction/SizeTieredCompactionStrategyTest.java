@@ -34,6 +34,12 @@ import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
+import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.getBuckets;
+import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.mostInterestingBucket;
+import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.trimToThresholdWithHotness;
+import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.filterColdSSTables;
+import static org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy.validateOptions;
+
 import static org.junit.Assert.*;
 
 public class SizeTieredCompactionStrategyTest extends SchemaLoader
@@ -47,13 +53,13 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
         options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, "0.5");
         options.put(SizeTieredCompactionStrategyOptions.BUCKET_HIGH_KEY, "1.5");
         options.put(SizeTieredCompactionStrategyOptions.MIN_SSTABLE_SIZE_KEY, "10000");
-        Map<String, String> unvalidated = SizeTieredCompactionStrategy.validateOptions(options);
+        Map<String, String> unvalidated = validateOptions(options);
         assertTrue(unvalidated.isEmpty());
 
         try
         {
             options.put(SizeTieredCompactionStrategyOptions.MAX_COLD_READS_RATIO_KEY, "-0.5");
-            SizeTieredCompactionStrategy.validateOptions(options);
+            validateOptions(options);
             fail(String.format("Negative %s should be rejected", SizeTieredCompactionStrategyOptions.MAX_COLD_READS_RATIO_KEY));
         }
         catch (ConfigurationException e) {}
@@ -61,7 +67,7 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
         try
         {
             options.put(SizeTieredCompactionStrategyOptions.MAX_COLD_READS_RATIO_KEY, "10.0");
-            SizeTieredCompactionStrategy.validateOptions(options);
+            validateOptions(options);
             fail(String.format("%s > 1.0 should be rejected", SizeTieredCompactionStrategyOptions.MAX_COLD_READS_RATIO_KEY));
         }
         catch (ConfigurationException e)
@@ -72,7 +78,7 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
         try
         {
             options.put(SizeTieredCompactionStrategyOptions.BUCKET_LOW_KEY, "1000.0");
-            SizeTieredCompactionStrategy.validateOptions(options);
+            validateOptions(options);
             fail("bucket_low greater than bucket_high should be rejected");
         }
         catch (ConfigurationException e)
@@ -81,7 +87,7 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
         }
 
         options.put("bad_option", "1.0");
-        unvalidated = SizeTieredCompactionStrategy.validateOptions(options);
+        unvalidated = validateOptions(options);
         assertTrue(unvalidated.containsKey("bad_option"));
     }
 
@@ -96,7 +102,7 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
             pairs.add(pair);
         }
 
-        List<List<String>> buckets = SizeTieredCompactionStrategy.getBuckets(pairs, 1.5, 0.5, 2);
+        List<List<String>> buckets = getBuckets(pairs, 1.5, 0.5, 2);
         assertEquals(3, buckets.size());
 
         for (List<String> bucket : buckets)
@@ -116,7 +122,7 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
             pairs.add(pair);
         }
 
-        buckets = SizeTieredCompactionStrategy.getBuckets(pairs, 1.5, 0.5, 2);
+        buckets = getBuckets(pairs, 1.5, 0.5, 2);
         assertEquals(2, buckets.size());
 
         for (List<String> bucket : buckets)
@@ -137,7 +143,7 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
             pairs.add(pair);
         }
 
-        buckets = SizeTieredCompactionStrategy.getBuckets(pairs, 1.5, 0.5, 10);
+        buckets = getBuckets(pairs, 1.5, 0.5, 10);
         assertEquals(1, buckets.size());
     }
 
@@ -164,13 +170,12 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
             cfs.forceBlockingFlush();
         }
         cfs.forceBlockingFlush();
-        SizeTieredCompactionStrategy strategy = (SizeTieredCompactionStrategy) cfs.getCompactionStrategy();
 
         List<SSTableReader> sstrs = new ArrayList<>(cfs.getSSTables());
         Pair<List<SSTableReader>, Double> bucket;
 
-        bucket = strategy.prepBucket(sstrs, 4, 32);
-        assertNull("null should be returned when the bucket is below the min threshold", bucket);
+        List<SSTableReader> interestingBucket = mostInterestingBucket(Collections.singletonList(sstrs.subList(0, 2)), 4, 32);
+        assertTrue("nothing should be returned when all buckets are below the min threshold", interestingBucket.isEmpty());
 
         sstrs.get(0).readMeter = new RestorableMeter(100.0, 100.0);
         sstrs.get(1).readMeter = new RestorableMeter(200.0, 200.0);
@@ -179,7 +184,7 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
         long estimatedKeys = sstrs.get(0).estimatedKeys();
 
         // if we have more than the max threshold, the coldest should be dropped
-        bucket = strategy.prepBucket(sstrs, 1, 2);
+        bucket = trimToThresholdWithHotness(sstrs, 2);
         assertEquals("one bucket should have been dropped", 2, bucket.left.size());
         double expectedBucketHotness = (200.0 + 300.0) / estimatedKeys;
         assertEquals(String.format("bucket hotness (%f) should be close to %f", bucket.right, expectedBucketHotness),
@@ -209,24 +214,23 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
             cfs.forceBlockingFlush();
         }
         cfs.forceBlockingFlush();
-        SizeTieredCompactionStrategy strategy = (SizeTieredCompactionStrategy) cfs.getCompactionStrategy();
 
         List<SSTableReader> filtered;
         List<SSTableReader> sstrs = new ArrayList<>(cfs.getSSTables());
 
         for (SSTableReader sstr : sstrs)
             sstr.readMeter = null;
-        filtered = strategy.filterColdSSTables(sstrs, 0.05);
+        filtered = filterColdSSTables(sstrs, 0.05);
         assertEquals("when there are no read meters, no sstables should be filtered", sstrs.size(), filtered.size());
 
         for (SSTableReader sstr : sstrs)
             sstr.readMeter = new RestorableMeter(0.0, 0.0);
-        filtered = strategy.filterColdSSTables(sstrs, 0.05);
+        filtered = filterColdSSTables(sstrs, 0.05);
         assertEquals("when all read meters are zero, no sstables should be filtered", sstrs.size(), filtered.size());
 
         // leave all read rates at 0 besides one
         sstrs.get(0).readMeter = new RestorableMeter(1000.0, 1000.0);
-        filtered = strategy.filterColdSSTables(sstrs, 0.05);
+        filtered = filterColdSSTables(sstrs, 0.05);
         assertEquals("there should only be one hot sstable", 1, filtered.size());
         assertEquals(1000.0, filtered.get(0).readMeter.twoHourRate(), 0.5);
 
@@ -239,20 +243,20 @@ public class SizeTieredCompactionStrategyTest extends SchemaLoader
         sstrs.get(2).readMeter = new RestorableMeter(1.0, 1.0);
         sstrs.get(3).readMeter = new RestorableMeter(1.0, 1.0);
 
-        filtered = strategy.filterColdSSTables(sstrs, 0.025);
+        filtered = filterColdSSTables(sstrs, 0.025);
         assertEquals(2, filtered.size());
         assertEquals(98.0, filtered.get(0).readMeter.twoHourRate() + filtered.get(1).readMeter.twoHourRate(), 0.5);
 
         // make sure a threshold of 0.0 doesn't result in any sstables being filtered
         for (SSTableReader sstr : sstrs)
             sstr.readMeter = new RestorableMeter(1.0, 1.0);
-        filtered = strategy.filterColdSSTables(sstrs, 0.0);
+        filtered = filterColdSSTables(sstrs, 0.0);
         assertEquals(sstrs.size(), filtered.size());
 
         // just for fun, set a threshold where all sstables are considered cold
         for (SSTableReader sstr : sstrs)
             sstr.readMeter = new RestorableMeter(1.0, 1.0);
-        filtered = strategy.filterColdSSTables(sstrs, 1.0);
+        filtered = filterColdSSTables(sstrs, 1.0);
         assertTrue(filtered.isEmpty());
     }
 }

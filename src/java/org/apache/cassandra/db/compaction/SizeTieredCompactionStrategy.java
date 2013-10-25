@@ -20,6 +20,7 @@ package org.apache.cassandra.db.compaction;
 import java.util.*;
 import java.util.Map.Entry;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.slf4j.Logger;
@@ -79,6 +80,14 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         return Collections.singletonList(sstablesWithTombstones.get(0));
     }
 
+    /**
+     * Removes as many cold sstables as possible while retaining at least maxColdReadsRatio of the total reads/sec
+     * across all sstables
+     * @param sstables all sstables to consider
+     * @param maxColdReadsRatio the maximum allowable ratio of total reads/sec that the cold/ignored sstables can make up
+     * @return a list of sstables with the as many cold sstables as possible excluded
+     */
+    @VisibleForTesting
     static List<SSTableReader> filterColdSSTables(List<SSTableReader> sstables, double maxColdReadsRatio)
     {
         // sort the sstables by hotness, breaking ties with size on disk (mainly for system tables and cold tables)
@@ -125,14 +134,20 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         return sstables.subList(cutoffIndex, sstables.size());
     }
 
+    /**
+     * @param buckets list of buckets from which to return the most interesting, where "interesting" is the total hotness for reads
+     * @param minThreshold minimum number of sstables in a bucket to qualify as interesting
+     * @param maxThreshold maximum number of sstables to compact at once (the returned bucket will be trimmed down to this)
+     * @return a bucket (list) of sstables to compact
+     */
     public static List<SSTableReader> mostInterestingBucket(List<List<SSTableReader>> buckets, int minThreshold, int maxThreshold)
     {
         // skip buckets containing less than minThreshold sstables, and limit other buckets to maxThreshold sstables
         final List<Pair<List<SSTableReader>, Double>> prunedBucketsAndHotness = new ArrayList<>(buckets.size());
         for (List<SSTableReader> bucket : buckets)
         {
-            Pair<List<SSTableReader>, Double> bucketAndHotness = prepBucket(bucket, minThreshold, maxThreshold);
-            if (bucketAndHotness != null)
+            Pair<List<SSTableReader>, Double> bucketAndHotness = trimToThresholdWithHotness(bucket, maxThreshold);
+            if (bucketAndHotness != null && bucketAndHotness.left.size() >= minThreshold)
                 prunedBucketsAndHotness.add(bucketAndHotness);
         }
         if (prunedBucketsAndHotness.isEmpty())
@@ -166,12 +181,11 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
 
     /**
      * Returns a (bucket, hotness) pair or null if there were not enough sstables in the bucket to meet minThreshold.
+     * If there are more than maxThreshold sstables, the coldest sstables will be trimmed to meet the threshold.
      **/
-    static Pair<List<SSTableReader>, Double> prepBucket(List<SSTableReader> bucket, int minThreshold, int maxThreshold)
+    @VisibleForTesting
+    static Pair<List<SSTableReader>, Double> trimToThresholdWithHotness(List<SSTableReader> bucket, int maxThreshold)
     {
-        if (bucket.size() < minThreshold)
-            return null;
-
         // sort by sstable hotness (descending)
         Collections.sort(bucket, new Comparator<SSTableReader>()
         {
@@ -192,6 +206,9 @@ public class SizeTieredCompactionStrategy extends AbstractCompactionStrategy
         return Pair.create(prunedBucket, bucketHotness);
     }
 
+    /**
+     * Returns the reads per second per key for this sstable, or 0.0 if the sstable has no read meter
+     */
     private static double hotness(SSTableReader sstr)
     {
         // system tables don't have read meters, just use 0.0 for the hotness
