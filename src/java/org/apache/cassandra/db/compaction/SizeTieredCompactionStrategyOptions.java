@@ -26,16 +26,16 @@ public final class SizeTieredCompactionStrategyOptions
     protected static final long DEFAULT_MIN_SSTABLE_SIZE = 50L * 1024L * 1024L;
     protected static final double DEFAULT_BUCKET_LOW = 0.5;
     protected static final double DEFAULT_BUCKET_HIGH = 1.5;
-    protected static final double DEFAULT_COLDNESS_THRESHOLD = 0.25;
+    protected static final double DEFAULT_MAX_COLD_READS_RATIO = 0.025;
     protected static final String MIN_SSTABLE_SIZE_KEY = "min_sstable_size";
     protected static final String BUCKET_LOW_KEY = "bucket_low";
     protected static final String BUCKET_HIGH_KEY = "bucket_high";
-    protected static final String COLDNESS_THRESHOLD_KEY = "coldness_threshold";
+    protected static final String MAX_COLD_READS_RATIO_KEY = "max_cold_reads_ratio";
 
     protected long minSSTableSize;
     protected double bucketLow;
     protected double bucketHigh;
-    protected double coldnessThreshold;
+    protected double maxColdReadsRatio;
 
     public SizeTieredCompactionStrategyOptions(Map<String, String> options)
     {
@@ -45,8 +45,8 @@ public final class SizeTieredCompactionStrategyOptions
         bucketLow = optionValue == null ? DEFAULT_BUCKET_LOW : Double.parseDouble(optionValue);
         optionValue = options.get(BUCKET_HIGH_KEY);
         bucketHigh = optionValue == null ? DEFAULT_BUCKET_HIGH : Double.parseDouble(optionValue);
-        optionValue = options.get(COLDNESS_THRESHOLD_KEY);
-        coldnessThreshold = optionValue == null ? DEFAULT_COLDNESS_THRESHOLD : Double.parseDouble(optionValue);
+        optionValue = options.get(MAX_COLD_READS_RATIO_KEY);
+        maxColdReadsRatio = optionValue == null ? DEFAULT_MAX_COLD_READS_RATIO : Double.parseDouble(optionValue);
     }
 
     public SizeTieredCompactionStrategyOptions()
@@ -54,7 +54,7 @@ public final class SizeTieredCompactionStrategyOptions
         minSSTableSize = DEFAULT_MIN_SSTABLE_SIZE;
         bucketLow = DEFAULT_BUCKET_LOW;
         bucketHigh = DEFAULT_BUCKET_HIGH;
-        coldnessThreshold = DEFAULT_COLDNESS_THRESHOLD;
+        maxColdReadsRatio = DEFAULT_MAX_COLD_READS_RATIO;
     }
 
     private static double parseDouble(Map<String, String> options, String key, double defaultValue) throws ConfigurationException
@@ -94,14 +94,17 @@ public final class SizeTieredCompactionStrategyOptions
                                                            BUCKET_HIGH_KEY, bucketHigh, BUCKET_LOW_KEY, bucketLow));
         }
 
-        double coldnessThreshold = parseDouble(options, COLDNESS_THRESHOLD_KEY, DEFAULT_COLDNESS_THRESHOLD);
-        if (coldnessThreshold < 0.0)
-            throw new ConfigurationException(String.format("%s value (%s) is must be between non-negative", COLDNESS_THRESHOLD_KEY, optionValue));
+        double maxColdReadsRatio = parseDouble(options, MAX_COLD_READS_RATIO_KEY, DEFAULT_MAX_COLD_READS_RATIO);
+        if (maxColdReadsRatio < 0.0 || maxColdReadsRatio > 1.0)
+        {
+            throw new ConfigurationException(String.format("%s value (%s) should be between between 0.0 and 1.0",
+                                                           MAX_COLD_READS_RATIO_KEY, optionValue));
+        }
 
         uncheckedOptions.remove(MIN_SSTABLE_SIZE_KEY);
         uncheckedOptions.remove(BUCKET_LOW_KEY);
         uncheckedOptions.remove(BUCKET_HIGH_KEY);
-        uncheckedOptions.remove(COLDNESS_THRESHOLD_KEY);
+        uncheckedOptions.remove(MAX_COLD_READS_RATIO_KEY);
 
         return uncheckedOptions;
     }
