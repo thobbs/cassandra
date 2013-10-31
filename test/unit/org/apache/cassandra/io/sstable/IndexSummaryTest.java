@@ -23,6 +23,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +38,12 @@ import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
+
+import static org.apache.cassandra.io.sstable.IndexSummary.BASE_DOWNSAMPLE_LEVEL;
+import static org.apache.cassandra.io.sstable.IndexSummary.LOWEST_DOWNSAMPLE_LEVEL;
+
+import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.downsample;
+import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.getDownsamplePattern;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -73,13 +80,13 @@ public class IndexSummaryTest
         Pair<List<DecoratedKey>, IndexSummary> random = generateRandomIndex(100, 1);
         ByteArrayOutputStream aos = new ByteArrayOutputStream();
         DataOutputStream dos = new DataOutputStream(aos);
-        IndexSummary.serializer.serialize(random.right, dos);
+        IndexSummary.serializer.serialize(random.right, dos, false);
         // write junk
         dos.writeUTF("JUNK");
         dos.writeUTF("JUNK");
         FileUtils.closeQuietly(dos);
         DataInputStream dis = new DataInputStream(new ByteArrayInputStream(aos.toByteArray()));
-        IndexSummary is = IndexSummary.serializer.deserialize(dis, DatabaseDescriptor.getPartitioner());
+        IndexSummary is = IndexSummary.serializer.deserialize(dis, DatabaseDescriptor.getPartitioner(), false);
         for (int i = 0; i < 100; i++)
             assertEquals(i, is.binarySearch(random.left.get(i)));
         // read the junk
@@ -101,9 +108,9 @@ public class IndexSummaryTest
 
         ByteArrayOutputStream aos = new ByteArrayOutputStream();
         DataOutputStream dos = new DataOutputStream(aos);
-        IndexSummary.serializer.serialize(summary, dos);
+        IndexSummary.serializer.serialize(summary, dos, false);
         DataInputStream dis = new DataInputStream(new ByteArrayInputStream(aos.toByteArray()));
-        IndexSummary loaded = IndexSummary.serializer.deserialize(dis, p);
+        IndexSummary loaded = IndexSummary.serializer.deserialize(dis, p, false);
 
         assertEquals(1, loaded.size());
         assertEquals(summary.getPosition(0), loaded.getPosition(0));
@@ -125,5 +132,93 @@ public class IndexSummaryTest
             builder.maybeAddEntry(list.get(i), i);
         IndexSummary summary = builder.build(DatabaseDescriptor.getPartitioner());
         return Pair.create(list, summary);
+    }
+
+    @Test
+    public void testDownsamplePatterns()
+    {
+        assertEquals(Arrays.asList(0), getDownsamplePattern(0));
+        assertEquals(Arrays.asList(0), getDownsamplePattern(1));
+
+        assertEquals(Arrays.asList(0, 1), getDownsamplePattern(2));
+        assertEquals(Arrays.asList(0, 2, 1, 3), getDownsamplePattern(4));
+        assertEquals(Arrays.asList(0, 4, 2, 6, 1, 5, 3, 7), getDownsamplePattern(8));
+        assertEquals(Arrays.asList(0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15), getDownsamplePattern(16));
+    }
+
+    private static boolean shouldSkip(int index, List<Integer> startPoints)
+    {
+        for (int start : startPoints)
+        {
+            if ((index - start) % BASE_DOWNSAMPLE_LEVEL == 0)
+                return true;
+        }
+        return false;
+    }
+
+    @Test
+    public void testDownsample()
+    {
+        final int NUM_KEYS = 4096;
+        final int INDEX_INTERVAL = 128;
+        final int ORIGINAL_NUM_ENTRIES = NUM_KEYS / INDEX_INTERVAL;
+
+
+        Pair<List<DecoratedKey>, IndexSummary> random = generateRandomIndex(NUM_KEYS, INDEX_INTERVAL);
+        List<DecoratedKey> keys = random.left;
+        IndexSummary original = random.right;
+
+        // sanity check on the original index summary
+        for (int i = 0; i < ORIGINAL_NUM_ENTRIES; i++)
+            assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(original.getKey(i)));
+
+        List<Integer> downsamplePattern = getDownsamplePattern(BASE_DOWNSAMPLE_LEVEL);
+
+        // downsample by one level, then two levels, then three levels...
+        int downsamplingRound = 1;
+        for (int downsampleLevel = BASE_DOWNSAMPLE_LEVEL - 1; downsampleLevel >= LOWEST_DOWNSAMPLE_LEVEL; downsampleLevel--)
+        {
+            int targetNumEntries = (int) Math.floor((((float) downsampleLevel) / BASE_DOWNSAMPLE_LEVEL) * ORIGINAL_NUM_ENTRIES);
+
+            IndexSummary downsampled = downsample(original, targetNumEntries, DatabaseDescriptor.getPartitioner());
+            assertEquals(targetNumEntries, downsampled.size());
+
+            int downsampledIndex = 0;
+            List<Integer> skipStartPoints = downsamplePattern.subList(0, downsamplingRound);
+            for (int i = 0; i < ORIGINAL_NUM_ENTRIES; i++)
+            {
+                if (!shouldSkip(i, skipStartPoints))
+                {
+                    assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(downsampled.getKey(downsampledIndex)));
+                    downsampledIndex++;
+                }
+            }
+            downsamplingRound++;
+        }
+
+        // downsample one level each time
+        IndexSummary previous = original;
+        downsamplingRound = 1;
+        for (int downsampleLevel = BASE_DOWNSAMPLE_LEVEL - 1; downsampleLevel >= LOWEST_DOWNSAMPLE_LEVEL; downsampleLevel--)
+        {
+            int targetNumEntries = (int) Math.floor((((float) downsampleLevel) / BASE_DOWNSAMPLE_LEVEL) * ORIGINAL_NUM_ENTRIES);
+
+            IndexSummary downsampled = downsample(previous, targetNumEntries, DatabaseDescriptor.getPartitioner());
+            assertEquals(targetNumEntries, downsampled.size());
+
+            int downsampledIndex = 0;
+            List<Integer> skipStartPoints = downsamplePattern.subList(0, downsamplingRound);
+            for (int i = 0; i < ORIGINAL_NUM_ENTRIES; i++)
+            {
+                if (!shouldSkip(i, skipStartPoints))
+                {
+                    assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(downsampled.getKey(downsampledIndex)));
+                    downsampledIndex++;
+                }
+            }
+
+            previous = downsampled;
+            downsamplingRound++;
+        }
     }
 }

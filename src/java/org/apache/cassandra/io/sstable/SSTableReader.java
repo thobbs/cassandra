@@ -513,7 +513,7 @@ public class SSTableReader extends SSTable implements Closeable
         try
         {
             iStream = new DataInputStream(new FileInputStream(summariesFile));
-            reader.indexSummary = IndexSummary.serializer.deserialize(iStream, reader.partitioner);
+            reader.indexSummary = IndexSummary.serializer.deserialize(iStream, reader.partitioner, reader.descriptor.version.hasDownsamplingLevel);
             if (reader.indexSummary.getIndexInterval() != metadata.getIndexInterval())
             {
                 iStream.close();
@@ -552,7 +552,7 @@ public class SSTableReader extends SSTable implements Closeable
         try
         {
             oStream = new DataOutputStream(new FileOutputStream(summariesFile));
-            IndexSummary.serializer.serialize(reader.indexSummary, oStream);
+            IndexSummary.serializer.serialize(reader.indexSummary, oStream, reader.descriptor.version.hasDownsamplingLevel);
             ByteBufferUtil.writeWithLength(reader.first.key, oStream);
             ByteBufferUtil.writeWithLength(reader.last.key, oStream);
             ibuilder.serializeBounds(oStream);
