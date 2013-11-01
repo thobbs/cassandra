@@ -23,32 +23,37 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
 import com.google.common.collect.Lists;
 import org.junit.Test;
 
+import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.io.sstable.IndexSummary.BASE_DOWNSAMPLE_LEVEL;
-import static org.apache.cassandra.io.sstable.IndexSummary.LOWEST_DOWNSAMPLE_LEVEL;
+import static org.apache.cassandra.io.sstable.IndexSummary.BASE_SAMPLING_LEVEL;
+import static org.apache.cassandra.io.sstable.IndexSummary.MIN_SAMPLING_LEVEL;
 
 import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.downsample;
-import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.getDownsamplePattern;
+import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.getSamplingPattern;
 
+import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.entriesAtSamplingLevel;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
-public class IndexSummaryTest
+public class IndexSummaryTest extends SchemaLoader
 {
     @Test
     public void testGetKey()
@@ -99,7 +104,7 @@ public class IndexSummaryTest
     public void testAddEmptyKey() throws Exception
     {
         IPartitioner p = new RandomPartitioner();
-        IndexSummaryBuilder builder = new IndexSummaryBuilder(1, 1);
+        IndexSummaryBuilder builder = new IndexSummaryBuilder(1, 1, IndexSummary.BASE_SAMPLING_LEVEL);
         builder.maybeAddEntry(p.decorateKey(ByteBufferUtil.EMPTY_BYTE_BUFFER), 0);
         IndexSummary summary = builder.build(p);
         assertEquals(1, summary.size());
@@ -120,7 +125,7 @@ public class IndexSummaryTest
     private Pair<List<DecoratedKey>, IndexSummary> generateRandomIndex(int size, int interval)
     {
         List<DecoratedKey> list = Lists.newArrayList();
-        IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(), interval);
+        IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(), interval, IndexSummary.BASE_SAMPLING_LEVEL);
         for (int i = 0; i < size; i++)
         {
             UUID uuid = UUID.randomUUID();
@@ -137,20 +142,20 @@ public class IndexSummaryTest
     @Test
     public void testDownsamplePatterns()
     {
-        assertEquals(Arrays.asList(0), getDownsamplePattern(0));
-        assertEquals(Arrays.asList(0), getDownsamplePattern(1));
+        assertEquals(Arrays.asList(0), getSamplingPattern(0));
+        assertEquals(Arrays.asList(0), getSamplingPattern(1));
 
-        assertEquals(Arrays.asList(0, 1), getDownsamplePattern(2));
-        assertEquals(Arrays.asList(0, 2, 1, 3), getDownsamplePattern(4));
-        assertEquals(Arrays.asList(0, 4, 2, 6, 1, 5, 3, 7), getDownsamplePattern(8));
-        assertEquals(Arrays.asList(0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15), getDownsamplePattern(16));
+        assertEquals(Arrays.asList(0, 1), getSamplingPattern(2));
+        assertEquals(Arrays.asList(0, 2, 1, 3), getSamplingPattern(4));
+        assertEquals(Arrays.asList(0, 4, 2, 6, 1, 5, 3, 7), getSamplingPattern(8));
+        assertEquals(Arrays.asList(0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15), getSamplingPattern(16));
     }
 
     private static boolean shouldSkip(int index, List<Integer> startPoints)
     {
         for (int start : startPoints)
         {
-            if ((index - start) % BASE_DOWNSAMPLE_LEVEL == 0)
+            if ((index - start) % BASE_SAMPLING_LEVEL == 0)
                 return true;
         }
         return false;
@@ -172,25 +177,23 @@ public class IndexSummaryTest
         for (int i = 0; i < ORIGINAL_NUM_ENTRIES; i++)
             assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(original.getKey(i)));
 
-        List<Integer> downsamplePattern = getDownsamplePattern(BASE_DOWNSAMPLE_LEVEL);
+        List<Integer> samplePattern = getSamplingPattern(BASE_SAMPLING_LEVEL);
 
         // downsample by one level, then two levels, then three levels...
         int downsamplingRound = 1;
-        for (int downsampleLevel = BASE_DOWNSAMPLE_LEVEL - 1; downsampleLevel >= LOWEST_DOWNSAMPLE_LEVEL; downsampleLevel--)
+        for (int samplingLevel = BASE_SAMPLING_LEVEL - 1; samplingLevel >= MIN_SAMPLING_LEVEL; samplingLevel--)
         {
-            int targetNumEntries = (int) Math.floor((((float) downsampleLevel) / BASE_DOWNSAMPLE_LEVEL) * ORIGINAL_NUM_ENTRIES);
+            IndexSummary downsampled = downsample(original, samplingLevel, DatabaseDescriptor.getPartitioner());
+            assertEquals(entriesAtSamplingLevel(original, samplingLevel), downsampled.size());
 
-            IndexSummary downsampled = downsample(original, targetNumEntries, DatabaseDescriptor.getPartitioner());
-            assertEquals(targetNumEntries, downsampled.size());
-
-            int downsampledIndex = 0;
-            List<Integer> skipStartPoints = downsamplePattern.subList(0, downsamplingRound);
+            int sampledCount = 0;
+            List<Integer> skipStartPoints = samplePattern.subList(0, downsamplingRound);
             for (int i = 0; i < ORIGINAL_NUM_ENTRIES; i++)
             {
                 if (!shouldSkip(i, skipStartPoints))
                 {
-                    assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(downsampled.getKey(downsampledIndex)));
-                    downsampledIndex++;
+                    assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(downsampled.getKey(sampledCount)));
+                    sampledCount++;
                 }
             }
             downsamplingRound++;
@@ -199,26 +202,165 @@ public class IndexSummaryTest
         // downsample one level each time
         IndexSummary previous = original;
         downsamplingRound = 1;
-        for (int downsampleLevel = BASE_DOWNSAMPLE_LEVEL - 1; downsampleLevel >= LOWEST_DOWNSAMPLE_LEVEL; downsampleLevel--)
+        for (int downsampleLevel = BASE_SAMPLING_LEVEL - 1; downsampleLevel >= MIN_SAMPLING_LEVEL; downsampleLevel--)
         {
-            int targetNumEntries = (int) Math.floor((((float) downsampleLevel) / BASE_DOWNSAMPLE_LEVEL) * ORIGINAL_NUM_ENTRIES);
+            IndexSummary downsampled = downsample(previous, downsampleLevel, DatabaseDescriptor.getPartitioner());
+            assertEquals(entriesAtSamplingLevel(original, downsampleLevel), downsampled.size());
 
-            IndexSummary downsampled = downsample(previous, targetNumEntries, DatabaseDescriptor.getPartitioner());
-            assertEquals(targetNumEntries, downsampled.size());
-
-            int downsampledIndex = 0;
-            List<Integer> skipStartPoints = downsamplePattern.subList(0, downsamplingRound);
+            int sampledCount = 0;
+            List<Integer> skipStartPoints = samplePattern.subList(0, downsamplingRound);
             for (int i = 0; i < ORIGINAL_NUM_ENTRIES; i++)
             {
                 if (!shouldSkip(i, skipStartPoints))
                 {
-                    assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(downsampled.getKey(downsampledIndex)));
-                    downsampledIndex++;
+                    assertEquals(keys.get(i * INDEX_INTERVAL).key, ByteBuffer.wrap(downsampled.getKey(sampledCount)));
+                    sampledCount++;
                 }
             }
 
             previous = downsampled;
             downsamplingRound++;
         }
+    }
+
+    private static long totalOffHeapSize(List<SSTableReader> sstables)
+    {
+        long total = 0;
+        for (SSTableReader sstr : sstables)
+            total += sstr.getIndexSummary().getOffHeapSize();
+
+        return total;
+    }
+
+    private static void resetSummaries(List<SSTableReader> sstables, long originalOffHeapSize)
+    {
+        for (SSTableReader sstr : sstables)
+            sstr.readMeter = new RestorableMeter(100.0, 100.0);
+        IndexSummarySizer.redistributeSummaries(sstables, originalOffHeapSize * sstables.size());
+        for (SSTableReader sstr : sstables)
+            assertEquals(IndexSummary.BASE_SAMPLING_LEVEL, sstr.getIndexSummary().getSamplingLevel());
+    }
+
+    @Test
+    public void testRedistributeSummaries()
+    {
+        String ksname = "Keyspace1";
+        String cfname = "StandardLowIndexInterval";
+        Keyspace keyspace = Keyspace.open(ksname);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
+        cfs.truncateBlocking();
+        cfs.disableAutoCompaction();
+
+        ByteBuffer value = ByteBuffer.wrap(new byte[100]);
+
+        int numSSTables = 4;
+        int numRows = 256;
+        for (int sstable = 0; sstable < numSSTables; sstable++)
+        {
+            for (int row = 0; row < numRows; row++)
+            {
+                DecoratedKey key = Util.dk(String.valueOf(row));
+                RowMutation rm = new RowMutation(ksname, key.key);
+                rm.add(cfname, ByteBufferUtil.bytes("column"), value, 0);
+                rm.apply();
+            }
+            cfs.forceBlockingFlush();
+        }
+
+        List<SSTableReader> sstrs = new ArrayList<>(cfs.getSSTables());
+        assertEquals(numSSTables, sstrs.size());
+
+        for (SSTableReader sstr : sstrs)
+            sstr.readMeter = new RestorableMeter(100.0, 100.0);
+
+        long offHeapSize = sstrs.get(0).getIndexSummary().getOffHeapSize();
+
+        // there should be enough space to not downsample anything
+        IndexSummarySizer.redistributeSummaries(sstrs, offHeapSize * numSSTables);
+        for (SSTableReader sstr : sstrs)
+            assertEquals(sstr.getIndexSummary().getSamplingLevel(), BASE_SAMPLING_LEVEL);
+        assertEquals(offHeapSize * numSSTables, totalOffHeapSize(sstrs));
+
+        // everything should get cut in half
+        IndexSummarySizer.redistributeSummaries(sstrs, (offHeapSize * numSSTables) / 2);
+        for (SSTableReader sstr : sstrs)
+            assertEquals(BASE_SAMPLING_LEVEL / 2, sstr.getIndexSummary().getSamplingLevel());
+
+        // everything should get cut to a quarter
+        IndexSummarySizer.redistributeSummaries(sstrs, (offHeapSize * numSSTables) / 4);
+        for (SSTableReader sstr : sstrs)
+            assertEquals(BASE_SAMPLING_LEVEL / 4, sstr.getIndexSummary().getSamplingLevel());
+
+        // upsample back up to half
+        IndexSummarySizer.redistributeSummaries(sstrs, (offHeapSize * numSSTables) / 2);
+        for (SSTableReader sstr : sstrs)
+            assertEquals(BASE_SAMPLING_LEVEL / 2, sstr.getIndexSummary().getSamplingLevel());
+
+        // upsample back up to the original index summary
+        IndexSummarySizer.redistributeSummaries(sstrs, offHeapSize * numSSTables);
+        for (SSTableReader sstr : sstrs)
+            assertEquals(BASE_SAMPLING_LEVEL, sstr.getIndexSummary().getSamplingLevel());
+
+        // make two of the four sstables cold, only leave enough space for three full index summaries,
+        // so the two cold sstables should get downsampled to be half of their original size
+        sstrs.get(0).readMeter = new RestorableMeter(50.0, 50.0);
+        sstrs.get(1).readMeter = new RestorableMeter(50.0, 50.0);
+        IndexSummarySizer.redistributeSummaries(sstrs, offHeapSize * (numSSTables - 1));
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(0).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+
+        // small increases or decreases in the read rate don't result in downsampling or upsampling
+        double lowerRate = 50.0 * (IndexSummarySizer.DOWNSAMPLE_THESHOLD + (IndexSummarySizer.DOWNSAMPLE_THESHOLD * 0.10));
+        double higherRate = 50.0 * (IndexSummarySizer.UPSAMPLE_THRESHOLD - (IndexSummarySizer.UPSAMPLE_THRESHOLD * 0.10));
+        sstrs.get(0).readMeter = new RestorableMeter(lowerRate, lowerRate);
+        sstrs.get(1).readMeter = new RestorableMeter(higherRate, higherRate);
+        IndexSummarySizer.redistributeSummaries(sstrs, offHeapSize * (numSSTables - 1));
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(0).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+
+        // reset, and then this time, leave enough space for one of the cold sstables to not get downsampled
+        // as far as the other
+        resetSummaries(sstrs, offHeapSize);
+        sstrs.get(0).readMeter = new RestorableMeter(50.0, 50.0);
+        sstrs.get(1).readMeter = new RestorableMeter(50.0, 50.0);
+        IndexSummary summary = sstrs.get(0).getIndexSummary();
+        int extraEntries = IndexSummaryBuilder.entriesAtSamplingLevel(summary, (BASE_SAMPLING_LEVEL / 2) + 1) -
+                           IndexSummaryBuilder.entriesAtSamplingLevel(summary, BASE_SAMPLING_LEVEL / 2);
+        double avgSize = summary.getOffHeapSize() / (double) summary.size();
+        int extraSpace = (int) Math.ceil(extraEntries * avgSize);
+        IndexSummarySizer.redistributeSummaries(sstrs, offHeapSize * (numSSTables - 1) + extraSpace);
+
+        if (sstrs.get(0).getIndexSummary().getSamplingLevel() == BASE_SAMPLING_LEVEL / 2)
+            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstrs.get(1).getIndexSummary().getSamplingLevel());
+        else if (sstrs.get(1).getIndexSummary().getSamplingLevel() == BASE_SAMPLING_LEVEL / 2)
+            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstrs.get(0).getIndexSummary().getSamplingLevel());
+        else
+            fail("One of the first two sstables should be downsampled to half of the original summary");
+
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+
+        // Cause a mix of upsampling and downsampling. We'll leave enough space for two full index summaries. The two
+        // coldest sstables will get downsampled to 1/4 of their size, leaving us with 1.5 index summaries worth of
+        // space.  The hottest sstable should get a full index summary, and the one in the middle should get half
+        // a summary.
+        sstrs.get(0).readMeter = new RestorableMeter(200.0, 200.0);
+        sstrs.get(1).readMeter = new RestorableMeter(100.0, 100.0);
+        sstrs.get(2).readMeter = new RestorableMeter(0.0, 0.0);
+        sstrs.get(3).readMeter = new RestorableMeter(0.0, 0.0);
+        IndexSummarySizer.redistributeSummaries(sstrs, offHeapSize * 2);
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(0).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummary().getSamplingLevel());
+        assertEquals(MIN_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
+        assertEquals(MIN_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+
+        // Don't leave enough space for the minimal index summaries
+        IndexSummarySizer.redistributeSummaries(sstrs, offHeapSize - 100);
+        for (SSTableReader sstr : sstrs)
+            assertEquals(MIN_SAMPLING_LEVEL, sstr.getIndexSummary().getSamplingLevel());
     }
 }

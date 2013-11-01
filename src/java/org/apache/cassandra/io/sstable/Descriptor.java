@@ -57,7 +57,7 @@ public class Descriptor
         //             tracks max/min column values (according to comparator)
         // jb (2.0.1): switch from crc32 to adler32 for compression checksums
         //             checksum the compressed data
-        // jc (2.1.0): index summaries can be downsampled and the downsampling level is persisted
+        // jc (2.1.0): index summaries can be downsampled and the sampling level is persisted
 
         public static final Version CURRENT = new Version(current_version);
 
@@ -71,7 +71,7 @@ public class Descriptor
         public final boolean hasRowSizeAndColumnCount;
         public final boolean tracksMaxMinColumnNames;
         public final boolean hasPostCompressionAdlerChecksums;
-        public final boolean hasDownsamplingLevel;
+        public final boolean hasSamplingLevel;
 
         public Version(String version)
         {
@@ -84,7 +84,7 @@ public class Descriptor
             hasRowSizeAndColumnCount = version.compareTo("ja") < 0;
             tracksMaxMinColumnNames = version.compareTo("ja") >= 0;
             hasPostCompressionAdlerChecksums = version.compareTo("jb") >= 0;
-            hasDownsamplingLevel = version.compareTo("jc") >= 0;
+            hasSamplingLevel = version.compareTo("jc") >= 0;
         }
 
         /**

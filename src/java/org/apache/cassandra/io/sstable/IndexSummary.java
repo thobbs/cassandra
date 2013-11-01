@@ -42,13 +42,13 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class IndexSummary implements Closeable
 {
-    // The base downsampling level determines the granularity at which we can downsample.  A higher number would
+    // The base downsampling level determines the granularity at which we can down/upsample.  A higher number would
     // mean fewer items would be removed in each downsampling round.  This must be a power of two in order to have
-    // good downsampling patterns.
-    public static final int BASE_DOWNSAMPLE_LEVEL = 16;
+    // good sampling patterns. This cannot be changed without rebuilding all index summaries at full sampling.
+    public static final int BASE_SAMPLING_LEVEL = 16;
 
     // The lowest level we will downsample to.  (Arbitrary value, can be anywhere from 1 to the base value.)
-    public static final int LOWEST_DOWNSAMPLE_LEVEL = 4;
+    public static final int MIN_SAMPLING_LEVEL = 4;
 
     public static final IndexSummarySerializer serializer = new IndexSummarySerializer();
     private final int indexInterval;
@@ -57,20 +57,20 @@ public class IndexSummary implements Closeable
     private final Memory bytes;
 
     /*
-     * A value between LOWEST_DOWNSAMPLE_LEVEL and BASE_DOWNSAMPLE_LEVEL that represents how many of the original
+     * A value between MIN_SAMPLING_LEVEL and BASE_SAMPLING_LEVEL that represents how many of the original
      * index summary entries ((1 / indexInterval) * numKeys) have been retained.
-     * This summary contains (downsampleLevel / BASE_DOWNSAMPLE_LEVEL) * ((1 / indexInterval) * numKeys)) entries.
-     * In other words, a lower downsampleLevel means fewer entries have been retained.
+     * This summary contains (samplingLevel / BASE_SAMPLING_LEVEL) * ((1 / indexInterval) * numKeys)) entries.
+     * In other words, a lower samplingLevel means fewer entries have been retained.
      */
-    private final int downsampleLevel;
+    private final int samplingLevel;
 
-    public IndexSummary(IPartitioner partitioner, Memory memory, int summary_size, int indexInterval, int downsampleLevel)
+    public IndexSummary(IPartitioner partitioner, Memory memory, int summary_size, int indexInterval, int samplingLevel)
     {
         this.partitioner = partitioner;
         this.indexInterval = indexInterval;
         this.summary_size = summary_size;
         this.bytes = memory;
-        this.downsampleLevel = downsampleLevel;
+        this.samplingLevel = samplingLevel;
     }
 
     // binary search is notoriously more difficult to get right than it looks; this is lifted from
@@ -148,9 +148,14 @@ public class IndexSummary implements Closeable
         return summary_size;
     }
 
-    public int getDownsamplingLevel()
+    public int getSamplingLevel()
     {
-        return downsampleLevel;
+        return samplingLevel;
+    }
+
+    public int getOriginalNumEntries()
+    {
+        return (BASE_SAMPLING_LEVEL * summary_size) / samplingLevel;
     }
 
     public long getOffHeapSize()
@@ -160,22 +165,22 @@ public class IndexSummary implements Closeable
 
     public static class IndexSummarySerializer
     {
-        public void serialize(IndexSummary t, DataOutputStream out, boolean withDownsampleLevel) throws IOException
+        public void serialize(IndexSummary t, DataOutputStream out, boolean withSamplingLevel) throws IOException
         {
             out.writeInt(t.indexInterval);
             out.writeInt(t.summary_size);
             out.writeLong(t.bytes.size());
-            if (withDownsampleLevel)
-                out.writeInt(t.downsampleLevel);
+            if (withSamplingLevel)
+                out.writeInt(t.samplingLevel);
             FBUtilities.copy(new MemoryInputStream(t.bytes), out, t.bytes.size());
         }
 
-        public IndexSummary deserialize(DataInputStream in, IPartitioner partitioner, boolean haveDownsampleLevel) throws IOException
+        public IndexSummary deserialize(DataInputStream in, IPartitioner partitioner, boolean haveSamplingLevel) throws IOException
         {
             int indexInterval = in.readInt();
             int summarySize = in.readInt();
             long offheapSize = in.readLong();
-            int downsampleLevel = haveDownsampleLevel ? in.readInt() : BASE_DOWNSAMPLE_LEVEL;
+            int downsampleLevel = haveSamplingLevel ? in.readInt() : BASE_SAMPLING_LEVEL;
             Memory memory = Memory.allocate(offheapSize);
             FBUtilities.copy(in, new MemoryOutputStream(memory), offheapSize);
             return new IndexSummary(partitioner, memory, summarySize, indexInterval, downsampleLevel);

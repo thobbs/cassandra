@@ -36,14 +36,20 @@ public class IndexSummaryBuilder
     private final ArrayList<Long> positions;
     private final ArrayList<byte[]> keys;
     private final int indexInterval;
+    private final int samplingLevel;
+    private final int[] startPoints;
     private long keysWritten = 0;
+    private long indexIntervalMatches = 0;
     private long offheapSize = 0;
 
-    private static final Map<Integer, List<Integer>> downsamplePatternCache = new HashMap<>();
+    private static final Map<Integer, List<Integer>> samplePatternCache = new HashMap<>();
 
-    public IndexSummaryBuilder(long expectedKeys, int indexInterval)
+    public IndexSummaryBuilder(long expectedKeys, int indexInterval, int samplingLevel)
     {
         this.indexInterval = indexInterval;
+        this.samplingLevel = samplingLevel;
+        this.startPoints = getStartPoints(IndexSummary.BASE_SAMPLING_LEVEL, samplingLevel);
+
         long expectedEntries = expectedKeys / indexInterval;
         if (expectedEntries > Integer.MAX_VALUE)
         {
@@ -54,6 +60,10 @@ public class IndexSummaryBuilder
             logger.warn("Index interval of {} is too low for {} expected keys; using interval of {} instead",
                         indexInterval, expectedKeys, effectiveInterval);
         }
+
+        // adjust our estimates based on the sampling level
+        expectedEntries *= (long) Math.ceil(samplingLevel / ((double) IndexSummary.BASE_SAMPLING_LEVEL));
+
         positions = new ArrayList<>((int)expectedEntries);
         keys = new ArrayList<>((int)expectedEntries);
     }
@@ -62,11 +72,27 @@ public class IndexSummaryBuilder
     {
         if (keysWritten % indexInterval == 0)
         {
-            byte[] key = ByteBufferUtil.getArray(decoratedKey.key);
-            keys.add(key);
-            offheapSize += key.length;
-            positions.add(indexPosition);
-            offheapSize += TypeSizes.NATIVE.sizeof(indexPosition);
+            indexIntervalMatches++;
+
+            // see if we should skip this key based on our sampling level
+            boolean shouldSkip = false;
+            for (int start : startPoints)
+            {
+                if ((indexIntervalMatches - start) % IndexSummary.BASE_SAMPLING_LEVEL == 0)
+                {
+                    shouldSkip = true;
+                    break;
+                }
+            }
+
+            if (!shouldSkip)
+            {
+                byte[] key = ByteBufferUtil.getArray(decoratedKey.key);
+                keys.add(key);
+                offheapSize += key.length;
+                positions.add(indexPosition);
+                offheapSize += TypeSizes.NATIVE.sizeof(indexPosition);
+            }
         }
         keysWritten++;
 
@@ -99,32 +125,32 @@ public class IndexSummaryBuilder
             memory.setLong(keyPosition, actualIndexPosition);
             keyPosition += TypeSizes.NATIVE.sizeof(actualIndexPosition);
         }
-        return new IndexSummary(partitioner, memory, keys.size(), indexInterval, IndexSummary.BASE_DOWNSAMPLE_LEVEL);
+        return new IndexSummary(partitioner, memory, keys.size(), indexInterval, samplingLevel);
     }
 
     @VisibleForTesting
-    static List<Integer> getDownsamplePattern(int baseDownsampleLevel)
+    static List<Integer> getSamplingPattern(int baseSamplingLevel)
     {
-        List<Integer> pattern = downsamplePatternCache.get(baseDownsampleLevel);
+        List<Integer> pattern = samplePatternCache.get(baseSamplingLevel);
         if (pattern != null)
             return pattern;
 
-        if (baseDownsampleLevel <= 1)
+        if (baseSamplingLevel <= 1)
             return Arrays.asList(0);
 
-        ArrayList<Integer> startIndices = new ArrayList<>(baseDownsampleLevel);
+        ArrayList<Integer> startIndices = new ArrayList<>(baseSamplingLevel);
         startIndices.add(0);
 
-        int spread = baseDownsampleLevel;
+        int spread = baseSamplingLevel;
         while (spread >= 2)
         {
-            ArrayList<Integer> roundIndices = new ArrayList<>(baseDownsampleLevel / spread);
-            for (int i = spread / 2; i < baseDownsampleLevel; i += spread)
+            ArrayList<Integer> roundIndices = new ArrayList<>(baseSamplingLevel / spread);
+            for (int i = spread / 2; i < baseSamplingLevel; i += spread)
                 roundIndices.add(i);
 
             // especially for latter rounds, it's important that we spread out the start points, so we'll
             // make a recursive call to get an ordering for this list of start points
-            List<Integer> roundIndicesOrdering = getDownsamplePattern(roundIndices.size());
+            List<Integer> roundIndicesOrdering = getSamplingPattern(roundIndices.size());
             for (int i = 0; i < roundIndices.size(); ++i)
                 startIndices.add(roundIndices.get(roundIndicesOrdering.get(i)));
 
@@ -134,32 +160,30 @@ public class IndexSummaryBuilder
         return startIndices;
     }
 
-    public static IndexSummary downsample(IndexSummary existing, int targetNumEntries, IPartitioner partitioner)
+    public static int entriesAtSamplingLevel(IndexSummary summary, int samplingLevel)
     {
-        // To downsample the old index summary, we'll go through (potentially) several rounds of downsampling.
-        // Conceptually, each round starts at position X and then removes every Nth item.  The value of X follows
-        // a particular pattern to evenly space out the items that we remove.  The value of N decreases by one each
-        // round.
+        return (samplingLevel * summary.getOriginalNumEntries()) / IndexSummary.BASE_SAMPLING_LEVEL;
+    }
 
-        List<Integer> allStartPoints = getDownsamplePattern(IndexSummary.BASE_DOWNSAMPLE_LEVEL);
-        int currentDownsamplingLevel = existing.getDownsamplingLevel();
+    public static int calculateSamplingLevel(IndexSummary existing, long targetNumEntries)
+    {
+        // Algebraic explanation for calculating the new sampling level (solve for newSamplingLevel):
+        // originalNumEntries = (baseSamplingLevel / currentSamplingLevel) * currentNumEntries
+        // targetNumEntries = (newSamplingLevel / baseSamplingLevel) * originalNumEntries
+        // targetNumEntries = (newSamplingLevel / baseSamplingLevel) * (baseSamplingLevel / currentSamplingLevel) * currentNumEntries
+        // targetNumEntries = (newSamplingLevel / currentSamplingLevel) * currentNumEntries
+        // (targetNumEntries * currentSamplingLevel) / currentNumEntries = newSamplingLevel
+        int newSamplingLevel = (int) (targetNumEntries * existing.getSamplingLevel()) / existing.size();
+        return Math.min(IndexSummary.BASE_SAMPLING_LEVEL, Math.max(IndexSummary.MIN_SAMPLING_LEVEL, newSamplingLevel));
+    }
 
-        // Algebraic explanation for calculating the new downsampling level (solve for newDownsamplingLevel):
-        // originalNumEntries = (baseDownsamplingLevel / currentDownsamplingLevel) * currentNumEntries
-        // targetNumEntries = (newDownsamplingLevel / baseDownsamplingLevel) * originalNumEntries
-        // targetNumEntries = (newDownsamplingLevel / baseDownsamplingLevel) * (baseDownsamplingLevel / currentDownsamplingLevel) * currentNumEntries
-        // targetNumEntries = (newDownsamplingLevel / currentDownsamplingLevel) * currentNumEntries
-        // (targetNumEntries * currentDownsamplingLevel) / currentNumEntries = newDownsamplingLevel
-        int newDownsamplingLevel = (targetNumEntries * currentDownsamplingLevel) / existing.size();
-        newDownsamplingLevel = Math.max(IndexSummary.LOWEST_DOWNSAMPLE_LEVEL, newDownsamplingLevel);
+    private static int[] getStartPoints(int currentSamplingLevel, int newSamplingLevel)
+    {
+        List<Integer> allStartPoints = getSamplingPattern(IndexSummary.BASE_SAMPLING_LEVEL);
 
-        // TODO check that the difference is significant here?
-        if (currentDownsamplingLevel <= newDownsamplingLevel)
-            return existing;
-
-        // calculate starting indexes for downsampling rounds
-        int initialRound = IndexSummary.BASE_DOWNSAMPLE_LEVEL - currentDownsamplingLevel;
-        int numRounds = currentDownsamplingLevel - newDownsamplingLevel;
+        // calculate starting indexes for sampling rounds
+        int initialRound = IndexSummary.BASE_SAMPLING_LEVEL - currentSamplingLevel;
+        int numRounds = Math.abs(currentSamplingLevel - newSamplingLevel);
         int[] startPoints = new int[numRounds];
         for (int i = 0; i < numRounds; ++i)
         {
@@ -175,16 +199,32 @@ public class IndexSummaryBuilder
             }
             startPoints[i] = start - adjustment;
         }
+        return startPoints;
+    }
+
+    public static IndexSummary downsample(IndexSummary existing, int newSamplingLevel, IPartitioner partitioner)
+    {
+        // To downsample the old index summary, we'll go through (potentially) several rounds of downsampling.
+        // Conceptually, each round starts at position X and then removes every Nth item.  The value of X follows
+        // a particular pattern to evenly space out the items that we remove.  The value of N decreases by one each
+        // round.
+
+        int currentSamplingLevel = existing.getSamplingLevel();
+        if (currentSamplingLevel <= newSamplingLevel)
+            return existing;
+
+        // calculate starting indexes for downsampling rounds
+        int[] startPoints = getStartPoints(currentSamplingLevel, newSamplingLevel);
 
         // calculate new off-heap size
         int removedKeyCount = 0;
         long newOffHeapSize = existing.getOffHeapSize();
         for (int start : startPoints)
         {
-            for (int j = start; j < existing.size(); j += currentDownsamplingLevel)
+            for (int j = start; j < existing.size(); j += currentSamplingLevel)
             {
                 removedKeyCount++;
-                newOffHeapSize -= existing.getKey(j).length + 8; // key length + position in index file
+                newOffHeapSize -= existing.getEntry(j).length;
             }
         }
 
@@ -204,7 +244,7 @@ public class IndexSummaryBuilder
             boolean skip = false;
             for (int start : startPoints)
             {
-                if ((oldSummaryIndex - start) % currentDownsamplingLevel == 0)
+                if ((oldSummaryIndex - start) % currentSamplingLevel == 0)
                 {
                     skip = true;
                     break;
@@ -223,6 +263,6 @@ public class IndexSummaryBuilder
                 keyPosition += entry.length;
             }
         }
-        return new IndexSummary(partitioner, memory, newKeyCount, existing.getIndexInterval(), newDownsamplingLevel);
+        return new IndexSummary(partitioner, memory, newKeyCount, existing.getIndexInterval(), newSamplingLevel);
     }
 }

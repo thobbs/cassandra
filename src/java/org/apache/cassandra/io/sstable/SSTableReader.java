@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
@@ -103,7 +104,8 @@ public class SSTableReader extends SSTable implements Closeable
     private final AtomicLong keyCacheHit = new AtomicLong(0);
     private final AtomicLong keyCacheRequest = new AtomicLong(0);
 
-    public final RestorableMeter readMeter;
+    @VisibleForTesting
+    public RestorableMeter readMeter;
 
     public static long getApproximateKeyCount(Iterable<SSTableReader> sstables, CFMetaData metadata)
     {
@@ -167,7 +169,7 @@ public class SSTableReader extends SSTable implements Closeable
                                        ? new CompressedSegmentedFile.Builder()
                                        : new BufferedSegmentedFile.Builder();
         if (!loadSummary(sstable, ibuilder, dbuilder, sstable.metadata))
-            sstable.buildSummary(false, ibuilder, dbuilder, false);
+            sstable.buildSummary(false, ibuilder, dbuilder, false, IndexSummary.BASE_SAMPLING_LEVEL);
         sstable.ifile = ibuilder.complete(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX));
         sstable.dfile = dbuilder.complete(sstable.descriptor.filenameFor(Component.DATA));
 
@@ -441,7 +443,7 @@ public class SSTableReader extends SSTable implements Closeable
 
         boolean summaryLoaded = loadSummary(this, ibuilder, dbuilder, metadata);
         if (recreateBloomFilter || !summaryLoaded)
-            buildSummary(recreateBloomFilter, ibuilder, dbuilder, summaryLoaded);
+            buildSummary(recreateBloomFilter, ibuilder, dbuilder, summaryLoaded, IndexSummary.BASE_SAMPLING_LEVEL);
 
         ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
         dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
@@ -449,8 +451,17 @@ public class SSTableReader extends SSTable implements Closeable
             saveSummary(this, ibuilder, dbuilder);
     }
 
-     private void buildSummary(boolean recreateBloomFilter, SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, boolean summaryLoaded) throws IOException
-     {
+    public void rebuildSummary(int samplingLevel) throws IOException
+    {
+        SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
+        SegmentedFile.Builder dbuilder = compression
+                                         ? SegmentedFile.getCompressedBuilder()
+                                         : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
+        buildSummary(false, ibuilder, dbuilder, false, samplingLevel);
+    }
+
+    private void buildSummary(boolean recreateBloomFilter, SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, boolean summaryLoaded, int samplingLevel) throws IOException
+    {
         // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
         RandomAccessReader primaryIndex = RandomAccessReader.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX)));
 
@@ -467,7 +478,7 @@ public class SSTableReader extends SSTable implements Closeable
 
             IndexSummaryBuilder summaryBuilder = null;
             if (!summaryLoaded)
-                summaryBuilder = new IndexSummaryBuilder(estimatedKeys, metadata.getIndexInterval());
+                summaryBuilder = new IndexSummaryBuilder(estimatedKeys, metadata.getIndexInterval(), samplingLevel);
 
             long indexPosition;
             while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
@@ -513,7 +524,7 @@ public class SSTableReader extends SSTable implements Closeable
         try
         {
             iStream = new DataInputStream(new FileInputStream(summariesFile));
-            reader.indexSummary = IndexSummary.serializer.deserialize(iStream, reader.partitioner, reader.descriptor.version.hasDownsamplingLevel);
+            reader.indexSummary = IndexSummary.serializer.deserialize(iStream, reader.partitioner, reader.descriptor.version.hasSamplingLevel);
             if (reader.indexSummary.getIndexInterval() != metadata.getIndexInterval())
             {
                 iStream.close();
@@ -552,7 +563,7 @@ public class SSTableReader extends SSTable implements Closeable
         try
         {
             oStream = new DataOutputStream(new FileOutputStream(summariesFile));
-            IndexSummary.serializer.serialize(reader.indexSummary, oStream, reader.descriptor.version.hasDownsamplingLevel);
+            IndexSummary.serializer.serialize(reader.indexSummary, oStream, reader.descriptor.version.hasSamplingLevel);
             ByteBufferUtil.writeWithLength(reader.first.key, oStream);
             ByteBufferUtil.writeWithLength(reader.last.key, oStream);
             ibuilder.serializeBounds(oStream);
@@ -570,6 +581,16 @@ public class SSTableReader extends SSTable implements Closeable
         {
             FileUtils.closeQuietly(oStream);
         }
+    }
+
+    public IndexSummary getIndexSummary()
+    {
+        return indexSummary;
+    }
+
+    public void setIndexSummary(IndexSummary newSummary)
+    {
+        indexSummary = newSummary;
     }
 
     public void releaseSummary()
