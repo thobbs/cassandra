@@ -38,7 +38,7 @@ public class IndexSummarySizer
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexSummarySizer.class);
 
-    private int intervalInMinutes;
+    private int intervalInMinutes = 0;
     private long memoryPoolSize;
 
     static final double UPSAMPLE_THRESHOLD = 1.5;
@@ -49,16 +49,46 @@ public class IndexSummarySizer
 
     public IndexSummarySizer(int intervalInMinutes, int memoryPoolSizeInMB)
     {
-        this.intervalInMinutes = intervalInMinutes;
-        this.memoryPoolSize = memoryPoolSizeInMB * 1024L * 1024L;
-        this.executor = new DebuggableScheduledThreadPoolExecutor(1, "IndexSummarySizer", 0);
-        this.future = this.executor.scheduleWithFixedDelay(new WrappedRunnable()
+        executor = new DebuggableScheduledThreadPoolExecutor(1, "IndexSummarySizer", 0);
+        setMemoryPoolSizeInMB(memoryPoolSizeInMB);
+        setIntervalInMinutes(intervalInMinutes);
+    }
+
+    public void setIntervalInMinutes(int newIntervalInMinutes)
+    {
+        int difference = newIntervalInMinutes - intervalInMinutes;
+        intervalInMinutes = newIntervalInMinutes;
+
+        long initialDelay;
+        if (future != null)
         {
-            public void runMayThrow()
+            long remaining = future.getDelay(TimeUnit.MINUTES);
+            initialDelay = Math.max(0, remaining + difference);
+            future.cancel(false);
+        }
+        else
+        {
+            initialDelay = intervalInMinutes;
+        }
+
+        if (intervalInMinutes < 0)
+        {
+            future = null;
+            return;
+        }
+
+        future = executor.scheduleWithFixedDelay(new WrappedRunnable()
+        {
+            protected void runMayThrow() throws Exception
             {
                 redistributeSummaries();
             }
-        }, intervalInMinutes, intervalInMinutes, TimeUnit.MINUTES);
+        }, initialDelay, newIntervalInMinutes, TimeUnit.MINUTES);
+    }
+
+    public void setMemoryPoolSizeInMB(int newMemorySizeInMB)
+    {
+        this.memoryPoolSize = newMemorySizeInMB * 1024L * 1024L;
     }
 
     public void redistributeSummaries()
