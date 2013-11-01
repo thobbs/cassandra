@@ -223,6 +223,41 @@ public class IndexSummaryTest extends SchemaLoader
         }
     }
 
+    @Test
+    public void testRebuildAtSamplingLevel() throws IOException
+    {
+        String ksname = "Keyspace1";
+        String cfname = "StandardLowIndexInterval";
+        Keyspace keyspace = Keyspace.open(ksname);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
+        cfs.truncateBlocking();
+        cfs.disableAutoCompaction();
+
+        ByteBuffer value = ByteBuffer.wrap(new byte[100]);
+
+        int numRows = 256;
+        for (int row = 0; row < numRows; row++)
+        {
+            DecoratedKey key = Util.dk(String.valueOf(row));
+            RowMutation rm = new RowMutation(ksname, key.key);
+            rm.add(cfname, ByteBufferUtil.bytes("column"), value, 0);
+            rm.apply();
+        }
+        cfs.forceBlockingFlush();
+
+        List<SSTableReader> sstrs = new ArrayList<>(cfs.getSSTables());
+        assertEquals(1, sstrs.size());
+        SSTableReader sstable = sstrs.get(0);
+
+        for (int samplingLevel = MIN_SAMPLING_LEVEL; samplingLevel < BASE_SAMPLING_LEVEL; samplingLevel++)
+        {
+            sstable.rebuildSummary(samplingLevel);
+            IndexSummary summary = sstable.getIndexSummary();
+            assertEquals(samplingLevel, summary.getSamplingLevel());
+            assertEquals((numRows * samplingLevel) / (summary.getIndexInterval() * BASE_SAMPLING_LEVEL), summary.size());
+        }
+    }
+
     private static long totalOffHeapSize(List<SSTableReader> sstables)
     {
         long total = 0;
