@@ -86,6 +86,7 @@ public class DatabaseDescriptor
 
     private static long keyCacheSizeInMB;
     private static IAllocator memoryAllocator;
+    private static long indexSummarySizeInMB;
 
     private static String localDC;
     private static Comparator<InetAddress> localComparator;
@@ -445,6 +446,15 @@ public class DatabaseDescriptor
             throw new ConfigurationException("key_cache_size_in_mb option was set incorrectly to '"
                     + conf.key_cache_size_in_mb + "', supported values are <integer> >= 0.");
         }
+
+        indexSummarySizeInMB = (conf.index_summary_size_in_mb == null)
+            ? Math.min(Math.max(1, (int) (Runtime.getRuntime().totalMemory() * 0.05 / 1024 / 1024)), 100)
+            : conf.index_summary_size_in_mb;
+
+        if (indexSummarySizeInMB < 0)
+            throw new ConfigurationException("index_summary_size_in_mb option was set incorrectly to '"
+                    + conf.index_summary_size_in_mb + "', it should be a non-negative integer.");
+
 
         memoryAllocator = FBUtilities.newOffHeapAllocator(conf.memory_allocator);
 
@@ -1204,6 +1214,11 @@ public class DatabaseDescriptor
     public static long getKeyCacheSizeInMB()
     {
         return keyCacheSizeInMB;
+    }
+
+    public static long getIndexSummarySizeInMB()
+    {
+        return indexSummarySizeInMB;
     }
 
     public static int getKeyCacheSavePeriod()
