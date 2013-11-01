@@ -883,11 +883,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return removeDeletedCF(cf, gcBefore);
     }
 
-    private static void removeDeletedColumnsOnly(ColumnFamily cf, int gcBefore, SecondaryIndexManager.Updater indexer)
+    private static long removeDeletedColumnsOnly(ColumnFamily cf, int gcBefore, SecondaryIndexManager.Updater indexer)
     {
         Iterator<Column> iter = cf.iterator();
         DeletionInfo.InOrderTester tester = cf.inOrderDeletionTester();
         boolean hasDroppedColumns = !cf.metadata.getDroppedColumns().isEmpty();
+        long removedBytes = 0;
         while (iter.hasNext())
         {
             Column c = iter.next();
@@ -899,13 +900,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             {
                 iter.remove();
                 indexer.remove(c);
+                removedBytes += c.dataSize();
             }
         }
+        return removedBytes;
     }
 
-    public static void removeDeletedColumnsOnly(ColumnFamily cf, int gcBefore)
+    public static long removeDeletedColumnsOnly(ColumnFamily cf, int gcBefore)
     {
-        removeDeletedColumnsOnly(cf, gcBefore, SecondaryIndexManager.nullUpdater);
+        return removeDeletedColumnsOnly(cf, gcBefore, SecondaryIndexManager.nullUpdater);
     }
 
     // returns true if
@@ -913,7 +916,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     // 2. if it has been re-added since then, this particular column was inserted before the last drop
     private static boolean isDroppedColumn(Column c, CFMetaData meta)
     {
-        Long droppedAt = meta.getDroppedColumns().get(((CompositeType) meta.comparator).extractLastComponent(c.name()));
+        ByteBuffer cql3ColumnName = ((CompositeType) meta.comparator).extractLastComponent(c.name());
+        Long droppedAt = meta.getDroppedColumns().get(meta.getColumnDefinition(cql3ColumnName).name);
         return droppedAt != null && c.timestamp() <= droppedAt;
     }
 
@@ -1091,6 +1095,17 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public long getTotalMemtableLiveSize()
     {
         return getMemtableDataSize() + indexManager.getTotalLiveSize();
+    }
+
+    /**
+     * @return the live size of all the memtables (the current active one and pending flush).
+     */
+    public long getAllMemtablesLiveSize()
+    {
+        long size = 0;
+        for (Memtable mt : getDataTracker().getAllMemtables())
+            size += mt.getLiveSize();
+        return size;
     }
 
     public int getMemtableSwitchCount()

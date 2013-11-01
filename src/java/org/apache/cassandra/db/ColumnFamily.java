@@ -314,9 +314,12 @@ public abstract class ColumnFamily implements Iterable<Column>, IRowCacheEntry
         return null;
     }
 
-    public long memorySize()
+    public long dataSize()
     {
-        return ObjectSizes.measureDeep(this);
+        long size = 0;
+        for (Column column : this)
+            size += column.dataSize();
+        return size;
     }
 
     public long maxTimestamp()
