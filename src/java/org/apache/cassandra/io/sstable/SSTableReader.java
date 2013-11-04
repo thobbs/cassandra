@@ -588,9 +588,18 @@ public class SSTableReader extends SSTable implements Closeable
         return indexSummary;
     }
 
+    /**
+     * Sets a new index summary and persists it to disk.
+     */
     public void setIndexSummary(IndexSummary newSummary)
     {
         indexSummary = newSummary;
+
+        SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
+        SegmentedFile.Builder dbuilder = compression
+                                         ? SegmentedFile.getCompressedBuilder()
+                                         : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
+        saveSummary(this, ibuilder, dbuilder);
     }
 
     public void releaseSummary()

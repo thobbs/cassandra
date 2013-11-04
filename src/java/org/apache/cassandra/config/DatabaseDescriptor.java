@@ -39,6 +39,7 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
+import org.apache.cassandra.io.sstable.IndexSummaryManager;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.IAllocator;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
@@ -86,7 +87,7 @@ public class DatabaseDescriptor
 
     private static long keyCacheSizeInMB;
     private static IAllocator memoryAllocator;
-    private static long indexSummarySizeInMB;
+    private static long indexSummaryCapacityInMB;
 
     private static String localDC;
     private static Comparator<InetAddress> localComparator;
@@ -447,14 +448,16 @@ public class DatabaseDescriptor
                     + conf.key_cache_size_in_mb + "', supported values are <integer> >= 0.");
         }
 
-        indexSummarySizeInMB = (conf.index_summary_size_in_mb == null)
-            ? Math.min(Math.max(1, (int) (Runtime.getRuntime().totalMemory() * 0.05 / 1024 / 1024)), 100)
-            : conf.index_summary_size_in_mb;
+        // if set to empty/"auto" then use min(5% of Heap, 50 MB)
+        indexSummaryCapacityInMB = (conf.index_summary_capacity_in_mb == null)
+            ? Math.min(Math.max(1, (int) (Runtime.getRuntime().totalMemory() * 0.05 / 1024 / 1024)), 50)
+            : conf.index_summary_capacity_in_mb;
 
-        if (indexSummarySizeInMB < 0)
-            throw new ConfigurationException("index_summary_size_in_mb option was set incorrectly to '"
-                    + conf.index_summary_size_in_mb + "', it should be a non-negative integer.");
+        if (indexSummaryCapacityInMB < 0)
+            throw new ConfigurationException("index_summary_capacity_in_mb option was set incorrectly to '"
+                    + conf.index_summary_capacity_in_mb + "', it should be a non-negative integer.");
 
+        IndexSummaryManager.instance.getMemoryPoolCapacityInMB();
 
         memoryAllocator = FBUtilities.newOffHeapAllocator(conf.memory_allocator);
 
@@ -1216,9 +1219,14 @@ public class DatabaseDescriptor
         return keyCacheSizeInMB;
     }
 
-    public static long getIndexSummarySizeInMB()
+    public static long getIndexSummaryCapacityInMB()
     {
-        return indexSummarySizeInMB;
+        return indexSummaryCapacityInMB;
+    }
+
+    public static void setIndexSummaryCapacityInMB(long indexSummaryCapacityInMB)
+    {
+        conf.index_summary_capacity_in_mb = indexSummaryCapacityInMB;
     }
 
     public static int getKeyCacheSavePeriod()
@@ -1311,5 +1319,10 @@ public class DatabaseDescriptor
         {
             throw new RuntimeException(e);
         }
+    }
+
+    public static int getIndexSummaryResizeIntervalInMinutes()
+    {
+        return conf.index_summary_resize_interval_in_minutes;
     }
 }
