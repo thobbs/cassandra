@@ -248,9 +248,16 @@ public class IndexSummaryTest extends SchemaLoader
         for (int samplingLevel = MIN_SAMPLING_LEVEL; samplingLevel < BASE_SAMPLING_LEVEL; samplingLevel++)
         {
             sstable.rebuildSummary(samplingLevel);
-            IndexSummary summary = sstable.getIndexSummary();
-            assertEquals(samplingLevel, summary.getSamplingLevel());
-            assertEquals((numRows * samplingLevel) / (summary.getIndexInterval() * BASE_SAMPLING_LEVEL), summary.size());
+            IndexSummary summary = sstable.getReferencedIndexSummary();
+            try
+            {
+                assertEquals(samplingLevel, summary.getSamplingLevel());
+                assertEquals((numRows * samplingLevel) / (summary.getIndexInterval() * BASE_SAMPLING_LEVEL), summary.size());
+            }
+            finally
+            {
+                summary.unreference();
+            }
         }
     }
 
@@ -258,18 +265,18 @@ public class IndexSummaryTest extends SchemaLoader
     {
         long total = 0;
         for (SSTableReader sstr : sstables)
-            total += sstr.getIndexSummary().getOffHeapSize();
+            total += sstr.getIndexSummaryOffHeapSize();
 
         return total;
     }
 
-    private static void resetSummaries(List<SSTableReader> sstables, long originalOffHeapSize)
+    private static void resetSummaries(List<SSTableReader> sstables, long originalOffHeapSize) throws IOException
     {
         for (SSTableReader sstr : sstables)
             sstr.readMeter = new RestorableMeter(100.0, 100.0);
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstables, originalOffHeapSize * sstables.size());
         for (SSTableReader sstr : sstables)
-            assertEquals(IndexSummary.BASE_SAMPLING_LEVEL, sstr.getIndexSummary().getSamplingLevel());
+            assertEquals(IndexSummary.BASE_SAMPLING_LEVEL, sstr.getIndexSummarySamplingLevel());
     }
 
     private void validateData(ColumnFamilyStore cfs, int numRows)
@@ -286,7 +293,7 @@ public class IndexSummaryTest extends SchemaLoader
     }
 
     @Test
-    public void testRedistributeSummaries()
+    public void testRedistributeSummaries() throws IOException
     {
         String ksname = "Keyspace1";
         String cfname = "StandardLowIndexInterval";
@@ -318,37 +325,37 @@ public class IndexSummaryTest extends SchemaLoader
         for (SSTableReader sstr : sstrs)
             sstr.readMeter = new RestorableMeter(100.0, 100.0);
 
-        long offHeapSize = sstrs.get(0).getIndexSummary().getOffHeapSize();
+        long offHeapSize = sstrs.get(0).getIndexSummaryOffHeapSize();
 
         // there should be enough space to not downsample anything
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, offHeapSize * numSSTables);
         for (SSTableReader sstr : sstrs)
-            assertEquals(sstr.getIndexSummary().getSamplingLevel(), BASE_SAMPLING_LEVEL);
+            assertEquals(sstr.getIndexSummarySamplingLevel(), BASE_SAMPLING_LEVEL);
         assertEquals(offHeapSize * numSSTables, totalOffHeapSize(sstrs));
         validateData(cfs, numRows);
 
         // everything should get cut in half
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, (offHeapSize * numSSTables) / 2);
         for (SSTableReader sstr : sstrs)
-            assertEquals(BASE_SAMPLING_LEVEL / 2, sstr.getIndexSummary().getSamplingLevel());
+            assertEquals(BASE_SAMPLING_LEVEL / 2, sstr.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // everything should get cut to a quarter
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, (offHeapSize * numSSTables) / 4);
         for (SSTableReader sstr : sstrs)
-            assertEquals(BASE_SAMPLING_LEVEL / 4, sstr.getIndexSummary().getSamplingLevel());
+            assertEquals(BASE_SAMPLING_LEVEL / 4, sstr.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // upsample back up to half
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, (offHeapSize * numSSTables) / 2);
         for (SSTableReader sstr : sstrs)
-            assertEquals(BASE_SAMPLING_LEVEL / 2, sstr.getIndexSummary().getSamplingLevel());
+            assertEquals(BASE_SAMPLING_LEVEL / 2, sstr.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // upsample back up to the original index summary
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, offHeapSize * numSSTables);
         for (SSTableReader sstr : sstrs)
-            assertEquals(BASE_SAMPLING_LEVEL, sstr.getIndexSummary().getSamplingLevel());
+            assertEquals(BASE_SAMPLING_LEVEL, sstr.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // make two of the four sstables cold, only leave enough space for three full index summaries,
@@ -356,10 +363,10 @@ public class IndexSummaryTest extends SchemaLoader
         sstrs.get(0).readMeter = new RestorableMeter(50.0, 50.0);
         sstrs.get(1).readMeter = new RestorableMeter(50.0, 50.0);
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, offHeapSize * (numSSTables - 1));
-        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(0).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(0).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // small increases or decreases in the read rate don't result in downsampling or upsampling
@@ -368,10 +375,10 @@ public class IndexSummaryTest extends SchemaLoader
         sstrs.get(0).readMeter = new RestorableMeter(lowerRate, lowerRate);
         sstrs.get(1).readMeter = new RestorableMeter(higherRate, higherRate);
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, offHeapSize * (numSSTables - 1));
-        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(0).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(0).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // reset, and then this time, leave enough space for one of the cold sstables to not get downsampled
@@ -379,22 +386,30 @@ public class IndexSummaryTest extends SchemaLoader
         resetSummaries(sstrs, offHeapSize);
         sstrs.get(0).readMeter = new RestorableMeter(50.0, 50.0);
         sstrs.get(1).readMeter = new RestorableMeter(50.0, 50.0);
-        IndexSummary summary = sstrs.get(0).getIndexSummary();
-        int extraEntries = IndexSummaryBuilder.entriesAtSamplingLevel(summary, (BASE_SAMPLING_LEVEL / 2) + 1) -
+        IndexSummary summary = sstrs.get(0).getReferencedIndexSummary();
+        int extraEntries = 0;
+        try
+        {
+            extraEntries = IndexSummaryBuilder.entriesAtSamplingLevel(summary, (BASE_SAMPLING_LEVEL / 2) + 1) -
                            IndexSummaryBuilder.entriesAtSamplingLevel(summary, BASE_SAMPLING_LEVEL / 2);
+        }
+        finally
+        {
+            summary.unreference();
+        }
         double avgSize = summary.getOffHeapSize() / (double) summary.size();
         int extraSpace = (int) Math.ceil(extraEntries * avgSize);
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, offHeapSize * (numSSTables - 1) + extraSpace);
 
-        if (sstrs.get(0).getIndexSummary().getSamplingLevel() == BASE_SAMPLING_LEVEL / 2)
-            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstrs.get(1).getIndexSummary().getSamplingLevel());
-        else if (sstrs.get(1).getIndexSummary().getSamplingLevel() == BASE_SAMPLING_LEVEL / 2)
-            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstrs.get(0).getIndexSummary().getSamplingLevel());
+        if (sstrs.get(0).getIndexSummarySamplingLevel() == BASE_SAMPLING_LEVEL / 2)
+            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstrs.get(1).getIndexSummarySamplingLevel());
+        else if (sstrs.get(1).getIndexSummarySamplingLevel() == BASE_SAMPLING_LEVEL / 2)
+            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstrs.get(0).getIndexSummarySamplingLevel());
         else
             fail("One of the first two sstables should be downsampled to half of the original summary");
 
-        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(2).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // Cause a mix of upsampling and downsampling. We'll leave enough space for two full index summaries. The two
@@ -406,16 +421,16 @@ public class IndexSummaryTest extends SchemaLoader
         sstrs.get(2).readMeter = new RestorableMeter(0.0, 0.0);
         sstrs.get(3).readMeter = new RestorableMeter(0.0, 0.0);
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, offHeapSize * 2);
-        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(0).getIndexSummary().getSamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummary().getSamplingLevel());
-        assertEquals(MIN_SAMPLING_LEVEL, sstrs.get(2).getIndexSummary().getSamplingLevel());
-        assertEquals(MIN_SAMPLING_LEVEL, sstrs.get(3).getIndexSummary().getSamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL, sstrs.get(0).getIndexSummarySamplingLevel());
+        assertEquals(BASE_SAMPLING_LEVEL / 2, sstrs.get(1).getIndexSummarySamplingLevel());
+        assertEquals(MIN_SAMPLING_LEVEL, sstrs.get(2).getIndexSummarySamplingLevel());
+        assertEquals(MIN_SAMPLING_LEVEL, sstrs.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // Don't leave enough space for even the minimal index summaries
         org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries(sstrs, offHeapSize - 100);
         for (SSTableReader sstr : sstrs)
-            assertEquals(MIN_SAMPLING_LEVEL, sstr.getIndexSummary().getSamplingLevel());
+            assertEquals(MIN_SAMPLING_LEVEL, sstr.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
     }
 }

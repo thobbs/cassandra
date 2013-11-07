@@ -85,7 +85,7 @@ public class SSTableReader extends SSTable implements Closeable
     private SegmentedFile ifile;
     private SegmentedFile dfile;
 
-    private IndexSummary indexSummary;
+    private volatile IndexSummary indexSummary;
     private IFilter bf;
 
     private InstrumentingCache<KeyCacheKey, RowIndexEntry> keyCache;
@@ -583,16 +583,22 @@ public class SSTableReader extends SSTable implements Closeable
         }
     }
 
-    public IndexSummary getIndexSummary()
+    public int getIndexSummarySamplingLevel()
     {
-        return indexSummary;
+        return indexSummary.getSamplingLevel();
+    }
+
+    public long getIndexSummaryOffHeapSize()
+    {
+        return indexSummary.getOffHeapSize();
     }
 
     /**
      * Sets a new index summary and persists it to disk.
      */
-    public void setIndexSummary(IndexSummary newSummary)
+    public void setIndexSummary(IndexSummary newSummary) throws IOException
     {
+        IndexSummary oldSummary = indexSummary;
         indexSummary = newSummary;
 
         SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
@@ -600,10 +606,15 @@ public class SSTableReader extends SSTable implements Closeable
                                          ? SegmentedFile.getCompressedBuilder()
                                          : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
         saveSummary(this, ibuilder, dbuilder);
+
+        // this should result in the reference count dropping to zero, resulting in the index summary
+        // being closed and its off-heap memory being freed once all current readers complete
+        oldSummary.unreference();
     }
 
-    public void releaseSummary()
+    public void releaseSummary() throws IOException
     {
+        indexSummary.unreference();
         indexSummary = null;
     }
 
@@ -613,22 +624,44 @@ public class SSTableReader extends SSTable implements Closeable
             throw new IllegalStateException(String.format("SSTable first key %s > last key %s", this.first, this.last));
     }
 
+    /**
+     * Returns the current IndexSummary for this sstable with its reference count already incremented.  The
+     * caller *must* ensure that the reference count is decremented after the summary is no longer needed
+     * in order to guarantee that the off-heap memory is freed.
+     * @return the current IndexSummary
+     */
+    public IndexSummary getReferencedIndexSummary()
+    {
+        IndexSummary summary = indexSummary;
+        while (!summary.reference())
+            summary = indexSummary;
+        return summary;
+    }
+
     /** get the position in the index file to start scanning to find the given key (at most indexInterval keys away) */
     public long getIndexScanPosition(RowPosition key)
     {
-        int index = indexSummary.binarySearch(key);
-        if (index < 0)
+        IndexSummary summary = getReferencedIndexSummary();
+        try
         {
-            // binary search gives us the first index _greater_ than the key searched for,
-            // i.e., its insertion position
-            int greaterThan = (index + 1) * -1;
-            if (greaterThan == 0)
-                return -1;
-            return indexSummary.getPosition(greaterThan - 1);
+            int index = summary.binarySearch(key);
+            if (index < 0)
+            {
+                // binary search gives us the first index _greater_ than the key searched for,
+                // i.e., its insertion position
+                int greaterThan = (index + 1) * -1;
+                if (greaterThan == 0)
+                    return -1;
+                return summary.getPosition(greaterThan - 1);
+            }
+            else
+            {
+                return summary.getPosition(index);
+            }
         }
-        else
+        finally
         {
-            return indexSummary.getPosition(index);
+            summary.unreference();
         }
     }
 
@@ -667,7 +700,15 @@ public class SSTableReader extends SSTable implements Closeable
      */
     public long estimatedKeys()
     {
-        return ((long) indexSummary.size()) * indexSummary.getIndexInterval();
+        IndexSummary summary = getReferencedIndexSummary();
+        try
+        {
+            return ((long) summary.size()) * summary.getIndexInterval();
+        }
+        finally
+        {
+            summary.unreference();
+        }
     }
 
     /**
@@ -676,11 +717,19 @@ public class SSTableReader extends SSTable implements Closeable
      */
     public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
     {
-        long sampleKeyCount = 0;
-        List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(indexSummary, ranges);
-        for (Pair<Integer, Integer> sampleIndexRange : sampleIndexes)
-            sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
-        return Math.max(1, sampleKeyCount * indexSummary.getIndexInterval());
+        IndexSummary summary = getReferencedIndexSummary();
+        try
+        {
+            long sampleKeyCount = 0;
+            List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(summary, ranges);
+            for (Pair<Integer, Integer> sampleIndexRange : sampleIndexes)
+                sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
+            return Math.max(1, sampleKeyCount * summary.getIndexInterval());
+        }
+        finally
+        {
+            summary.unreference();
+        }
     }
 
     /**
@@ -693,7 +742,16 @@ public class SSTableReader extends SSTable implements Closeable
 
     public byte[] getKeySample(int position)
     {
-        return indexSummary.getKey(position);
+
+        IndexSummary summary = getReferencedIndexSummary();
+        try
+        {
+            return summary.getKey(position);
+        }
+        finally
+        {
+            summary.unreference();
+        }
     }
 
     private static List<Pair<Integer,Integer>> getSampleIndexesForRanges(IndexSummary summary, Collection<Range<Token>> ranges)
@@ -740,50 +798,29 @@ public class SSTableReader extends SSTable implements Closeable
 
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
-        final List<Pair<Integer, Integer>> indexRanges = getSampleIndexesForRanges(indexSummary, Collections.singletonList(range));
-
-        if (indexRanges.isEmpty())
-            return Collections.emptyList();
-
-        return new Iterable<DecoratedKey>()
+        final IndexSummary summary = getReferencedIndexSummary();
+        try
         {
-            public Iterator<DecoratedKey> iterator()
+            final List<Pair<Integer, Integer>> indexRanges = getSampleIndexesForRanges(summary, Collections.singletonList(range));
+
+            if (indexRanges.isEmpty())
+                return Collections.emptyList();
+
+            List<DecoratedKey> keys = new ArrayList<>();
+            for (Pair<Integer, Integer> currentRange : indexRanges)
             {
-                return new Iterator<DecoratedKey>()
+                for (int i = currentRange.left; i < currentRange.right; i++)
                 {
-                    private Iterator<Pair<Integer, Integer>> rangeIter = indexRanges.iterator();
-                    private Pair<Integer, Integer> current;
-                    private int idx;
-
-                    public boolean hasNext()
-                    {
-                        if (current == null || idx > current.right)
-                        {
-                            if (rangeIter.hasNext())
-                            {
-                                current = rangeIter.next();
-                                idx = current.left;
-                                return true;
-                            }
-                            return false;
-                        }
-
-                        return true;
-                    }
-
-                    public DecoratedKey next()
-                    {
-                        byte[] bytes = indexSummary.getKey(idx++);
-                        return partitioner.decorateKey(ByteBuffer.wrap(bytes));
-                    }
-
-                    public void remove()
-                    {
-                        throw new UnsupportedOperationException();
-                    }
-                };
+                    byte[] bytes = summary.getKey(i);
+                    keys.add(partitioner.decorateKey(ByteBuffer.wrap(bytes)));
+                }
             }
-        };
+            return keys;
+        }
+        finally
+        {
+            summary.unreference();
+        }
     }
 
     /**
@@ -940,6 +977,7 @@ public class SSTableReader extends SSTable implements Closeable
             }
         }
 
+        // TODO indexInterval assumption is no longer correct with index summary downsampling
         // scan the on-disk index, starting at the nearest sampled position.
         // The check against IndexInterval is to be exit the loop in the EQ case when the key looked for is not present
         // (bloom filter false positive). But note that for non-EQ cases, we might need to check the first key of the
@@ -948,12 +986,13 @@ public class SSTableReader extends SSTable implements Closeable
         // of the next interval).
         int i = 0;
         Iterator<FileDataInput> segments = ifile.iterator(sampledPosition);
-        while (segments.hasNext() && i <= indexSummary.getIndexInterval())
+        int indexInterval = indexSummary.getIndexInterval();
+        while (segments.hasNext() && i <= indexInterval)
         {
             FileDataInput in = segments.next();
             try
             {
-                while (!in.isEOF() && i <= indexSummary.getIndexInterval())
+                while (!in.isEOF() && i <= indexInterval)
                 {
                     i++;
 

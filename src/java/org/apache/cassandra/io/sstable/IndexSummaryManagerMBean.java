@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.sstable;
 
+import java.io.IOException;
 import java.util.Map;
 
 public interface IndexSummaryManagerMBean
@@ -40,7 +41,7 @@ public interface IndexSummaryManagerMBean
 
     public double getAverageSamplingRatio();
 
-    public void redistributeSummaries();
+    public void redistributeSummaries() throws IOException;
 
     public int getResizeIntervalInMinutes();
     public void setResizeIntervalInMinutes(int resizeIntervalInMinutes);

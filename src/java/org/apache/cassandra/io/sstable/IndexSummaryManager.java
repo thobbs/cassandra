@@ -141,7 +141,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         for (int i = 0; i < sstables.size(); i++)
         {
             SSTableReader sstable = sstables.get(i);
-            ratios.put(sstable.getFilename(), sstable.getIndexSummary().getSamplingLevel() / (double) IndexSummary.BASE_SAMPLING_LEVEL);
+            ratios.put(sstable.getFilename(), sstable.getIndexSummarySamplingLevel() / (double) IndexSummary.BASE_SAMPLING_LEVEL);
         }
         return ratios;
     }
@@ -151,7 +151,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         List<SSTableReader> sstables = getAllNoncompactingSSTables();
         double total = 0.0;
         for (SSTableReader sstable : sstables)
-            total += sstable.getIndexSummary().getSamplingLevel() / (double) IndexSummary.BASE_SAMPLING_LEVEL;
+            total += sstable.getIndexSummarySamplingLevel() / (double) IndexSummary.BASE_SAMPLING_LEVEL;
         return total / sstables.size();
     }
 
@@ -168,7 +168,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     {
         long total = 0;
         for (SSTableReader sstable : getAllNoncompactingSSTables())
-            total += sstable.getIndexSummary().getOffHeapSize();
+            total += sstable.getIndexSummaryOffHeapSize();
         return total / 1024.0 / 1024.0;
     }
 
@@ -181,7 +181,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         return sstables;
     }
 
-    public void redistributeSummaries()
+    public void redistributeSummaries() throws IOException
     {
         redistributeSummaries(getAllNoncompactingSSTables(), this.memoryPoolCapacity);
     }
@@ -190,14 +190,14 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
      * Attempts to fairly distribute a fixed pool of memory for index summaries across a set of SSTables based on
      * their recent read rates.
      * @param sstables a list of sstables to share the memory pool across
-     * @param memoryPoolSize a size (in bytes) that the total index summary space usage should stay close to or under,
-     *                       if possible
+     * @param memoryPoolCapacity a size (in bytes) that the total index summary space usage should stay close to or
+     *                           under, if possible
      */
     @VisibleForTesting
-    public static void redistributeSummaries(List<SSTableReader> sstables, long memoryPoolSize)
+    public static void redistributeSummaries(List<SSTableReader> sstables, long memoryPoolCapacity) throws IOException
     {
         logger.debug("Beginning redistribution of index summaries for {} sstables with memory pool size {} MB",
-                     sstables.size(), memoryPoolSize / 1024L / 1024L);
+                     sstables.size(), memoryPoolCapacity / 1024L / 1024L);
 
         double totalReadsPerSec = 0.0;
         for (SSTableReader sstr : sstables)
@@ -226,18 +226,43 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             }
         });
 
-        // list of (SSTR, (targetNumEntries, newSamplingLevel)) pairs
-        List<Pair<SSTableReader, Pair<Long, Integer>>> toDownsample = new ArrayList<>(sstables.size() / 4);
+        List<Pair<SSTableReader, IndexSummary>> sstrsAndSummaries = new ArrayList<>(sstables.size());
+        for (SSTableReader sstr : sstables)
+            sstrsAndSummaries.add(Pair.create(sstr, sstr.getReferencedIndexSummary()));
+        try
+        {
+            adjustSamplingLevels(sstrsAndSummaries, totalReadsPerSec, memoryPoolCapacity);
+        }
+        finally
+        {
+            for (Pair<SSTableReader, IndexSummary> sstrAndSummary : sstrsAndSummaries)
+                sstrAndSummary.right.unreference();
+        }
+
+        long total = 0;
+        for (SSTableReader sstable : sstables)
+            total += sstable.getIndexSummaryOffHeapSize();
+        logger.debug("Completed resizing of index summaries; current approximate memory used: {} MB",
+                     total / 1024.0 / 1024.0);
+    }
+
+    private static void adjustSamplingLevels(List<Pair<SSTableReader, IndexSummary>> sstrsAndSummaries,
+                                             double totalReadsPerSec, long memoryPoolCapacity) throws IOException
+    {
+
+        // list of (SSTR, (newSpaceUsed, newSamplingLevel)) pairs
+        List<ResampleEntry> toDownsample = new ArrayList<>(sstrsAndSummaries.size() / 4);
 
         // list of (SSTR, newSamplingLevel) pairs
-        List<Pair<SSTableReader, Integer>> toUpsample = new ArrayList<>(sstables.size() / 4);
+        List<ResampleEntry> toUpsample = new ArrayList<>(sstrsAndSummaries.size() / 4);
 
         // Going from the coldest to the hottest sstables, try to give each sstable an amount of space proportional
         // to the number of total reads/sec it handles.
-        long remainingSpace = memoryPoolSize;
-        for (SSTableReader sstr : sstables)
+        long remainingSpace = memoryPoolCapacity;
+        for (Pair<SSTableReader, IndexSummary> sstrAndSummary : sstrsAndSummaries)
         {
-            IndexSummary summary = sstr.getIndexSummary();
+            SSTableReader sstr = sstrAndSummary.left;
+            IndexSummary summary = sstrAndSummary.right;
 
             double readsPerSec = sstr.readMeter == null ? 0.0 : sstr.readMeter.fifteenMinuteRate();
             long idealSpace = Math.round(remainingSpace * (readsPerSec / totalReadsPerSec));
@@ -252,13 +277,14 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
             if (targetNumEntries >= summary.size() * UPSAMPLE_THRESHOLD && newSamplingLevel > summary.getSamplingLevel())
             {
-                toUpsample.add(Pair.create(sstr, newSamplingLevel));
+                long spaceUsed = (long) Math.ceil(avgEntrySize * IndexSummaryBuilder.entriesAtSamplingLevel(summary, newSamplingLevel));
+                toUpsample.add(new ResampleEntry(sstr, summary, spaceUsed, newSamplingLevel));
                 remainingSpace -= avgEntrySize * IndexSummaryBuilder.entriesAtSamplingLevel(summary, newSamplingLevel);
             }
             else if (targetNumEntries < summary.size() * DOWNSAMPLE_THESHOLD && newSamplingLevel < summary.getSamplingLevel())
             {
                 long spaceUsed = (long) Math.ceil(avgEntrySize * IndexSummaryBuilder.entriesAtSamplingLevel(summary, newSamplingLevel));
-                toDownsample.add(Pair.create(sstr, Pair.create(spaceUsed, newSamplingLevel)));
+                toDownsample.add(new ResampleEntry(sstr, summary, spaceUsed, newSamplingLevel));
                 remainingSpace -= spaceUsed;
             }
             else
@@ -270,49 +296,41 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         }
 
         toDownsample = distributeRemainingSpace(toDownsample, remainingSpace);
-        for (Pair<SSTableReader, Pair<Long, Integer>> entry : toDownsample)
+        for (ResampleEntry entry : toDownsample)
         {
-            SSTableReader sstr = entry.left;
             logger.debug("Downsampling index summary for {} from {}/{} to {}/{} of the original number of entries",
-                         sstr, sstr.getIndexSummary().getSamplingLevel(), IndexSummary.BASE_SAMPLING_LEVEL,
-                         entry.right.right, IndexSummary.BASE_SAMPLING_LEVEL);
-            IndexSummary newSummary = IndexSummaryBuilder.downsample(sstr.getIndexSummary(), entry.right.right, sstr.partitioner);
-            sstr.setIndexSummary(newSummary);
+                         entry.sstable, entry.summary.getSamplingLevel(), IndexSummary.BASE_SAMPLING_LEVEL,
+                         entry.newSamplingLevel, IndexSummary.BASE_SAMPLING_LEVEL);
+            IndexSummary newSummary = IndexSummaryBuilder.downsample(entry.summary, entry.newSamplingLevel, entry.sstable.partitioner);
+            entry.sstable.setIndexSummary(newSummary);
         }
 
-        for (Pair<SSTableReader, Integer> entry : toUpsample)
+        for (ResampleEntry entry : toUpsample)
         {
-            SSTableReader sstr = entry.left;
-            logger.debug("Upsampling index summary for {} to {}/{} to {}/{} of the original number of entries",
-                         sstr, sstr.getIndexSummary().getSamplingLevel(), IndexSummary.BASE_SAMPLING_LEVEL,
-                         entry.right, IndexSummary.BASE_SAMPLING_LEVEL);
+            logger.debug("Upsampling index summary for {} from {}/{} to {}/{} of the original number of entries",
+                         entry.sstable, entry.summary.getSamplingLevel(), IndexSummary.BASE_SAMPLING_LEVEL,
+                         entry.newSamplingLevel, IndexSummary.BASE_SAMPLING_LEVEL);
             try
             {
-                sstr.rebuildSummary(entry.right);
+                entry.sstable.rebuildSummary(entry.newSamplingLevel);
             }
             catch (IOException ioe)
             {
                 logger.error("Failed to rebuild index summary: ", ioe);
             }
         }
-
-        long total = 0;
-        for (SSTableReader sstable : sstables)
-            total += sstable.getIndexSummary().getOffHeapSize();
-        logger.debug("Completed resizing of index summaries; current approximate memory used: {} MB",
-                     total / 1024.0 / 1024.0);
     }
 
     @VisibleForTesting
-    static List<Pair<SSTableReader, Pair<Long, Integer>>> distributeRemainingSpace(List<Pair<SSTableReader, Pair<Long, Integer>>> toDownsample, long remainingSpace)
+    static List<ResampleEntry> distributeRemainingSpace(List<ResampleEntry> toDownsample, long remainingSpace)
     {
         // sort by read rate (descending)
-        Collections.sort(toDownsample, new Comparator<Pair<SSTableReader, Pair<Long, Integer>>>()
+        Collections.sort(toDownsample, new Comparator<ResampleEntry>()
         {
-            public int compare(Pair<SSTableReader, Pair<Long, Integer>> o1, Pair<SSTableReader, Pair<Long, Integer>> o2)
+            public int compare(ResampleEntry o1, ResampleEntry o2)
             {
-                RestorableMeter a = o1.left.readMeter;
-                RestorableMeter b = o2.left.readMeter;
+                RestorableMeter a = o1.sstable.readMeter;
+                RestorableMeter b = o2.sstable.readMeter;
                 if (a == null && b == null)
                     return 0;
                 else if (a == null)
@@ -327,18 +345,13 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         while (remainingSpace > 0 && !toDownsample.isEmpty())
         {
             boolean didAdjust = false;
-            List<Pair<SSTableReader, Pair<Long, Integer>>> newToDownsample = new ArrayList<>(toDownsample.size());
-            for (Pair<SSTableReader, Pair<Long, Integer>> entry : toDownsample)
+            List<ResampleEntry> newToDownsample = new ArrayList<>(toDownsample.size());
+            for (ResampleEntry entry : toDownsample)
             {
-                SSTableReader sstr = entry.left;
-                long plannedSpaceUsed = entry.right.left;
-                int currentLevel = entry.right.right;
-
-                IndexSummary summary = sstr.getIndexSummary();
-                int entriesAtNextLevel = IndexSummaryBuilder.entriesAtSamplingLevel(sstr.getIndexSummary(), currentLevel + 1);
-                double avgEntrySize = summary.getOffHeapSize() / (double) summary.size();
+                int entriesAtNextLevel = IndexSummaryBuilder.entriesAtSamplingLevel(entry.summary, entry.newSamplingLevel + 1);
+                double avgEntrySize = entry.summary.getOffHeapSize() / (double) entry.summary.size();
                 long spaceAtNextLevel = (long) Math.ceil(avgEntrySize * entriesAtNextLevel);
-                long extraSpaceRequired = (spaceAtNextLevel - plannedSpaceUsed);
+                long extraSpaceRequired = (spaceAtNextLevel - entry.newSpaceUsed);
                 // see if we have enough leftover space to increase the sampling level
                 if (extraSpaceRequired <= remainingSpace)
                 {
@@ -346,8 +359,8 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                     remainingSpace -= extraSpaceRequired;
                     // if increasing the level would put us back to the original level, just leave this sstable out
                     // of the set to downsample
-                    if (currentLevel + 1 < summary.getSamplingLevel())
-                        newToDownsample.add(Pair.create(sstr, Pair.create(spaceAtNextLevel, currentLevel + 1)));
+                    if (entry.newSamplingLevel + 1 < entry.summary.getSamplingLevel())
+                        newToDownsample.add(new ResampleEntry(entry.sstable, entry.summary, spaceAtNextLevel, entry.newSamplingLevel + 1));
                 }
                 else
                 {
@@ -359,5 +372,21 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                 break;
         }
         return toDownsample;
+    }
+
+    private static class ResampleEntry
+    {
+        public final SSTableReader sstable;
+        public final IndexSummary summary;
+        public final long newSpaceUsed;
+        public final int newSamplingLevel;
+
+        public ResampleEntry(SSTableReader sstable, IndexSummary summary, long newSpaceUsed, int newSamplingLevel)
+        {
+            this.sstable = sstable;
+            this.summary = summary;
+            this.newSpaceUsed = newSpaceUsed;
+            this.newSamplingLevel = newSamplingLevel;
+        }
     }
 }

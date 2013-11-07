@@ -42,8 +42,6 @@ public class IndexSummaryBuilder
     private long indexIntervalMatches = 0;
     private long offheapSize = 0;
 
-    private static final Map<Integer, List<Integer>> samplePatternCache = new HashMap<>();
-
     public IndexSummaryBuilder(long expectedKeys, int indexInterval, int samplingLevel)
     {
         this.indexInterval = indexInterval;
@@ -131,10 +129,6 @@ public class IndexSummaryBuilder
     @VisibleForTesting
     static List<Integer> getSamplingPattern(int baseSamplingLevel)
     {
-        List<Integer> pattern = samplePatternCache.get(baseSamplingLevel);
-        if (pattern != null)
-            return pattern;
-
         if (baseSamplingLevel <= 1)
             return Arrays.asList(0);
 
@@ -162,17 +156,17 @@ public class IndexSummaryBuilder
 
     public static int entriesAtSamplingLevel(IndexSummary summary, int samplingLevel)
     {
-        return (samplingLevel * summary.getOriginalNumEntries()) / IndexSummary.BASE_SAMPLING_LEVEL;
+        return (samplingLevel * summary.getMaxNumberOfEntries()) / IndexSummary.BASE_SAMPLING_LEVEL;
     }
 
     public static int calculateSamplingLevel(IndexSummary existing, long targetNumEntries)
     {
         // Algebraic explanation for calculating the new sampling level (solve for newSamplingLevel):
         // originalNumEntries = (baseSamplingLevel / currentSamplingLevel) * currentNumEntries
-        // targetNumEntries = (newSamplingLevel / baseSamplingLevel) * originalNumEntries
-        // targetNumEntries = (newSamplingLevel / baseSamplingLevel) * (baseSamplingLevel / currentSamplingLevel) * currentNumEntries
-        // targetNumEntries = (newSamplingLevel / currentSamplingLevel) * currentNumEntries
-        // (targetNumEntries * currentSamplingLevel) / currentNumEntries = newSamplingLevel
+        // newSpaceUsed = (newSamplingLevel / baseSamplingLevel) * originalNumEntries
+        // newSpaceUsed = (newSamplingLevel / baseSamplingLevel) * (baseSamplingLevel / currentSamplingLevel) * currentNumEntries
+        // newSpaceUsed = (newSamplingLevel / currentSamplingLevel) * currentNumEntries
+        // (newSpaceUsed * currentSamplingLevel) / currentNumEntries = newSamplingLevel
         int newSamplingLevel = (int) (targetNumEntries * existing.getSamplingLevel()) / existing.size();
         return Math.min(IndexSummary.BASE_SAMPLING_LEVEL, Math.max(IndexSummary.MIN_SAMPLING_LEVEL, newSamplingLevel));
     }

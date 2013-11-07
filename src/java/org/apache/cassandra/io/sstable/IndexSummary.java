@@ -22,6 +22,10 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.RowPosition;
@@ -42,6 +46,8 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class IndexSummary implements Closeable
 {
+    private static final Logger logger = LoggerFactory.getLogger(IndexSummaryBuilder.class);
+
     // The base downsampling level determines the granularity at which we can down/upsample.  A higher number would
     // mean fewer items would be removed in each downsampling round.  This must be a power of two in order to have
     // good sampling patterns. This cannot be changed without rebuilding all index summaries at full sampling.
@@ -55,6 +61,11 @@ public class IndexSummary implements Closeable
     private final IPartitioner partitioner;
     private final int summary_size;
     private final Memory bytes;
+
+    // In order to properly free the off-heap memory for this index summary without locking access to it, we'll use
+    // a reference counting strategy.
+    private volatile int references = 1;
+    private static final AtomicIntegerFieldUpdater<IndexSummary> UPDATER = AtomicIntegerFieldUpdater.newUpdater(IndexSummary.class, "references");
 
     /*
      * A value between MIN_SAMPLING_LEVEL and BASE_SAMPLING_LEVEL that represents how many of the original
@@ -153,11 +164,19 @@ public class IndexSummary implements Closeable
         return samplingLevel;
     }
 
-    public int getOriginalNumEntries()
+    /**
+     * Returns the number of entries this summary would have if it were at the full sampling level.
+     * @return the most entries this summary could have
+     */
+    public int getMaxNumberOfEntries()
     {
         return (BASE_SAMPLING_LEVEL * summary_size) / samplingLevel;
     }
 
+    /**
+     * Returns the amount of off-heap memory used for this summary.
+     * @return size in bytes
+     */
     public long getOffHeapSize()
     {
         return bytes.size();
@@ -184,6 +203,38 @@ public class IndexSummary implements Closeable
             Memory memory = Memory.allocate(offheapSize);
             FBUtilities.copy(in, new MemoryOutputStream(memory), offheapSize);
             return new IndexSummary(partitioner, memory, summarySize, indexInterval, downsampleLevel);
+        }
+    }
+
+    /**
+     * @return true if we succeed in referencing before the reference count reaches zero.
+     * (New instances are created with a reference count of one.)
+     */
+    public boolean reference()
+    {
+        while (true)
+        {
+            int n = UPDATER.get(this);
+            if (n <= 0)
+                return false;
+            if (UPDATER.compareAndSet(this, n, n + 1))
+                return true;
+        }
+    }
+
+    /** decrement reference count.  if count reaches zero, the off-heap memory for this IndexSummary is freed. */
+    public void unreference()
+    {
+        if (UPDATER.decrementAndGet(this) == 0)
+        {
+            try
+            {
+                close();
+            }
+            catch (IOException ioe)
+            {
+                 logger.error("Error freeing memory for index summary: ", ioe);
+            }
         }
     }
 
