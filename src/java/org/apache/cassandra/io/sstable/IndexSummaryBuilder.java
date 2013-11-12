@@ -19,8 +19,6 @@ package org.apache.cassandra.io.sstable;
 
 import java.util.*;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
@@ -60,7 +58,7 @@ public class IndexSummaryBuilder
         }
 
         // adjust our estimates based on the sampling level
-        expectedEntries *= (long) Math.ceil(samplingLevel / ((double) IndexSummary.BASE_SAMPLING_LEVEL));
+        expectedEntries = (expectedEntries * samplingLevel) / IndexSummary.BASE_SAMPLING_LEVEL;
 
         positions = new ArrayList<>((int)expectedEntries);
         keys = new ArrayList<>((int)expectedEntries);

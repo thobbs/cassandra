@@ -48,7 +48,7 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 public class IndexSummary implements Closeable
 {
-    private static final Logger logger = LoggerFactory.getLogger(IndexSummaryBuilder.class);
+    private static final Logger logger = LoggerFactory.getLogger(IndexSummary.class);
 
     // The base downsampling level determines the granularity at which we can down/upsample.  A higher number would
     // mean fewer items would be removed in each downsampling round.  This must be a power of two in order to have
@@ -202,6 +202,11 @@ public class IndexSummary implements Closeable
         return bytes.size();
     }
 
+    /**
+     * Gets a list of starting indices for downsampling rounds.
+     * @param samplingLevel the base sampling level
+     * @return A list of `samplingLevel` unique indices between 0 and `samplingLevel`
+     */
     @VisibleForTesting
     static List<Integer> getSamplingPattern(int samplingLevel)
     {
@@ -235,6 +240,13 @@ public class IndexSummary implements Closeable
         return startIndices;
     }
 
+    /**
+     * Returns a list that can be used to translate current index summary indexes to their original index before
+     * downsampling.  For example, if [7, 15] is returned, the current index summary entry at index 0 was originally
+     * at index 7, and the current index 1 was originally at index 15.
+     * @param samplingLevel the current sampling level for the index summary
+     * @return a list of original indexes for current summary entries
+     */
     @VisibleForTesting
     static List<Integer> getOriginalIndexes(int samplingLevel)
     {
@@ -253,6 +265,13 @@ public class IndexSummary implements Closeable
         return originalIndexes;
     }
 
+    /**
+     * Returns the number of primary (on-disk) index entries between the index summary entry at `index` and the next
+     * index summary entry (assuming there is one).  Without any downsampling, this will always be equivalent to
+     * the index interval.
+     * @param index the index of an index summary entry (between zero and the index entry size)
+     * @return the number of partitions after `index` until the next partition with a summary entry
+     */
     public int getNumberOfSkippedEntriesAfterIndex(int index)
     {
         return getNumberOfSkippedEntriesAfterIndex(index, samplingLevel, indexInterval);

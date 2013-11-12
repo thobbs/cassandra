@@ -79,7 +79,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         }
     }
 
-    public IndexSummaryManager()
+    private IndexSummaryManager()
     {
         executor = new DebuggableScheduledThreadPoolExecutor(1, "IndexSummaryManager", Thread.MIN_PRIORITY);
 
