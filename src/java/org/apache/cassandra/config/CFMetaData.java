@@ -168,6 +168,13 @@ public final class CFMetaData
                                                               + "PRIMARY KEY (keyspace_name, columnfamily_name, trigger_name)"
                                                               + ") WITH COMMENT='triggers metadata table'");
 
+    public static final CFMetaData SchemaUserTypesCf = compile("CREATE TABLE " + SystemKeyspace.SCHEMA_USER_TYPES_CF + " ("
+                                                               + "type_name text,"
+                                                               + "column_names list<text>,"
+                                                               + "column_types list<text>,"
+                                                               + "PRIMARY KEY (type_name)"
+                                                               + ") WITH COMMENT='Defined user types' AND gc_grace_seconds=8640");
+
     public static final CFMetaData HintsCf = compile("CREATE TABLE " + SystemKeyspace.HINTS_CF + " ("
                                                      + "target_id uuid,"
                                                      + "hint_id timeuuid,"
@@ -518,7 +525,8 @@ public final class CFMetaData
         return newCFMD.comment(comment)
                 .readRepairChance(0)
                 .dcLocalReadRepairChance(0)
-                .gcGraceSeconds(0);
+                .gcGraceSeconds(0)
+                .memtableFlushPeriod(3600 * 1000);
     }
 
     public static CFMetaData newIndexMetadata(CFMetaData parent, ColumnDefinition info, AbstractType<?> columnComparator)

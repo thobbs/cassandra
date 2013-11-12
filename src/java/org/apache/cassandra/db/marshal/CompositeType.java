@@ -88,7 +88,7 @@ public class CompositeType extends AbstractCompositeType
         return ct;
     }
 
-    private CompositeType(List<AbstractType<?>> types)
+    protected CompositeType(List<AbstractType<?>> types)
     {
         this.types = ImmutableList.copyOf(types);
     }
@@ -131,6 +131,23 @@ public class CompositeType extends AbstractCompositeType
             serialized[i] = buffer;
         }
         return build(serialized);
+    }
+
+    // Overriding the one of AbstractCompositeType because we can do a tad better
+    @Override
+    public ByteBuffer[] split(ByteBuffer name)
+    {
+        // Assume all components, we'll trunk the array afterwards if need be, but
+        // most names will be complete.
+        ByteBuffer[] l = new ByteBuffer[types.size()];
+        ByteBuffer bb = name.duplicate();
+        int i = 0;
+        while (bb.remaining() > 0)
+        {
+            l[i++] = getWithShortLength(bb);
+            bb.get(); // skip end-of-component
+        }
+        return i == l.length ? l : Arrays.copyOfRange(l, 0, i);
     }
 
     // Extract component idx from bb. Return null if there is not enough component.
@@ -230,11 +247,11 @@ public class CompositeType extends AbstractCompositeType
                 AbstractType<?> t = types.get(i);
                 ByteBuffer s = i < start.length ? start[i] : ByteBufferUtil.EMPTY_BYTE_BUFFER;
                 ByteBuffer f = i < finish.length ? finish[i] : ByteBufferUtil.EMPTY_BYTE_BUFFER;
-                if (!t.intersects(minColumnNames.get(i), maxColumnNames.get(i), s, f))
-                    return false;
+                if (t.intersects(minColumnNames.get(i), maxColumnNames.get(i), s, f))
+                    return true;
             }
         }
-        return true;
+        return false;
     }
 
     private static class StaticParsedComparator implements ParsedComparator

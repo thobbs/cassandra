@@ -1,4 +1,4 @@
-/*
+/**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -15,28 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.serializers;
 
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
+package org.apache.cassandra.service;
 
-public class AsciiSerializer extends AbstractTextSerializer
+public class PendingRangeCalculatorServiceMBean
 {
-    public static final AsciiSerializer instance = new AsciiSerializer();
-
-    private AsciiSerializer()
-    {
-        super(StandardCharsets.US_ASCII);
-    }
-
-    public void validate(ByteBuffer bytes) throws MarshalException
-    {
-        // 0-127
-        for (int i = bytes.position(); i < bytes.limit(); i++)
-        {
-            byte b = bytes.get(i);
-            if (b < 0 || b > 127)
-                throw new MarshalException("Invalid byte for ascii: " + Byte.toString(b));
-        }
-    }
 }

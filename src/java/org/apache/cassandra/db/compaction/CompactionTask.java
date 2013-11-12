@@ -259,15 +259,18 @@ public class CompactionTask extends AbstractCompactionTask
         Map<Integer, Long> mergedRows = new HashMap<Integer, Long>();
         for (int i = 0; i < counts.length; i++)
         {
-            int rows = i + 1;
             long count = counts[i];
+            if (count == 0)
+                continue;
+
+            int rows = i + 1;
             totalSourceRows += rows * count;
             mergeSummary.append(String.format("%d:%d, ", rows, count));
             mergedRows.put(rows, count);
         }
 
         SystemKeyspace.updateCompactionHistory(cfs.keyspace.getName(), cfs.name, start, startsize, endsize, mergedRows);
-        logger.info(String.format("Compacted %d sstables to [%s].  %,d bytes to %,d (~%d%% of original) in %,dms = %fMB/s.  %,d total rows, %,d unique.  Row merge counts were {%s}",
+        logger.info(String.format("Compacted %d sstables to [%s].  %,d bytes to %,d (~%d%% of original) in %,dms = %fMB/s.  %,d total partitions merged to %,d.  Partition merge counts were {%s}",
                                   toCompact.size(), builder.toString(), startsize, endsize, (int) (ratio * 100), dTime, mbps, totalSourceRows, totalkeysWritten, mergeSummary.toString()));
         logger.debug(String.format("CF Total Bytes Compacted: %,d", CompactionTask.addToTotalBytesCompacted(endsize)));
     }
