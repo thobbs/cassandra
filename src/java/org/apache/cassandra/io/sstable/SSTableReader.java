@@ -649,8 +649,7 @@ public class SSTableReader extends SSTable implements Closeable
         IndexSummary summary = getReferencedIndexSummary();
         try
         {
-            int binarySearchResult = summary.binarySearch(key);
-            return summary.getPosition(getIndexSummaryIndexFromBinarySearchResult(binarySearchResult));
+            return getIndexScanPositionFromBinarySearchResult(summary.binarySearch(key), summary);
         }
         finally
         {
@@ -663,7 +662,7 @@ public class SSTableReader extends SSTable implements Closeable
         if (binarySearchResult == -1)
             return -1;
         else
-            return(referencedIndexSummary.getPosition(getIndexSummaryIndexFromBinarySearchResult(binarySearchResult)));
+            return referencedIndexSummary.getPosition(getIndexSummaryIndexFromBinarySearchResult(binarySearchResult));
     }
 
     private static int getIndexSummaryIndexFromBinarySearchResult(int binarySearchResult)
