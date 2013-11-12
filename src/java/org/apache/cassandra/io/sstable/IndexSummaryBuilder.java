@@ -126,34 +126,6 @@ public class IndexSummaryBuilder
         return new IndexSummary(partitioner, memory, keys.size(), indexInterval, samplingLevel);
     }
 
-    @VisibleForTesting
-    static List<Integer> getSamplingPattern(int baseSamplingLevel)
-    {
-        if (baseSamplingLevel <= 1)
-            return Arrays.asList(0);
-
-        ArrayList<Integer> startIndices = new ArrayList<>(baseSamplingLevel);
-        startIndices.add(0);
-
-        int spread = baseSamplingLevel;
-        while (spread >= 2)
-        {
-            ArrayList<Integer> roundIndices = new ArrayList<>(baseSamplingLevel / spread);
-            for (int i = spread / 2; i < baseSamplingLevel; i += spread)
-                roundIndices.add(i);
-
-            // especially for latter rounds, it's important that we spread out the start points, so we'll
-            // make a recursive call to get an ordering for this list of start points
-            List<Integer> roundIndicesOrdering = getSamplingPattern(roundIndices.size());
-            for (int i = 0; i < roundIndices.size(); ++i)
-                startIndices.add(roundIndices.get(roundIndicesOrdering.get(i)));
-
-            spread /= 2;
-        }
-
-        return startIndices;
-    }
-
     public static int entriesAtSamplingLevel(IndexSummary summary, int samplingLevel)
     {
         return (samplingLevel * summary.getMaxNumberOfEntries()) / IndexSummary.BASE_SAMPLING_LEVEL;
@@ -173,7 +145,7 @@ public class IndexSummaryBuilder
 
     private static int[] getStartPoints(int currentSamplingLevel, int newSamplingLevel)
     {
-        List<Integer> allStartPoints = getSamplingPattern(IndexSummary.BASE_SAMPLING_LEVEL);
+        List<Integer> allStartPoints = IndexSummary.getSamplingPattern(IndexSummary.BASE_SAMPLING_LEVEL);
 
         // calculate starting indexes for sampling rounds
         int initialRound = IndexSummary.BASE_SAMPLING_LEVEL - currentSamplingLevel;

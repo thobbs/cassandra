@@ -40,11 +40,8 @@ import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
-import static org.apache.cassandra.io.sstable.IndexSummary.BASE_SAMPLING_LEVEL;
-import static org.apache.cassandra.io.sstable.IndexSummary.MIN_SAMPLING_LEVEL;
-
+import static org.apache.cassandra.io.sstable.IndexSummary.*;
 import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.downsample;
-import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.getSamplingPattern;
 
 import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.entriesAtSamplingLevel;
 import static org.junit.Assert.*;
@@ -432,5 +429,42 @@ public class IndexSummaryTest extends SchemaLoader
         for (SSTableReader sstr : sstrs)
             assertEquals(MIN_SAMPLING_LEVEL, sstr.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
+    }
+
+    @Test
+    public void testOriginalIndexLookup()
+    {
+        for (int i = BASE_SAMPLING_LEVEL; i >= MIN_SAMPLING_LEVEL; i--)
+            assertEquals(i, getOriginalIndexes(i).size());
+
+        // spot check a few values (these depend on BASE_SAMPLING_LEVEL being 16)
+        assert BASE_SAMPLING_LEVEL == 16;
+        assertEquals(Arrays.asList(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), getOriginalIndexes(16));
+        assertEquals(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), getOriginalIndexes(15));
+        assertEquals(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15), getOriginalIndexes(14));
+
+        assertEquals(Arrays.asList(1, 3, 5, 7, 9, 11, 13, 15), getOriginalIndexes(8));
+        assertEquals(Arrays.asList(3, 7, 11, 15), getOriginalIndexes(4));
+        assertEquals(Arrays.asList(7, 15), getOriginalIndexes(2));
+        assertEquals(Arrays.asList(), getOriginalIndexes(0));
+    }
+
+    @Test
+    public void testGetNumberOfSkippedEntriesAfterIndex()
+    {
+        int indexInterval = 128;
+        for (int i = 0; i < BASE_SAMPLING_LEVEL; i++)
+            assertEquals(indexInterval, getNumberOfSkippedEntriesAfterIndex(i, BASE_SAMPLING_LEVEL, indexInterval));
+
+        // with one round of downsampling, only the first summary has been removed, so only the last index will have
+        // double the gap until the next sample
+        for (int i = 0; i < BASE_SAMPLING_LEVEL - 2; i++)
+            assertEquals(indexInterval, getNumberOfSkippedEntriesAfterIndex(i, BASE_SAMPLING_LEVEL - 1, indexInterval));
+        assertEquals(indexInterval * 2, getNumberOfSkippedEntriesAfterIndex(BASE_SAMPLING_LEVEL - 2, BASE_SAMPLING_LEVEL - 1, indexInterval));
+
+        // at samplingLevel=2, the retained summary points are [7, 15] (assumes BASE_SAMPLING_LEVEL is 16)
+        assert BASE_SAMPLING_LEVEL == 16;
+        assertEquals(8 * indexInterval, getNumberOfSkippedEntriesAfterIndex(0, 2, indexInterval));
+        assertEquals(8 * indexInterval, getNumberOfSkippedEntriesAfterIndex(1, 2, indexInterval));
     }
 }

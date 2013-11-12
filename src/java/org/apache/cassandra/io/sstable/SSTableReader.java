@@ -453,11 +453,13 @@ public class SSTableReader extends SSTable implements Closeable
 
     public void rebuildSummary(int samplingLevel) throws IOException
     {
+        IndexSummary oldSummary = indexSummary;
         SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
         SegmentedFile.Builder dbuilder = compression
                                          ? SegmentedFile.getCompressedBuilder()
                                          : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
         buildSummary(false, ibuilder, dbuilder, false, samplingLevel);
+        oldSummary.unreference();
     }
 
     private void buildSummary(boolean recreateBloomFilter, SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, boolean summaryLoaded, int samplingLevel) throws IOException
@@ -638,30 +640,46 @@ public class SSTableReader extends SSTable implements Closeable
         return summary;
     }
 
-    /** get the position in the index file to start scanning to find the given key (at most indexInterval keys away) */
+    /**
+     * Gets the position in the index file to start scanning to find the given key (at most indexInterval keys away,
+     * modulo downsampling of the index summary).
+     */
     public long getIndexScanPosition(RowPosition key)
     {
         IndexSummary summary = getReferencedIndexSummary();
         try
         {
-            int index = summary.binarySearch(key);
-            if (index < 0)
-            {
-                // binary search gives us the first index _greater_ than the key searched for,
-                // i.e., its insertion position
-                int greaterThan = (index + 1) * -1;
-                if (greaterThan == 0)
-                    return -1;
-                return summary.getPosition(greaterThan - 1);
-            }
-            else
-            {
-                return summary.getPosition(index);
-            }
+            int binarySearchResult = summary.binarySearch(key);
+            return summary.getPosition(getIndexSummaryIndexFromBinarySearchResult(binarySearchResult));
         }
         finally
         {
             summary.unreference();
+        }
+    }
+
+    public static long getIndexScanPositionFromBinarySearchResult(int binarySearchResult, IndexSummary referencedIndexSummary)
+    {
+        if (binarySearchResult == -1)
+            return -1;
+        else
+            return(referencedIndexSummary.getPosition(getIndexSummaryIndexFromBinarySearchResult(binarySearchResult)));
+    }
+
+    private static int getIndexSummaryIndexFromBinarySearchResult(int binarySearchResult)
+    {
+        if (binarySearchResult < 0)
+        {
+            // binary search gives us the first index _greater_ than the key searched for,
+            // i.e., its insertion position
+            int greaterThan = (binarySearchResult + 1) * -1;
+            if (greaterThan == 0)
+                return -1;
+            return greaterThan - 1;
+        }
+        else
+        {
+            return binarySearchResult;
         }
     }
 
@@ -959,25 +977,37 @@ public class SSTableReader extends SSTable implements Closeable
         }
 
         // next, see if the sampled index says it's impossible for the key to be present
-        long sampledPosition = getIndexScanPosition(key);
-        if (sampledPosition == -1)
+        IndexSummary summary = getReferencedIndexSummary();
+        long sampledPosition;
+        int sampledIndex, skippedIndexEntriesAfterIndex;
+        try
         {
-            if (op == Operator.EQ && updateCacheAndStats)
-                bloomFilterTracker.addFalsePositive();
-            // we matched the -1th position: if the operator might match forward, we'll start at the first
-            // position. We however need to return the correct index entry for that first position.
-            if (op.apply(1) >= 0)
+            int binarySearchResult = summary.binarySearch(key);
+            sampledPosition = getIndexScanPositionFromBinarySearchResult(binarySearchResult, summary);
+            sampledIndex = getIndexSummaryIndexFromBinarySearchResult(binarySearchResult);
+            if (sampledPosition == -1)
             {
-                sampledPosition = 0;
+                if (op == Operator.EQ && updateCacheAndStats)
+                    bloomFilterTracker.addFalsePositive();
+                // we matched the -1th position: if the operator might match forward, we'll start at the first
+                // position. We however need to return the correct index entry for that first position.
+                if (op.apply(1) >= 0)
+                {
+                    sampledPosition = 0;
+                }
+                else
+                {
+                    Tracing.trace("Partition summary allows skipping sstable {}", descriptor.generation);
+                    return null;
+                }
             }
-            else
-            {
-                Tracing.trace("Partition summary allows skipping sstable {}", descriptor.generation);
-                return null;
-            }
+            skippedIndexEntriesAfterIndex = summary.getNumberOfSkippedEntriesAfterIndex(sampledIndex);
+        }
+        finally
+        {
+            summary.unreference();
         }
 
-        // TODO indexInterval assumption is no longer correct with index summary downsampling
         // scan the on-disk index, starting at the nearest sampled position.
         // The check against IndexInterval is to be exit the loop in the EQ case when the key looked for is not present
         // (bloom filter false positive). But note that for non-EQ cases, we might need to check the first key of the
@@ -986,13 +1016,12 @@ public class SSTableReader extends SSTable implements Closeable
         // of the next interval).
         int i = 0;
         Iterator<FileDataInput> segments = ifile.iterator(sampledPosition);
-        int indexInterval = indexSummary.getIndexInterval();
-        while (segments.hasNext() && i <= indexInterval)
+        while (segments.hasNext() && i <= skippedIndexEntriesAfterIndex)
         {
             FileDataInput in = segments.next();
             try
             {
-                while (!in.isEOF() && i <= indexInterval)
+                while (!in.isEOF() && i <= skippedIndexEntriesAfterIndex)
                 {
                     i++;
 

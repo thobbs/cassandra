@@ -23,16 +23,19 @@ package org.apache.cassandra.io.sstable;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor;
 
 import org.junit.Assert;
 import com.google.common.collect.Sets;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.OrderedJUnit4ClassRunner;
 import org.apache.cassandra.SchemaLoader;
@@ -54,11 +57,17 @@ import org.apache.cassandra.io.util.SegmentedFile;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
+
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 
 @RunWith(OrderedJUnit4ClassRunner.class)
 public class SSTableReaderTest extends SchemaLoader
 {
+    private static final Logger logger = LoggerFactory.getLogger(SSTableReaderTest.class);
+
     static Token t(int i)
     {
         return StorageService.getPartitioner().getToken(ByteBufferUtil.bytes(String.valueOf(i)));
@@ -339,6 +348,93 @@ public class SSTableReaderTest extends SchemaLoader
         SSTableReader bulkLoaded = SSTableReader.openForBatch(sstable.descriptor, components, store.metadata, sstable.partitioner);
         sections = bulkLoaded.getPositionsForRanges(ranges);
         assert sections.size() == 1 : "Expected to find range in sstable opened for bulk loading";
+    }
+
+    @Test
+    public void testIndexSummaryReplacement() throws IOException, ExecutionException, InterruptedException
+    {
+        Keyspace keyspace = Keyspace.open("Keyspace1");
+        ColumnFamilyStore store = keyspace.getColumnFamilyStore("StandardLowIndexInterval"); // index interval of 8
+        CompactionManager.instance.disableAutoCompaction();
+
+        final int NUM_ROWS = 1000;
+        for (int j = 0; j < NUM_ROWS; j++)
+        {
+            ByteBuffer key = ByteBufferUtil.bytes(String.format("%3d", j));
+            RowMutation rm = new RowMutation("Keyspace1", key);
+            rm.add("StandardLowIndexInterval", ByteBufferUtil.bytes("0"), ByteBufferUtil.EMPTY_BYTE_BUFFER, j);
+            rm.apply();
+        }
+        store.forceBlockingFlush();
+        CompactionManager.instance.performMaximal(store);
+
+        Collection<SSTableReader> sstables = store.getSSTables();
+        assert sstables.size() == 1;
+        final SSTableReader sstable = sstables.iterator().next();
+        IndexSummary originalSummary = sstable.getReferencedIndexSummary();
+        originalSummary.unreference();
+
+        final List<Long> expectedPositions = new ArrayList<>(NUM_ROWS);
+        final List<Long> expectedGEPositions = new ArrayList<>(NUM_ROWS);
+        final List<Long> expectedGTPositions = new ArrayList<>(NUM_ROWS);
+        for (int i = 0; i < NUM_ROWS; i++)
+        {
+            DecoratedKey key = sstable.partitioner.decorateKey(ByteBufferUtil.bytes(String.format("%3d", i)));
+            RowIndexEntry entry = sstable.getPosition(key, SSTableReader.Operator.EQ);
+            assert entry != null : String.format("unexpectedly got a null position for key %s", key);
+            expectedPositions.add(entry.position);
+
+            entry = sstable.getPosition(key, SSTableReader.Operator.GE);
+            assert entry != null : String.format("unexpectedly got a null position for key %s", key);
+            expectedGEPositions.add(entry.position);
+
+            entry = sstable.getPosition(key, SSTableReader.Operator.GT);
+            expectedGTPositions.add(entry == null ? null : entry.position);
+        }
+
+        ThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(5);
+        List<Future> futures = new ArrayList<>(NUM_ROWS * 2);
+        for (int i = 0; i < NUM_ROWS; i++)
+        {
+            final ByteBuffer key = ByteBufferUtil.bytes(String.format("%3d", i));
+            final int index = i;
+
+            futures.add(executor.submit(new Runnable()
+            {
+                public void run()
+                {
+                    RowIndexEntry entry;
+
+                    entry = sstable.getPosition(sstable.partitioner.decorateKey(key), SSTableReader.Operator.EQ);
+                    assertNotNull(String.format("Got null position on index %d", index), entry);
+                    assertEquals(expectedPositions.get(index), (Long) entry.position);
+
+                    entry = sstable.getPosition(sstable.partitioner.decorateKey(key), SSTableReader.Operator.GE);
+                    assertNotNull(String.format("Got null position on index %d", index), entry);
+                    assertEquals(expectedGEPositions.get(index), (Long) entry.position);
+
+                    entry = sstable.getPosition(sstable.partitioner.decorateKey(key), SSTableReader.Operator.GT);
+                    if (entry == null)
+                        assertTrue(String.format("Got null position on index %d", index), expectedGTPositions.get(index) == null);
+                    else
+                        assertEquals(expectedGTPositions.get(index), (Long) entry.position);
+                }
+            }));
+
+            futures.add(executor.submit(new Runnable()
+            {
+                public void run()
+                {
+                    sstable.getKeySamples(new Range<>(sstable.partitioner.getMinimumToken(), sstable.partitioner.getToken(key)));
+                }
+            }));
+        }
+
+        sstable.rebuildSummary(IndexSummary.MIN_SAMPLING_LEVEL);
+        for (Future future : futures)
+            future.get();
+
+        assertFalse("The original index summary reference count should have dropped to zero", originalSummary.reference());
     }
 
     private void assertIndexQueryWorks(ColumnFamilyStore indexedCFS) throws IOException

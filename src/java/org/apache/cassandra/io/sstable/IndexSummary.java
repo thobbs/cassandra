@@ -22,8 +22,10 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,10 +58,28 @@ public class IndexSummary implements Closeable
     // The lowest level we will downsample to.  (Arbitrary value, can be anywhere from 1 to the base value.)
     public static final int MIN_SAMPLING_LEVEL = 4;
 
+    // A cache of starting points for downsampling rounds. The first index is the technically for the base sampling
+    // level, but since the function recursively calls itself with lower values, it's effectively just the argument
+    // to getSamplingPattern().
+    private static final List<List<Integer>> samplePatternCache = new ArrayList<>(BASE_SAMPLING_LEVEL);
+
+    // A cache of arrays to translate current summary indices to their original (non-downsampled) indices.  The first
+    // index is the current sampling level.
+    private static final List<List<Integer>> originalIndexLookup = new ArrayList<>(BASE_SAMPLING_LEVEL);
+
+    static {
+        // initialize the caches to avoid index errors
+        for (int i = 0; i <= BASE_SAMPLING_LEVEL; i++)
+        {
+            samplePatternCache.add(null);
+            originalIndexLookup.add(null);
+        }
+    }
+
     public static final IndexSummarySerializer serializer = new IndexSummarySerializer();
     private final int indexInterval;
     private final IPartitioner partitioner;
-    private final int summary_size;
+    private final int summarySize;
     private final Memory bytes;
 
     // In order to properly free the off-heap memory for this index summary without locking access to it, we'll use
@@ -75,11 +95,11 @@ public class IndexSummary implements Closeable
      */
     private final int samplingLevel;
 
-    public IndexSummary(IPartitioner partitioner, Memory memory, int summary_size, int indexInterval, int samplingLevel)
+    public IndexSummary(IPartitioner partitioner, Memory memory, int summarySize, int indexInterval, int samplingLevel)
     {
         this.partitioner = partitioner;
         this.indexInterval = indexInterval;
-        this.summary_size = summary_size;
+        this.summarySize = summarySize;
         this.bytes = memory;
         this.samplingLevel = samplingLevel;
     }
@@ -88,7 +108,7 @@ public class IndexSummary implements Closeable
     // Harmony's Collections implementation
     public int binarySearch(RowPosition key)
     {
-        int low = 0, mid = summary_size, high = mid - 1, result = -1;
+        int low = 0, mid = summarySize, high = mid - 1, result = -1;
         while (low <= high)
         {
             mid = (low + high) >> 1;
@@ -146,7 +166,7 @@ public class IndexSummary implements Closeable
 
     private long calculateEnd(int index)
     {
-        return index == (summary_size - 1) ? bytes.size() : getPositionInSummary(index + 1);
+        return index == (summarySize - 1) ? bytes.size() : getPositionInSummary(index + 1);
     }
 
     public int getIndexInterval()
@@ -156,7 +176,7 @@ public class IndexSummary implements Closeable
 
     public int size()
     {
-        return summary_size;
+        return summarySize;
     }
 
     public int getSamplingLevel()
@@ -170,7 +190,7 @@ public class IndexSummary implements Closeable
      */
     public int getMaxNumberOfEntries()
     {
-        return (BASE_SAMPLING_LEVEL * summary_size) / samplingLevel;
+        return (BASE_SAMPLING_LEVEL * summarySize) / samplingLevel;
     }
 
     /**
@@ -182,12 +202,83 @@ public class IndexSummary implements Closeable
         return bytes.size();
     }
 
+    @VisibleForTesting
+    static List<Integer> getSamplingPattern(int samplingLevel)
+    {
+        List<Integer> pattern = samplePatternCache.get(samplingLevel);
+        if (pattern != null)
+            return pattern;
+
+        if (samplingLevel <= 1)
+            return Arrays.asList(0);
+
+        ArrayList<Integer> startIndices = new ArrayList<>(samplingLevel);
+        startIndices.add(0);
+
+        int spread = samplingLevel;
+        while (spread >= 2)
+        {
+            ArrayList<Integer> roundIndices = new ArrayList<>(samplingLevel / spread);
+            for (int i = spread / 2; i < samplingLevel; i += spread)
+                roundIndices.add(i);
+
+            // especially for latter rounds, it's important that we spread out the start points, so we'll
+            // make a recursive call to get an ordering for this list of start points
+            List<Integer> roundIndicesOrdering = getSamplingPattern(roundIndices.size());
+            for (int i = 0; i < roundIndices.size(); ++i)
+                startIndices.add(roundIndices.get(roundIndicesOrdering.get(i)));
+
+            spread /= 2;
+        }
+
+        samplePatternCache.set(samplingLevel, startIndices);
+        return startIndices;
+    }
+
+    @VisibleForTesting
+    static List<Integer> getOriginalIndexes(int samplingLevel)
+    {
+        List<Integer> originalIndexes = originalIndexLookup.get(samplingLevel);
+        if (originalIndexes != null)
+            return originalIndexes;
+
+        List<Integer> pattern = getSamplingPattern(BASE_SAMPLING_LEVEL).subList(0, BASE_SAMPLING_LEVEL - samplingLevel);
+        originalIndexes = new ArrayList<>(samplingLevel);
+        for (int j = 0; j < BASE_SAMPLING_LEVEL; j++)
+        {
+            if (!pattern.contains(j))
+                originalIndexes.add(j);
+        }
+        originalIndexLookup.set(samplingLevel, originalIndexes);
+        return originalIndexes;
+    }
+
+    public int getNumberOfSkippedEntriesAfterIndex(int index)
+    {
+        return getNumberOfSkippedEntriesAfterIndex(index, samplingLevel, indexInterval);
+    }
+
+    @VisibleForTesting
+    static int getNumberOfSkippedEntriesAfterIndex(int index, int samplingLevel, int indexInterval)
+    {
+        assert index >= -1;
+        List<Integer> originalIndexes = getOriginalIndexes(samplingLevel);
+        if (index == -1)
+            return originalIndexes.get(0) * indexInterval;
+
+        index %= samplingLevel;
+        if (index == originalIndexes.size() - 1)
+            return ((BASE_SAMPLING_LEVEL - originalIndexes.get(index)) + originalIndexes.get(0)) * indexInterval;
+        else
+            return (originalIndexes.get(index + 1) - originalIndexes.get(index)) * indexInterval;
+    }
+
     public static class IndexSummarySerializer
     {
         public void serialize(IndexSummary t, DataOutputStream out, boolean withSamplingLevel) throws IOException
         {
             out.writeInt(t.indexInterval);
-            out.writeInt(t.summary_size);
+            out.writeInt(t.summarySize);
             out.writeLong(t.bytes.size());
             if (withSamplingLevel)
                 out.writeInt(t.samplingLevel);
