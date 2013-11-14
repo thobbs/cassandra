@@ -171,7 +171,7 @@ public class SSTableReader extends SSTable implements Closeable
                                        ? new CompressedSegmentedFile.Builder()
                                        : new BufferedSegmentedFile.Builder();
         if (!loadSummary(sstable, ibuilder, dbuilder, sstable.metadata))
-            sstable.buildSummary(false, ibuilder, dbuilder, false, IndexSummary.BASE_SAMPLING_LEVEL);
+            sstable.buildSummary(false, ibuilder, dbuilder, false, Downsampling.BASE_SAMPLING_LEVEL);
         sstable.ifile = ibuilder.complete(sstable.descriptor.filenameFor(Component.PRIMARY_INDEX));
         sstable.dfile = dbuilder.complete(sstable.descriptor.filenameFor(Component.DATA));
 
@@ -450,7 +450,7 @@ public class SSTableReader extends SSTable implements Closeable
 
         boolean summaryLoaded = loadSummary(this, ibuilder, dbuilder, metadata);
         if (recreateBloomFilter || !summaryLoaded)
-            buildSummary(recreateBloomFilter, ibuilder, dbuilder, summaryLoaded, IndexSummary.BASE_SAMPLING_LEVEL);
+            buildSummary(recreateBloomFilter, ibuilder, dbuilder, summaryLoaded, Downsampling.BASE_SAMPLING_LEVEL);
 
         ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
         dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
@@ -730,7 +730,7 @@ public class SSTableReader extends SSTable implements Closeable
             sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
 
         // adjust for the current sampling level
-        long estimatedKeys = sampleKeyCount * (IndexSummary.BASE_SAMPLING_LEVEL * indexSummary.getIndexInterval()) / indexSummary.getSamplingLevel();
+        long estimatedKeys = sampleKeyCount * (Downsampling.BASE_SAMPLING_LEVEL * indexSummary.getIndexInterval()) / indexSummary.getSamplingLevel();
         return Math.max(1, estimatedKeys);
     }
 
@@ -1004,7 +1004,7 @@ public class SSTableReader extends SSTable implements Closeable
                 return null;
             }
         }
-        int skippedIndexEntriesAfterIndex = indexSummary.getNumberOfSkippedEntriesAfterIndex(sampledIndex);
+        int effectiveInterval = indexSummary.getEffectiveIndexIntervalAfterIndex(sampledIndex);
 
         // scan the on-disk index, starting at the nearest sampled position.
         // The check against IndexInterval is to be exit the loop in the EQ case when the key looked for is not present
@@ -1014,12 +1014,12 @@ public class SSTableReader extends SSTable implements Closeable
         // of the next interval).
         int i = 0;
         Iterator<FileDataInput> segments = ifile.iterator(sampledPosition);
-        while (segments.hasNext() && i <= skippedIndexEntriesAfterIndex)
+        while (segments.hasNext() && i <= effectiveInterval)
         {
             FileDataInput in = segments.next();
             try
             {
-                while (!in.isEOF() && i <= skippedIndexEntriesAfterIndex)
+                while (!in.isEOF() && i <= effectiveInterval)
                 {
                     i++;
 
