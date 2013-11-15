@@ -85,7 +85,7 @@ public class SSTableReader extends SSTable implements Closeable
     private SegmentedFile ifile;
     private SegmentedFile dfile;
 
-    private volatile IndexSummary indexSummary;
+    private IndexSummary indexSummary;
     private IFilter bf;
 
     private InstrumentingCache<KeyCacheKey, RowIndexEntry> keyCache;
@@ -97,6 +97,8 @@ public class SSTableReader extends SSTable implements Closeable
     // but it seems like a good extra layer of protection against reference counting bugs to not delete data based on that alone
     private final AtomicBoolean isCompacted = new AtomicBoolean(false);
     private final AtomicBoolean isSuspect = new AtomicBoolean(false);
+    private final AtomicBoolean isReplaced = new AtomicBoolean(false);
+
     private final SSTableDeletingTask deletingTask;
     // not final since we need to be able to change level on a file.
     private volatile SSTableMetadata sstableMetadata;
@@ -107,13 +109,14 @@ public class SSTableReader extends SSTable implements Closeable
     @VisibleForTesting
     public RestorableMeter readMeter;
 
+    // TODO this is wrong, need to adjust for sampling level (and add tests)
     public static long getApproximateKeyCount(Iterable<SSTableReader> sstables, CFMetaData metadata)
     {
         long count = 0;
 
         for (SSTableReader sstable : sstables)
         {
-            int indexKeyCount = sstable.getKeySampleSize();
+            int indexKeyCount = sstable.getIndexSummarySize();
             count = count + (indexKeyCount + 1) * sstable.indexSummary.getIndexInterval();
             if (logger.isDebugEnabled())
                 logger.debug("index size for bloom filter calc for file  : {}  : {}", sstable.getFilename(), count);
@@ -372,11 +375,16 @@ public class SSTableReader extends SSTable implements Closeable
      */
     public void close() throws IOException
     {
-        // Force finalizing mmapping if necessary
-        ifile.cleanup();
-        dfile.cleanup();
-        // close the BF so it can be opened later.
-        bf.close();
+        // if this SSTR was replaced by a new SSTR with a different index summary, the two instances will share
+        // resources, so don't force unmapping, clear the FileCacheService entry, or close the BF
+        if (!isReplaced.get())
+        {
+            // Force finalizing mmapping if necessary
+            ifile.cleanup();
+            dfile.cleanup();
+            // close the BF so it can be opened later.
+            bf.close();
+        }
         indexSummary.close();
     }
 
@@ -449,17 +457,6 @@ public class SSTableReader extends SSTable implements Closeable
         dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
         if (saveSummaryIfCreated && (recreateBloomFilter || !summaryLoaded)) // save summary information to disk
             saveSummary(this, ibuilder, dbuilder);
-    }
-
-    public void rebuildSummary(int samplingLevel) throws IOException
-    {
-        IndexSummary oldSummary = indexSummary;
-        SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
-        SegmentedFile.Builder dbuilder = compression
-                                         ? SegmentedFile.getCompressedBuilder()
-                                         : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
-        buildSummary(false, ibuilder, dbuilder, false, samplingLevel);
-        oldSummary.unreference();
     }
 
     private void buildSummary(boolean recreateBloomFilter, SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, boolean summaryLoaded, int samplingLevel) throws IOException
@@ -585,6 +582,49 @@ public class SSTableReader extends SSTable implements Closeable
         }
     }
 
+    public SSTableReader cloneWithNewSummarySamplingLevel(int samplingLevel) throws IOException
+    {
+        IndexSummary newSummary;
+        if (samplingLevel < indexSummary.getSamplingLevel())
+            newSummary = IndexSummaryBuilder.downsample(indexSummary, samplingLevel, partitioner);
+        else if (samplingLevel > indexSummary.getSamplingLevel())
+            newSummary = upsampleSummary(samplingLevel);
+        else
+            throw new AssertionError("Attempted to clone SSTableReader with the same index summary sampling level");
+
+        markReplaced();
+        SSTableReader replacement = new SSTableReader(descriptor, components, metadata, partitioner, ifile, dfile, newSummary, bf, maxDataAge, sstableMetadata);
+        replacement.readMeter = this.readMeter;
+        // TODO cancel read meter sync task on old SSTR
+        replacement.first = this.first;
+        replacement.last = this.last;
+        return replacement;
+    }
+
+    private IndexSummary upsampleSummary(int newSamplingLevel) throws IOException
+    {
+        // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
+        RandomAccessReader primaryIndex = RandomAccessReader.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX)));
+        try
+        {
+            long indexSize = primaryIndex.length();
+            IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata.getIndexInterval(), newSamplingLevel);
+
+            long indexPosition;
+            while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
+            {
+                summaryBuilder.maybeAddEntry(partitioner.decorateKey(ByteBufferUtil.readWithShortLength(primaryIndex)), indexPosition);
+                RowIndexEntry.serializer.skip(primaryIndex);
+            }
+
+            return summaryBuilder.build(partitioner);
+        }
+        finally
+        {
+            FileUtils.closeQuietly(primaryIndex);
+        }
+    }
+
     public int getIndexSummarySamplingLevel()
     {
         return indexSummary.getSamplingLevel();
@@ -595,28 +635,9 @@ public class SSTableReader extends SSTable implements Closeable
         return indexSummary.getOffHeapSize();
     }
 
-    /**
-     * Sets a new index summary and persists it to disk.
-     */
-    public void setIndexSummary(IndexSummary newSummary) throws IOException
-    {
-        IndexSummary oldSummary = indexSummary;
-        indexSummary = newSummary;
-
-        SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
-        SegmentedFile.Builder dbuilder = compression
-                                         ? SegmentedFile.getCompressedBuilder()
-                                         : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
-        saveSummary(this, ibuilder, dbuilder);
-
-        // this should result in the reference count dropping to zero, resulting in the index summary
-        // being closed and its off-heap memory being freed once all current readers complete
-        oldSummary.unreference();
-    }
-
     public void releaseSummary() throws IOException
     {
-        indexSummary.unreference();
+        indexSummary.close();
         indexSummary = null;
     }
 
@@ -626,35 +647,14 @@ public class SSTableReader extends SSTable implements Closeable
             throw new IllegalStateException(String.format("SSTable first key %s > last key %s", this.first, this.last));
     }
 
-    /**
-     * Returns the current IndexSummary for this sstable with its reference count already incremented.  The
-     * caller *must* ensure that the reference count is decremented after the summary is no longer needed
-     * in order to guarantee that the off-heap memory is freed.
-     * @return the current IndexSummary
-     */
-    public IndexSummary getReferencedIndexSummary()
-    {
-        IndexSummary summary = indexSummary;
-        while (!summary.reference())
-            summary = indexSummary;
-        return summary;
-    }
-
+    // TODO re-simplify these?
     /**
      * Gets the position in the index file to start scanning to find the given key (at most indexInterval keys away,
      * modulo downsampling of the index summary).
      */
     public long getIndexScanPosition(RowPosition key)
     {
-        IndexSummary summary = getReferencedIndexSummary();
-        try
-        {
-            return getIndexScanPositionFromBinarySearchResult(summary.binarySearch(key), summary);
-        }
-        finally
-        {
-            summary.unreference();
-        }
+        return getIndexScanPositionFromBinarySearchResult(indexSummary.binarySearch(key), indexSummary);
     }
 
     public static long getIndexScanPositionFromBinarySearchResult(int binarySearchResult, IndexSummary referencedIndexSummary)
@@ -715,60 +715,44 @@ public class SSTableReader extends SSTable implements Closeable
     /**
      * @return An estimate of the number of keys in this SSTable.
      */
+    // TODO this is wrong, adjust for sampling level
     public long estimatedKeys()
     {
-        IndexSummary summary = getReferencedIndexSummary();
-        try
-        {
-            return ((long) summary.size()) * summary.getIndexInterval();
-        }
-        finally
-        {
-            summary.unreference();
-        }
+        return ((long) indexSummary.size()) * indexSummary.getIndexInterval();
     }
 
     /**
      * @param ranges
      * @return An estimate of the number of keys for given ranges in this SSTable.
      */
+    // TODO this is wrong, adjust for asmpling level
     public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
     {
-        IndexSummary summary = getReferencedIndexSummary();
-        try
-        {
-            long sampleKeyCount = 0;
-            List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(summary, ranges);
-            for (Pair<Integer, Integer> sampleIndexRange : sampleIndexes)
-                sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
-            return Math.max(1, sampleKeyCount * summary.getIndexInterval());
-        }
-        finally
-        {
-            summary.unreference();
-        }
+        long sampleKeyCount = 0;
+        List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(indexSummary, ranges);
+        for (Pair<Integer, Integer> sampleIndexRange : sampleIndexes)
+            sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
+        return Math.max(1, sampleKeyCount * indexSummary.getIndexInterval());
     }
 
     /**
      * @return Approximately 1/INDEX_INTERVALth of the keys in this SSTable.
      */
-    public int getKeySampleSize()
+    // TODO make sure callers are using this correctly (so that sampling level doesn't matter)
+    public int getIndexSummarySize()
     {
         return indexSummary.size();
     }
 
+    public int getMaxIndexSummarySize()
+    {
+        return indexSummary.getMaxNumberOfEntries();
+    }
+
+    // TODO rename, figure out what position is supposed to be
     public byte[] getKeySample(int position)
     {
-
-        IndexSummary summary = getReferencedIndexSummary();
-        try
-        {
-            return summary.getKey(position);
-        }
-        finally
-        {
-            summary.unreference();
-        }
+        return indexSummary.getKey(position);
     }
 
     private static List<Pair<Integer,Integer>> getSampleIndexesForRanges(IndexSummary summary, Collection<Range<Token>> ranges)
@@ -815,29 +799,50 @@ public class SSTableReader extends SSTable implements Closeable
 
     public Iterable<DecoratedKey> getKeySamples(final Range<Token> range)
     {
-        final IndexSummary summary = getReferencedIndexSummary();
-        try
+        final List<Pair<Integer, Integer>> indexRanges = getSampleIndexesForRanges(indexSummary, Collections.singletonList(range));
+
+        if (indexRanges.isEmpty())
+            return Collections.emptyList();
+
+        return new Iterable<DecoratedKey>()
         {
-            final List<Pair<Integer, Integer>> indexRanges = getSampleIndexesForRanges(summary, Collections.singletonList(range));
-
-            if (indexRanges.isEmpty())
-                return Collections.emptyList();
-
-            List<DecoratedKey> keys = new ArrayList<>();
-            for (Pair<Integer, Integer> currentRange : indexRanges)
+            public Iterator<DecoratedKey> iterator()
             {
-                for (int i = currentRange.left; i < currentRange.right; i++)
+                return new Iterator<DecoratedKey>()
                 {
-                    byte[] bytes = summary.getKey(i);
-                    keys.add(partitioner.decorateKey(ByteBuffer.wrap(bytes)));
-                }
+                    private Iterator<Pair<Integer, Integer>> rangeIter = indexRanges.iterator();
+                    private Pair<Integer, Integer> current;
+                    private int idx;
+
+                    public boolean hasNext()
+                    {
+                        if (current == null || idx > current.right)
+                        {
+                            if (rangeIter.hasNext())
+                            {
+                                current = rangeIter.next();
+                                idx = current.left;
+                                return true;
+                            }
+                            return false;
+                        }
+
+                        return true;
+                    }
+
+                    public DecoratedKey next()
+                    {
+                        byte[] bytes = indexSummary.getKey(idx++);
+                        return partitioner.decorateKey(ByteBuffer.wrap(bytes));
+                    }
+
+                    public void remove()
+                    {
+                        throw new UnsupportedOperationException();
+                    }
+                };
             }
-            return keys;
-        }
-        finally
-        {
-            summary.unreference();
-        }
+        };
     }
 
     /**
@@ -976,36 +981,26 @@ public class SSTableReader extends SSTable implements Closeable
         }
 
         // next, see if the sampled index says it's impossible for the key to be present
-        IndexSummary summary = getReferencedIndexSummary();
-        long sampledPosition;
-        int sampledIndex, skippedIndexEntriesAfterIndex;
-        try
+        int binarySearchResult = indexSummary.binarySearch(key);
+        long sampledPosition = getIndexScanPositionFromBinarySearchResult(binarySearchResult, indexSummary);
+        int sampledIndex = getIndexSummaryIndexFromBinarySearchResult(binarySearchResult);
+        if (sampledPosition == -1)
         {
-            int binarySearchResult = summary.binarySearch(key);
-            sampledPosition = getIndexScanPositionFromBinarySearchResult(binarySearchResult, summary);
-            sampledIndex = getIndexSummaryIndexFromBinarySearchResult(binarySearchResult);
-            if (sampledPosition == -1)
+            if (op == Operator.EQ && updateCacheAndStats)
+                bloomFilterTracker.addFalsePositive();
+            // we matched the -1th position: if the operator might match forward, we'll start at the first
+            // position. We however need to return the correct index entry for that first position.
+            if (op.apply(1) >= 0)
             {
-                if (op == Operator.EQ && updateCacheAndStats)
-                    bloomFilterTracker.addFalsePositive();
-                // we matched the -1th position: if the operator might match forward, we'll start at the first
-                // position. We however need to return the correct index entry for that first position.
-                if (op.apply(1) >= 0)
-                {
-                    sampledPosition = 0;
-                }
-                else
-                {
-                    Tracing.trace("Partition summary allows skipping sstable {}", descriptor.generation);
-                    return null;
-                }
+                sampledPosition = 0;
             }
-            skippedIndexEntriesAfterIndex = summary.getNumberOfSkippedEntriesAfterIndex(sampledIndex);
+            else
+            {
+                Tracing.trace("Partition summary allows skipping sstable {}", descriptor.generation);
+                return null;
+            }
         }
-        finally
-        {
-            summary.unreference();
-        }
+        int skippedIndexEntriesAfterIndex = indexSummary.getNumberOfSkippedEntriesAfterIndex(sampledIndex);
 
         // scan the on-disk index, starting at the nearest sampled position.
         // The check against IndexInterval is to be exit the loop in the EQ case when the key looked for is not present
@@ -1155,6 +1150,12 @@ public class SSTableReader extends SSTable implements Closeable
         return dfile.onDiskLength;
     }
 
+    public void markReplaced()
+    {
+        boolean success = isReplaced.compareAndSet(false, true);
+        assert success : "Attempted to mark an SSTableReader as replaced more than once";
+    }
+
     public boolean acquireReference()
     {
         while (true)
@@ -1174,19 +1175,25 @@ public class SSTableReader extends SSTable implements Closeable
      */
     public void releaseReference()
     {
-        if (references.decrementAndGet() == 0 && isCompacted.get())
+        if (references.decrementAndGet() == 0)
         {
-            /**
-             * Make OS a favour and suggest (using fadvice call) that we
-             * don't want to see pages of this SSTable in memory anymore.
-             *
-             * NOTE: We can't use madvice in java because it requires address of
-             * the mapping, so instead we always open a file and run fadvice(fd, 0, 0) on it
-             */
-            dropPageCache();
-
             FileUtils.closeQuietly(this);
-            deletingTask.schedule();
+
+            // if this SSTR instance was replaced by another with a different index summary, let the new instance
+            // handle clearing the page cache and deleting the files
+            if (!isReplaced.get() && isCompacted.get())
+            {
+                /**
+                 * Do the OS a favour and suggest (using fadvice call) that we
+                 * don't want to see pages of this SSTable in memory anymore.
+                 *
+                 * NOTE: We can't use madvice in java because it requires the address of
+                 * the mapping, so instead we always open a file and run fadvice(fd, 0, 0) on it
+                 */
+                dropPageCache();
+
+                deletingTask.schedule();
+            }
         }
         assert references.get() >= 0 : "Reference counter " +  references.get() + " for " + dfile.path;
     }

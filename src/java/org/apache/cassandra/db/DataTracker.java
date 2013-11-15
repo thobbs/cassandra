@@ -328,6 +328,39 @@ public class DataTracker
                           SSTableIntervalTree.empty()));
     }
 
+    /**
+     * A special kind of replacement for SSTableReaders that were cloned with a new index summary sampling level (see
+     * SSTableReader.cloneWithNewSummarySamplingLevel and CASSANDRA-5519).  This does not mark the old reader
+     * as compacted.
+     * @param oldSSTables replaced readers
+     * @param newSSTables replacement readers
+     */
+    public void replaceReaders(List<SSTableReader> oldSSTables, List<SSTableReader> newSSTables)
+    {
+        long sizeIncrease = 0;
+        for (SSTableReader sstable : oldSSTables)
+            sizeIncrease -= sstable.bytesOnDisk();
+        for (SSTableReader sstable : newSSTables)
+            sizeIncrease += sstable.bytesOnDisk();
+
+        View currentView, newView;
+        do
+        {
+            currentView = view.get();
+            newView = currentView.replace(oldSSTables, newSSTables);
+        }
+        while (!view.compareAndSet(currentView, newView));
+
+        StorageMetrics.load.inc(sizeIncrease);
+        cfstore.metric.liveDiskSpaceUsed.inc(sizeIncrease);
+
+        for (SSTableReader sstable : oldSSTables)
+            sstable.releaseReference();
+
+        for (SSTableReader sstable : newSSTables)
+            sstable.setTrackedBy(this);
+    }
+
     private void replace(Collection<SSTableReader> oldSSTables, Iterable<SSTableReader> replacements)
     {
         if (!cfstore.isValid())

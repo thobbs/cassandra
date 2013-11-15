@@ -261,7 +261,7 @@ public class SSTableReaderTest extends SchemaLoader
 
         // test to see if sstable can be opened as expected
         SSTableReader target = SSTableReader.open(desc);
-        Assert.assertEquals(target.getKeySampleSize(), 1);
+        Assert.assertEquals(target.getIndexSummarySize(), 1);
         Assert.assertArrayEquals(ByteBufferUtil.getArray(firstKey.key), target.getKeySample(0));
         assert target.first.equals(firstKey);
         assert target.last.equals(lastKey);
@@ -354,7 +354,7 @@ public class SSTableReaderTest extends SchemaLoader
     public void testIndexSummaryReplacement() throws IOException, ExecutionException, InterruptedException
     {
         Keyspace keyspace = Keyspace.open("Keyspace1");
-        ColumnFamilyStore store = keyspace.getColumnFamilyStore("StandardLowIndexInterval"); // index interval of 8
+        final ColumnFamilyStore store = keyspace.getColumnFamilyStore("StandardLowIndexInterval"); // index interval of 8
         CompactionManager.instance.disableAutoCompaction();
 
         final int NUM_ROWS = 1000;
@@ -362,7 +362,7 @@ public class SSTableReaderTest extends SchemaLoader
         {
             ByteBuffer key = ByteBufferUtil.bytes(String.format("%3d", j));
             RowMutation rm = new RowMutation("Keyspace1", key);
-            rm.add("StandardLowIndexInterval", ByteBufferUtil.bytes("0"), ByteBufferUtil.EMPTY_BYTE_BUFFER, j);
+            rm.add("StandardLowIndexInterval", ByteBufferUtil.bytes("0"), ByteBufferUtil.bytes(String.format("%3d", j)), j);
             rm.apply();
         }
         store.forceBlockingFlush();
@@ -371,26 +371,6 @@ public class SSTableReaderTest extends SchemaLoader
         Collection<SSTableReader> sstables = store.getSSTables();
         assert sstables.size() == 1;
         final SSTableReader sstable = sstables.iterator().next();
-        IndexSummary originalSummary = sstable.getReferencedIndexSummary();
-        originalSummary.unreference();
-
-        final List<Long> expectedPositions = new ArrayList<>(NUM_ROWS);
-        final List<Long> expectedGEPositions = new ArrayList<>(NUM_ROWS);
-        final List<Long> expectedGTPositions = new ArrayList<>(NUM_ROWS);
-        for (int i = 0; i < NUM_ROWS; i++)
-        {
-            DecoratedKey key = sstable.partitioner.decorateKey(ByteBufferUtil.bytes(String.format("%3d", i)));
-            RowIndexEntry entry = sstable.getPosition(key, SSTableReader.Operator.EQ);
-            assert entry != null : String.format("unexpectedly got a null position for key %s", key);
-            expectedPositions.add(entry.position);
-
-            entry = sstable.getPosition(key, SSTableReader.Operator.GE);
-            assert entry != null : String.format("unexpectedly got a null position for key %s", key);
-            expectedGEPositions.add(entry.position);
-
-            entry = sstable.getPosition(key, SSTableReader.Operator.GT);
-            expectedGTPositions.add(entry == null ? null : entry.position);
-        }
 
         ThreadPoolExecutor executor = new ScheduledThreadPoolExecutor(5);
         List<Future> futures = new ArrayList<>(NUM_ROWS * 2);
@@ -403,21 +383,9 @@ public class SSTableReaderTest extends SchemaLoader
             {
                 public void run()
                 {
-                    RowIndexEntry entry;
-
-                    entry = sstable.getPosition(sstable.partitioner.decorateKey(key), SSTableReader.Operator.EQ);
-                    assertNotNull(String.format("Got null position on index %d", index), entry);
-                    assertEquals(expectedPositions.get(index), (Long) entry.position);
-
-                    entry = sstable.getPosition(sstable.partitioner.decorateKey(key), SSTableReader.Operator.GE);
-                    assertNotNull(String.format("Got null position on index %d", index), entry);
-                    assertEquals(expectedGEPositions.get(index), (Long) entry.position);
-
-                    entry = sstable.getPosition(sstable.partitioner.decorateKey(key), SSTableReader.Operator.GT);
-                    if (entry == null)
-                        assertTrue(String.format("Got null position on index %d", index), expectedGTPositions.get(index) == null);
-                    else
-                        assertEquals(expectedGTPositions.get(index), (Long) entry.position);
+                    ColumnFamily result = store.getColumnFamily(sstable.partitioner.decorateKey(key), ByteBufferUtil.EMPTY_BYTE_BUFFER, ByteBufferUtil.EMPTY_BYTE_BUFFER, false, 100, 100);
+                    assertFalse(result.isEmpty());
+                    assertEquals(0, ByteBufferUtil.compare(String.format("%3d", index).getBytes(), result.getColumn(ByteBufferUtil.bytes("0")).value()));
                 }
             }));
 
@@ -425,16 +393,17 @@ public class SSTableReaderTest extends SchemaLoader
             {
                 public void run()
                 {
-                    sstable.getKeySamples(new Range<>(sstable.partitioner.getMinimumToken(), sstable.partitioner.getToken(key)));
+                    Iterable<DecoratedKey> results = store.keySamples(
+                            new Range<>(sstable.partitioner.getMinimumToken(), sstable.partitioner.getToken(key)));
+                    assertTrue(results.iterator().hasNext());
                 }
             }));
         }
 
-        sstable.rebuildSummary(IndexSummary.MIN_SAMPLING_LEVEL);
+        SSTableReader replacement = sstable.cloneWithNewSummarySamplingLevel(IndexSummary.MIN_SAMPLING_LEVEL);
+        store.getDataTracker().replaceReaders(Arrays.asList(sstable), Arrays.asList(replacement));
         for (Future future : futures)
             future.get();
-
-        assertFalse("The original index summary reference count should have dropped to zero", originalSummary.reference());
     }
 
     private void assertIndexQueryWorks(ColumnFamilyStore indexedCFS) throws IOException

@@ -82,11 +82,6 @@ public class IndexSummary implements Closeable
     private final int summarySize;
     private final Memory bytes;
 
-    // In order to properly free the off-heap memory for this index summary without locking access to it, we'll use
-    // a reference counting strategy.
-    private volatile int references = 1;
-    private static final AtomicIntegerFieldUpdater<IndexSummary> UPDATER = AtomicIntegerFieldUpdater.newUpdater(IndexSummary.class, "references");
-
     /*
      * A value between MIN_SAMPLING_LEVEL and BASE_SAMPLING_LEVEL that represents how many of the original
      * index summary entries ((1 / indexInterval) * numKeys) have been retained.
@@ -313,38 +308,6 @@ public class IndexSummary implements Closeable
             Memory memory = Memory.allocate(offheapSize);
             FBUtilities.copy(in, new MemoryOutputStream(memory), offheapSize);
             return new IndexSummary(partitioner, memory, summarySize, indexInterval, downsampleLevel);
-        }
-    }
-
-    /**
-     * @return true if we succeed in referencing before the reference count reaches zero.
-     * (New instances are created with a reference count of one.)
-     */
-    public boolean reference()
-    {
-        while (true)
-        {
-            int n = UPDATER.get(this);
-            if (n <= 0)
-                return false;
-            if (UPDATER.compareAndSet(this, n, n + 1))
-                return true;
-        }
-    }
-
-    /** decrement reference count.  if count reaches zero, the off-heap memory for this IndexSummary is freed. */
-    public void unreference()
-    {
-        if (UPDATER.decrementAndGet(this) == 0)
-        {
-            try
-            {
-                close();
-            }
-            catch (IOException ioe)
-            {
-                 logger.error("Error freeing memory for index summary: ", ioe);
-            }
         }
     }
 

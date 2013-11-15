@@ -124,12 +124,12 @@ public class IndexSummaryBuilder
         return new IndexSummary(partitioner, memory, keys.size(), indexInterval, samplingLevel);
     }
 
-    public static int entriesAtSamplingLevel(IndexSummary summary, int samplingLevel)
+    public static int entriesAtSamplingLevel(int samplingLevel, int maxSummarySize)
     {
-        return (samplingLevel * summary.getMaxNumberOfEntries()) / IndexSummary.BASE_SAMPLING_LEVEL;
+        return (samplingLevel * maxSummarySize) / IndexSummary.BASE_SAMPLING_LEVEL;
     }
 
-    public static int calculateSamplingLevel(IndexSummary existing, long targetNumEntries)
+    public static int calculateSamplingLevel(int currentSamplingLevel, int currentNumEntries, long targetNumEntries)
     {
         // Algebraic explanation for calculating the new sampling level (solve for newSamplingLevel):
         // originalNumEntries = (baseSamplingLevel / currentSamplingLevel) * currentNumEntries
@@ -137,7 +137,7 @@ public class IndexSummaryBuilder
         // newSpaceUsed = (newSamplingLevel / baseSamplingLevel) * (baseSamplingLevel / currentSamplingLevel) * currentNumEntries
         // newSpaceUsed = (newSamplingLevel / currentSamplingLevel) * currentNumEntries
         // (newSpaceUsed * currentSamplingLevel) / currentNumEntries = newSamplingLevel
-        int newSamplingLevel = (int) (targetNumEntries * existing.getSamplingLevel()) / existing.size();
+        int newSamplingLevel = (int) (targetNumEntries * currentSamplingLevel) / currentNumEntries;
         return Math.min(IndexSummary.BASE_SAMPLING_LEVEL, Math.max(IndexSummary.MIN_SAMPLING_LEVEL, newSamplingLevel));
     }
 
