@@ -259,13 +259,12 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             int currentNumEntries = sstr.getIndexSummarySize();
             double avgEntrySize = sstr.getIndexSummaryOffHeapSize() / (double) currentNumEntries;
             long targetNumEntries = Math.round(idealSpace / avgEntrySize);
-            int newSamplingLevel = IndexSummaryBuilder.calculateSamplingLevel(
-                    sstr.getIndexSummarySamplingLevel(), sstr.getIndexSummarySize(), targetNumEntries);
+            int currentSamplingLevel = sstr.getIndexSummarySamplingLevel();
+            int newSamplingLevel = IndexSummaryBuilder.calculateSamplingLevel(currentSamplingLevel, currentNumEntries, targetNumEntries);
 
             logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes; target number of retained entries: {}",
                          sstr.getFilename(), readsPerSec, idealSpace, targetNumEntries);
 
-            int currentSamplingLevel = sstr.getIndexSummarySamplingLevel();
             int numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstr.getMaxIndexSummarySize());
 
             if (targetNumEntries >= currentNumEntries * UPSAMPLE_THRESHOLD && newSamplingLevel > currentSamplingLevel)

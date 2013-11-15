@@ -109,15 +109,14 @@ public class SSTableReader extends SSTable implements Closeable
     @VisibleForTesting
     public RestorableMeter readMeter;
 
-    // TODO this is wrong, need to adjust for sampling level (and add tests)
     public static long getApproximateKeyCount(Iterable<SSTableReader> sstables, CFMetaData metadata)
     {
         long count = 0;
 
         for (SSTableReader sstable : sstables)
         {
-            int indexKeyCount = sstable.getIndexSummarySize();
-            count = count + (indexKeyCount + 1) * sstable.indexSummary.getIndexInterval();
+            // using getMaxIndexSummarySize() lets us ignore the current sampling level
+            count += (sstable.getMaxIndexSummarySize() + 1) * sstable.indexSummary.getSamplingLevel();
             if (logger.isDebugEnabled())
                 logger.debug("index size for bloom filter calc for file  : {}  : {}", sstable.getFilename(), count);
         }
@@ -647,7 +646,6 @@ public class SSTableReader extends SSTable implements Closeable
             throw new IllegalStateException(String.format("SSTable first key %s > last key %s", this.first, this.last));
     }
 
-    // TODO re-simplify these?
     /**
      * Gets the position in the index file to start scanning to find the given key (at most indexInterval keys away,
      * modulo downsampling of the index summary).
@@ -715,44 +713,50 @@ public class SSTableReader extends SSTable implements Closeable
     /**
      * @return An estimate of the number of keys in this SSTable.
      */
-    // TODO this is wrong, adjust for sampling level
     public long estimatedKeys()
     {
-        return ((long) indexSummary.size()) * indexSummary.getIndexInterval();
+        return ((long) indexSummary.getMaxNumberOfEntries()) * indexSummary.getIndexInterval();
     }
 
     /**
      * @param ranges
      * @return An estimate of the number of keys for given ranges in this SSTable.
      */
-    // TODO this is wrong, adjust for asmpling level
     public long estimatedKeysForRanges(Collection<Range<Token>> ranges)
     {
         long sampleKeyCount = 0;
         List<Pair<Integer, Integer>> sampleIndexes = getSampleIndexesForRanges(indexSummary, ranges);
         for (Pair<Integer, Integer> sampleIndexRange : sampleIndexes)
             sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
-        return Math.max(1, sampleKeyCount * indexSummary.getIndexInterval());
+
+        // adjust for the current sampling level
+        long estimatedKeys = sampleKeyCount * (IndexSummary.BASE_SAMPLING_LEVEL * indexSummary.getIndexInterval()) / indexSummary.getSamplingLevel();
+        return Math.max(1, estimatedKeys);
     }
 
     /**
-     * @return Approximately 1/INDEX_INTERVALth of the keys in this SSTable.
+     * Returns the number of entries in the IndexSummary.  At full sampling, this is approximately 1/INDEX_INTERVALth of
+     * the keys in this SSTable.
      */
-    // TODO make sure callers are using this correctly (so that sampling level doesn't matter)
     public int getIndexSummarySize()
     {
         return indexSummary.size();
     }
 
+    /**
+     * Returns the approximate number of entries the IndexSummary would contain if it were at full sampling.
+     */
     public int getMaxIndexSummarySize()
     {
         return indexSummary.getMaxNumberOfEntries();
     }
 
-    // TODO rename, figure out what position is supposed to be
-    public byte[] getKeySample(int position)
+    /**
+     * Returns the key for the index summary entry at `index`.
+     */
+    public byte[] getIndexSummaryKey(int index)
     {
-        return indexSummary.getKey(position);
+        return indexSummary.getKey(index);
     }
 
     private static List<Pair<Integer,Integer>> getSampleIndexesForRanges(IndexSummary summary, Collection<Range<Token>> ranges)

@@ -262,7 +262,7 @@ public class SSTableReaderTest extends SchemaLoader
         // test to see if sstable can be opened as expected
         SSTableReader target = SSTableReader.open(desc);
         Assert.assertEquals(target.getIndexSummarySize(), 1);
-        Assert.assertArrayEquals(ByteBufferUtil.getArray(firstKey.key), target.getKeySample(0));
+        Assert.assertArrayEquals(ByteBufferUtil.getArray(firstKey.key), target.getIndexSummaryKey(0));
         assert target.first.equals(firstKey);
         assert target.last.equals(lastKey);
     }
@@ -404,6 +404,8 @@ public class SSTableReaderTest extends SchemaLoader
         store.getDataTracker().replaceReaders(Arrays.asList(sstable), Arrays.asList(replacement));
         for (Future future : futures)
             future.get();
+
+        assertEquals(sstable.estimatedKeys(), replacement.estimatedKeys(), replacement.metadata.getIndexInterval());
     }
 
     private void assertIndexQueryWorks(ColumnFamilyStore indexedCFS) throws IOException
