@@ -54,6 +54,7 @@ public class IndexSummary implements Closeable
     private final int indexInterval;
     private final IPartitioner partitioner;
     private final int summarySize;
+    private final int sizeAtFullSampling;
     private final Memory bytes;
 
     /**
@@ -64,11 +65,12 @@ public class IndexSummary implements Closeable
      */
     private final int samplingLevel;
 
-    public IndexSummary(IPartitioner partitioner, Memory memory, int summarySize, int indexInterval, int samplingLevel)
+    public IndexSummary(IPartitioner partitioner, Memory memory, int summarySize, int sizeAtFullSampling, int indexInterval, int samplingLevel)
     {
         this.partitioner = partitioner;
         this.indexInterval = indexInterval;
         this.summarySize = summarySize;
+        this.sizeAtFullSampling = sizeAtFullSampling;
         this.bytes = memory;
         this.samplingLevel = samplingLevel;
     }
@@ -154,12 +156,12 @@ public class IndexSummary implements Closeable
     }
 
     /**
-     * Returns the number of entries this summary would have if it were at the full sampling level.
-     * @return the most entries this summary could have
+     * Returns the number of entries this summary would have if it were at the full sampling level, which is equal
+     * to the number of entries in the primary on-disk index divided by the index interval.
      */
     public int getMaxNumberOfEntries()
     {
-        return (BASE_SAMPLING_LEVEL * summarySize) / samplingLevel;
+        return sizeAtFullSampling;
     }
 
     /**
@@ -193,7 +195,10 @@ public class IndexSummary implements Closeable
             out.writeInt(t.summarySize);
             out.writeLong(t.bytes.size());
             if (withSamplingLevel)
+            {
                 out.writeInt(t.samplingLevel);
+                out.writeInt(t.sizeAtFullSampling);
+            }
             FBUtilities.copy(new MemoryInputStream(t.bytes), out, t.bytes.size());
         }
 
@@ -202,10 +207,20 @@ public class IndexSummary implements Closeable
             int indexInterval = in.readInt();
             int summarySize = in.readInt();
             long offheapSize = in.readLong();
-            int downsampleLevel = haveSamplingLevel ? in.readInt() : BASE_SAMPLING_LEVEL;
+            int samplingLevel, fullSamplingSummarySize;
+            if (haveSamplingLevel)
+            {
+                samplingLevel = in.readInt();
+                fullSamplingSummarySize = in.readInt();
+            }
+            else
+            {
+                samplingLevel = BASE_SAMPLING_LEVEL;
+                fullSamplingSummarySize = summarySize;
+            }
             Memory memory = Memory.allocate(offheapSize);
             FBUtilities.copy(in, new MemoryOutputStream(memory), offheapSize);
-            return new IndexSummary(partitioner, memory, summarySize, indexInterval, downsampleLevel);
+            return new IndexSummary(partitioner, memory, summarySize, fullSamplingSummarySize, indexInterval, samplingLevel);
         }
     }
 

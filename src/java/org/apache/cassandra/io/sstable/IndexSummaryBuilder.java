@@ -124,7 +124,8 @@ public class IndexSummaryBuilder
             memory.setLong(keyPosition, actualIndexPosition);
             keyPosition += TypeSizes.NATIVE.sizeof(actualIndexPosition);
         }
-        return new IndexSummary(partitioner, memory, keys.size(), indexInterval, samplingLevel);
+        int sizeAtFullSampling = (int) (keysWritten / indexInterval);
+        return new IndexSummary(partitioner, memory, keys.size(), sizeAtFullSampling, indexInterval, samplingLevel);
     }
 
     public static int entriesAtSamplingLevel(int samplingLevel, int maxSummarySize)
@@ -160,7 +161,7 @@ public class IndexSummaryBuilder
         // round.
 
         int currentSamplingLevel = existing.getSamplingLevel();
-        assert currentSamplingLevel < newSamplingLevel;
+        assert currentSamplingLevel > newSamplingLevel;
 
         // calculate starting indexes for downsampling rounds
         int[] startPoints = Downsampling.getStartPoints(currentSamplingLevel, newSamplingLevel);
@@ -206,6 +207,6 @@ public class IndexSummaryBuilder
             memory.setBytes(keyPosition, entry, 0, entry.length);
             keyPosition += entry.length;
         }
-        return new IndexSummary(partitioner, memory, newKeyCount, existing.getIndexInterval(), newSamplingLevel);
+        return new IndexSummary(partitioner, memory, newKeyCount, existing.getMaxNumberOfEntries(), existing.getIndexInterval(), newSamplingLevel);
     }
 }

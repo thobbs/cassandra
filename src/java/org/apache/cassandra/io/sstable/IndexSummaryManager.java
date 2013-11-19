@@ -287,9 +287,12 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             totalReadsPerSec -= readsPerSec;
         }
 
-        Pair<List<SSTableReader>, List<ResampleEntry>> result = distributeRemainingSpace(toDownsample, remainingSpace);
-        toDownsample = result.right;
-        newSSTables.addAll(result.left);
+        if (remainingSpace > 0)
+        {
+            Pair<List<SSTableReader>, List<ResampleEntry>> result = distributeRemainingSpace(toDownsample, remainingSpace);
+            toDownsample = result.right;
+            newSSTables.addAll(result.left);
+        }
 
         // downsample first, then upsample
         toDownsample.addAll(toUpsample);
