@@ -405,7 +405,7 @@ public class SSTableReaderTest extends SchemaLoader
         for (Future future : futures)
             future.get();
 
-        assertEquals(sstable.estimatedKeys(), replacement.estimatedKeys(), replacement.metadata.getIndexInterval());
+        assertEquals(sstable.estimatedKeys(), replacement.estimatedKeys(), 1);
     }
 
     private void assertIndexQueryWorks(ColumnFamilyStore indexedCFS) throws IOException

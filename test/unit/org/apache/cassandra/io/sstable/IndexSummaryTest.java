@@ -28,6 +28,9 @@ import java.util.*;
 import com.google.common.collect.Lists;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -52,6 +55,8 @@ import static org.junit.Assert.*;
 
 public class IndexSummaryTest extends SchemaLoader
 {
+    private static final Logger logger = LoggerFactory.getLogger(IndexSummaryTest.class);
+
     @Test
     public void testGetKey()
     {
@@ -250,7 +255,8 @@ public class IndexSummaryTest extends SchemaLoader
         {
             sstable = sstable.cloneWithNewSummarySamplingLevel(samplingLevel);
             assertEquals(samplingLevel, sstable.getIndexSummarySamplingLevel());
-            assertEquals((numRows * samplingLevel) / (sstable.metadata.getIndexInterval() * BASE_SAMPLING_LEVEL), sstable.getIndexSummarySize());
+            int expectedSize = (numRows * samplingLevel) / (sstable.metadata.getIndexInterval() * BASE_SAMPLING_LEVEL);
+            assertEquals(expectedSize, sstable.getIndexSummarySize(), 1);
         }
     }
 
@@ -395,43 +401,47 @@ public class IndexSummaryTest extends SchemaLoader
         sstables = resetSummaries(sstables, offHeapSize);
         sstables.get(0).readMeter = new RestorableMeter(50.0, 50.0);
         sstables.get(1).readMeter = new RestorableMeter(50.0, 50.0);
-        int extraEntries = entriesAtSamplingLevel((BASE_SAMPLING_LEVEL / 2) + 1, sstables.get(0).getMaxIndexSummarySize()) -
-                           entriesAtSamplingLevel(BASE_SAMPLING_LEVEL / 2, sstables.get(0).getMaxIndexSummarySize());
+
+        int currentEntries = entriesAtSamplingLevel(BASE_SAMPLING_LEVEL / 2, sstables.get(0).getMaxIndexSummarySize());
+        int expectedLevel = BASE_SAMPLING_LEVEL / 2 + 1;
+        while (entriesAtSamplingLevel(expectedLevel, sstables.get(0).getMaxIndexSummarySize()) <= currentEntries)
+            expectedLevel += 1;
 
         double avgSize = sstables.get(0).getIndexSummaryOffHeapSize() / (double) sstables.get(0).getIndexSummarySize();
-        int extraSpace = (int) Math.ceil(extraEntries * avgSize);
-        sstables = redistributeSummaries(sstables, offHeapSize * (numSSTables - 1) + extraSpace);
+
+        sstables = redistributeSummaries(sstables, offHeapSize * (numSSTables - 1) + (long) Math.ceil(avgSize));
         Collections.sort(sstables, hotnessComparator);
 
-        if (sstables.get(0).getIndexSummarySamplingLevel() == BASE_SAMPLING_LEVEL / 2)
-            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstables.get(1).getIndexSummarySamplingLevel());
-        else if (sstables.get(1).getIndexSummarySamplingLevel() == BASE_SAMPLING_LEVEL / 2)
-            assertEquals((BASE_SAMPLING_LEVEL / 2) + 1, sstables.get(0).getIndexSummarySamplingLevel());
-        else
-            fail("One of the first two sstables should be downsampled to half of the original summary");
+        int indexOfHigherLevel = sstables.get(0).getIndexSummarySamplingLevel() == expectedLevel ? 0 : 1;
+        int higherLevel = sstables.get(indexOfHigherLevel).getIndexSummarySamplingLevel();
+        int lowerLevel = sstables.get(indexOfHigherLevel == 0 ? 1 : 0).getIndexSummarySamplingLevel();
 
+        assertEquals(expectedLevel, higherLevel);
+        assertTrue(lowerLevel < higherLevel && lowerLevel >= BASE_SAMPLING_LEVEL / 2);
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(2).getIndexSummarySamplingLevel());
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
+
         // Cause a mix of upsampling and downsampling. We'll leave enough space for two full index summaries. The two
-        // coldest sstables will get downsampled to 1/4 of their size, leaving us with 1.5 index summaries worth of
-        // space.  The hottest sstable should get a full index summary, and the one in the middle should get half
-        // a summary.
+        // coldest sstables will get downsampled to 8/128 of their size, leaving us with 1 and 112/128th index
+        // summaries worth of space.  The hottest sstable should get a full index summary, and the one in the middle
+        // should get the remaining 112/128th.
+        int leftovers = BASE_SAMPLING_LEVEL - (MIN_SAMPLING_LEVEL * 2);
         sstables.get(0).readMeter = new RestorableMeter(0.0, 0.0);
         sstables.get(1).readMeter = new RestorableMeter(0.0, 0.0);
-        sstables.get(2).readMeter = new RestorableMeter(100.0, 100.0);
-        sstables.get(3).readMeter = new RestorableMeter(200.0, 200.0);
+        sstables.get(2).readMeter = new RestorableMeter(leftovers, leftovers);
+        sstables.get(3).readMeter = new RestorableMeter(128.0, 128.0);
         sstables = redistributeSummaries(sstables, offHeapSize * 2);
         Collections.sort(sstables, hotnessComparator);
         assertEquals(MIN_SAMPLING_LEVEL, sstables.get(0).getIndexSummarySamplingLevel());
         assertEquals(MIN_SAMPLING_LEVEL, sstables.get(1).getIndexSummarySamplingLevel());
-        assertEquals(BASE_SAMPLING_LEVEL / 2, sstables.get(2).getIndexSummarySamplingLevel());
+        assertEquals(leftovers, sstables.get(2).getIndexSummarySamplingLevel());
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // Don't leave enough space for even the minimal index summaries
-        sstables = redistributeSummaries(sstables, offHeapSize - 100);
+        sstables = redistributeSummaries(sstables, (long) ((offHeapSize * numSSTables) * (MIN_SAMPLING_LEVEL / (double) BASE_SAMPLING_LEVEL) - 1));
         for (SSTableReader sstable : sstables)
             assertEquals(MIN_SAMPLING_LEVEL, sstable.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
@@ -443,15 +453,18 @@ public class IndexSummaryTest extends SchemaLoader
         for (int i = BASE_SAMPLING_LEVEL; i >= MIN_SAMPLING_LEVEL; i--)
             assertEquals(i, Downsampling.getOriginalIndexes(i).size());
 
-        // spot check a few values (these depend on BASE_SAMPLING_LEVEL being 16)
-        assert BASE_SAMPLING_LEVEL == 16;
-        assertEquals(Arrays.asList(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), Downsampling.getOriginalIndexes(16));
-        assertEquals(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15), Downsampling.getOriginalIndexes(15));
-        assertEquals(Arrays.asList(1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15), Downsampling.getOriginalIndexes(14));
+        ArrayList<Integer> full = new ArrayList<>();
+        for (int i = 0; i < BASE_SAMPLING_LEVEL; i++)
+            full.add(i);
 
-        assertEquals(Arrays.asList(1, 3, 5, 7, 9, 11, 13, 15), Downsampling.getOriginalIndexes(8));
-        assertEquals(Arrays.asList(3, 7, 11, 15), Downsampling.getOriginalIndexes(4));
-        assertEquals(Arrays.asList(7, 15), Downsampling.getOriginalIndexes(2));
+        assertEquals(full, Downsampling.getOriginalIndexes(BASE_SAMPLING_LEVEL));
+        // the entry at index 0 is the first to go
+        assertEquals(full.subList(1, full.size()), Downsampling.getOriginalIndexes(BASE_SAMPLING_LEVEL - 1));
+
+        // spot check a few values (these depend on BASE_SAMPLING_LEVEL being 128)
+        assert BASE_SAMPLING_LEVEL == 128;
+        assertEquals(Arrays.asList(31, 63, 95, 127), Downsampling.getOriginalIndexes(4));
+        assertEquals(Arrays.asList(63, 127), Downsampling.getOriginalIndexes(2));
         assertEquals(Arrays.asList(), Downsampling.getOriginalIndexes(0));
     }
 
@@ -468,9 +481,9 @@ public class IndexSummaryTest extends SchemaLoader
             assertEquals(indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(i, BASE_SAMPLING_LEVEL - 1, indexInterval));
         assertEquals(indexInterval * 2, Downsampling.getEffectiveIndexIntervalAfterIndex(BASE_SAMPLING_LEVEL - 2, BASE_SAMPLING_LEVEL - 1, indexInterval));
 
-        // at samplingLevel=2, the retained summary points are [7, 15] (assumes BASE_SAMPLING_LEVEL is 16)
-        assert BASE_SAMPLING_LEVEL == 16;
-        assertEquals(8 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(0, 2, indexInterval));
-        assertEquals(8 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(1, 2, indexInterval));
+        // at samplingLevel=2, the retained summary points are [63, 127] (assumes BASE_SAMPLING_LEVEL is 128)
+        assert BASE_SAMPLING_LEVEL == 128;
+        assertEquals(64 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(0, 2, indexInterval));
+        assertEquals(64 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(1, 2, indexInterval));
     }
 }
