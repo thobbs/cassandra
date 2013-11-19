@@ -640,9 +640,11 @@ public class SSTableReader extends SSTable implements Closeable
             throw new AssertionError("Attempted to clone SSTableReader with the same index summary sampling level");
 
         markReplaced();
+        if (readMeterSyncFuture != null)
+            readMeterSyncFuture.cancel(false);
+
         SSTableReader replacement = new SSTableReader(descriptor, components, metadata, partitioner, ifile, dfile, newSummary, bf, maxDataAge, sstableMetadata);
         replacement.readMeter = this.readMeter;
-        // TODO cancel read meter sync task on old SSTR
         replacement.first = this.first;
         replacement.last = this.last;
         return replacement;
