@@ -124,7 +124,7 @@ public class IndexSummaryBuilder
             memory.setLong(keyPosition, actualIndexPosition);
             keyPosition += TypeSizes.NATIVE.sizeof(actualIndexPosition);
         }
-        int sizeAtFullSampling = (int) (keysWritten / indexInterval);
+        int sizeAtFullSampling = (int) Math.ceil(keysWritten / (double) indexInterval);
         return new IndexSummary(partitioner, memory, keys.size(), sizeAtFullSampling, indexInterval, samplingLevel);
     }
 
