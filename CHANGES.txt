@@ -12,6 +12,10 @@
 
 
 2.0.3
+ * Cancel read meter task when closing SSTR (CASSANDRA-6358)
+ * free off-heap IndexSummary during bulk (CASSANDRA-6359)
+ * Recover from IOException in accept() thread (CASSANDRA-6349)
+ * Improve Gossip tolerance of abnormally slow tasks (CASSANDRA-6338)
  * Fix trying to hint timed out counter writes (CASSANDRA-6322)
  * Allow restoring specific columnfamilies from archived CL (CASSANDRA-4809)
  * Avoid flushing compaction_history after each operation (CASSANDRA-6287)
@@ -32,7 +36,10 @@
  * Fix serialization bug in PagedRange with 2ndary indexes (CASSANDRA-6299)
  * Fix CQL3 table validation in Thrift (CASSANDRA-6140)
  * Fix bug missing results with IN clauses (CASSANDRA-6327)
+ * Fix paging with reversed slices (CASSANDRA-6343)
+ * Set minTimestamp correctly to be able to drop expired sstables (CASSANDRA-6337)
 Merged from 1.2:
+ * Invalidate row cache when dropping CF (CASSANDRA-6351)
  * add non-jamm path for cached statements (CASSANDRA-6293)
  * (Hadoop) Require CFRR batchSize to be at least 2 (CASSANDRA-6114)
  * Fix altering column types (CASSANDRA-6185)
@@ -51,6 +58,11 @@ Merged from 1.2:
  * Fix json2sstable handling of range tombstones (CASSANDRA-6316)
  * Fix missing one row in reverse query (CASSANDRA-6330)
  * Fix reading expired row value from row cache (CASSANDRA-6325)
+ * Fix AssertionError when doing set element deletion (CASSANDRA-6341)
+ * Make CL code for the native protocol match the one in C* 2.0
+   (CASSANDRA-6347)
+ * Disallow altering CQL3 table from thrift (CASSANDRA-6370)
+ * Fix size computation of prepared statement (CASSANDRA-6369)
 
 
 2.0.2
