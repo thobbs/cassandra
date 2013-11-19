@@ -95,6 +95,15 @@ public class Downsampling
         return originalIndexes;
     }
 
+    /**
+     * Calculates the effective index interval after the entry at `index` in an IndexSummary.  In other words, this
+     * returns the number of partitions in the primary on-disk index before the next partition that has an entry in
+     * the index summary.  If samplingLevel == BASE_SAMPLING_LEVEL, this will be equal to the index interval.
+     * @param index an index into an IndexSummary
+     * @param samplingLevel the current sampling level for that IndexSummary
+     * @param indexInterval the index interval
+     * @return the number of partitions before the next index summary entry, inclusive on one end
+     */
     public static int getEffectiveIndexIntervalAfterIndex(int index, int samplingLevel, int indexInterval)
     {
         assert index >= -1;
@@ -104,9 +113,14 @@ public class Downsampling
 
         index %= samplingLevel;
         if (index == originalIndexes.size() - 1)
+        {
+            // account for partitions after the "last" entry as well as partitions before the "first" entry
             return ((BASE_SAMPLING_LEVEL - originalIndexes.get(index)) + originalIndexes.get(0)) * indexInterval;
+        }
         else
+        {
             return (originalIndexes.get(index + 1) - originalIndexes.get(index)) * indexInterval;
+        }
     }
 
     public static int[] getStartPoints(int currentSamplingLevel, int newSamplingLevel)

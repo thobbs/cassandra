@@ -144,6 +144,14 @@ public class IndexSummaryBuilder
         return Math.min(BASE_SAMPLING_LEVEL, Math.max(MIN_SAMPLING_LEVEL, newSamplingLevel));
     }
 
+    /**
+     * Downsamples an existing index summary to a new sampling level.
+     * @param existing an existing IndexSummary
+     * @param newSamplingLevel the target level for the new IndexSummary.  This must be less than the current sampling
+     *                         level for `existing`.
+     * @param partitioner the partitioner used for the index summary
+     * @return a new IndexSummary
+     */
     public static IndexSummary downsample(IndexSummary existing, int newSamplingLevel, IPartitioner partitioner)
     {
         // To downsample the old index summary, we'll go through (potentially) several rounds of downsampling.
@@ -152,8 +160,7 @@ public class IndexSummaryBuilder
         // round.
 
         int currentSamplingLevel = existing.getSamplingLevel();
-        if (currentSamplingLevel <= newSamplingLevel)
-            return existing;
+        assert currentSamplingLevel < newSamplingLevel;
 
         // calculate starting indexes for downsampling rounds
         int[] startPoints = Downsampling.getStartPoints(currentSamplingLevel, newSamplingLevel);

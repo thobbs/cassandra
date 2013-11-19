@@ -581,6 +581,14 @@ public class SSTableReader extends SSTable implements Closeable
         }
     }
 
+    /**
+     * Returns a new SSTableReader with the same properties as this SSTableReader except that a new IndexSummary will
+     * be built at the target samplingLevel.  This (original) SSTableReader instance will be marked as replaced, have
+     * its DeletingTask removed, and have its periodic read-meter sync task cancelled.
+     * @param samplingLevel the desired sampling level for the index summary on the new SSTableReader
+     * @return a new SSTableReader
+     * @throws IOException
+     */
     public SSTableReader cloneWithNewSummarySamplingLevel(int samplingLevel) throws IOException
     {
         IndexSummary newSummary;
