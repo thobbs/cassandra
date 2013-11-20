@@ -203,8 +203,12 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     @VisibleForTesting
     public static List<SSTableReader> redistributeSummaries(List<SSTableReader> compacting, List<SSTableReader> nonCompacting, long memoryPoolBytes) throws IOException
     {
-        logger.debug("Beginning redistribution of index summaries for {} sstables with memory pool size {} MB",
-                     nonCompacting.size(), memoryPoolBytes / 1024L / 1024L);
+        long total = 0;
+        for (SSTableReader sstable : Iterables.concat(compacting, nonCompacting))
+            total += sstable.getIndexSummaryOffHeapSize();
+
+        logger.debug("Beginning redistribution of index summaries for {} sstables with memory pool size {} MB; current spaced used is {} MB",
+                     nonCompacting.size(), memoryPoolBytes / 1024L / 1024L, total / 1024.0 / 1024.0);
 
         double totalReadsPerSec = 0.0;
         for (SSTableReader sstable : nonCompacting)
