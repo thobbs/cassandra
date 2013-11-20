@@ -104,16 +104,12 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         int difference = resizeIntervalInMinutes - this.resizeIntervalInMinutes;
         this.resizeIntervalInMinutes = resizeIntervalInMinutes;
 
-        long initialDelay;
+        long initialDelay = 1;
         if (future != null)
         {
             long remaining = future.getDelay(TimeUnit.MINUTES);
             initialDelay = Math.max(0, remaining + difference);
             future.cancel(false);
-        }
-        else
-        {
-            initialDelay = this.resizeIntervalInMinutes;
         }
 
         if (this.resizeIntervalInMinutes < 0)
@@ -250,7 +246,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
         List<SSTableReader> newSSTables = adjustSamplingLevels(sstablesByHotness, totalReadsPerSec, remainingBytes);
 
-        long total = 0;
+        total = 0;
         for (SSTableReader sstable : Iterables.concat(compacting, newSSTables))
             total += sstable.getIndexSummaryOffHeapSize();
         logger.debug("Completed resizing of index summaries; current approximate memory used: {} MB",
