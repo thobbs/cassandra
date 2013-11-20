@@ -594,6 +594,11 @@ public class SSTableReader extends SSTable implements Closeable
 
     public void saveSummary(SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder)
     {
+        saveSummary(ibuilder, dbuilder, indexSummary);
+    }
+
+    private void saveSummary(SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, IndexSummary summary)
+    {
         File summariesFile = new File(descriptor.filenameFor(Component.SUMMARY));
         if (summariesFile.exists())
             summariesFile.delete();
@@ -602,7 +607,7 @@ public class SSTableReader extends SSTable implements Closeable
         try
         {
             oStream = new DataOutputStream(new FileOutputStream(summariesFile));
-            IndexSummary.serializer.serialize(indexSummary, oStream, descriptor.version.hasSamplingLevel);
+            IndexSummary.serializer.serialize(summary, oStream, descriptor.version.hasSamplingLevel);
             ByteBufferUtil.writeWithLength(first.key, oStream);
             ByteBufferUtil.writeWithLength(last.key, oStream);
             ibuilder.serializeBounds(oStream);
@@ -634,7 +639,15 @@ public class SSTableReader extends SSTable implements Closeable
     {
         IndexSummary newSummary;
         if (samplingLevel < indexSummary.getSamplingLevel())
+        {
             newSummary = IndexSummaryBuilder.downsample(indexSummary, samplingLevel, partitioner);
+
+            SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
+            SegmentedFile.Builder dbuilder = compression
+                                             ? SegmentedFile.getCompressedBuilder()
+                                             : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
+            saveSummary(ibuilder, dbuilder, newSummary);
+        }
         else if (samplingLevel > indexSummary.getSamplingLevel())
             newSummary = upsampleSummary(samplingLevel);
         else

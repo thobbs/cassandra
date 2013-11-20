@@ -59,7 +59,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     // upsampling requires reading the primary index in order to rebuild the summary, the threshold
     // for upsampling is is higher.
     static final double UPSAMPLE_THRESHOLD = 1.5;
-    static final double DOWNSAMPLE_THESHOLD = 0.9;
+    static final double DOWNSAMPLE_THESHOLD = 0.75;
 
     private final DebuggableScheduledThreadPoolExecutor executor;
 
