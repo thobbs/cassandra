@@ -241,6 +241,13 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         for (SSTableReader sstable : compacting)
             remainingBytes -= sstable.getIndexSummaryOffHeapSize();
 
+        // leave enough space for rebuilding the largest summary
+        long largest = 0;
+        for (SSTableReader sstable : nonCompacting)
+            largest = Math.max(largest, sstable.getIndexSummaryOffHeapSize());
+        remainingBytes -= largest;
+
+
         List<SSTableReader> newSSTables = adjustSamplingLevels(sstablesByHotness, totalReadsPerSec, remainingBytes);
 
         long total = 0;

@@ -354,11 +354,11 @@ public class DataTracker
         StorageMetrics.load.inc(sizeIncrease);
         cfstore.metric.liveDiskSpaceUsed.inc(sizeIncrease);
 
-        for (SSTableReader sstable : oldSSTables)
-            sstable.releaseReference();
-
         for (SSTableReader sstable : newSSTables)
             sstable.setTrackedBy(this);
+
+        for (SSTableReader sstable : oldSSTables)
+            sstable.releaseReference();
     }
 
     private void replace(Collection<SSTableReader> oldSSTables, Iterable<SSTableReader> replacements)
