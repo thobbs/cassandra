@@ -274,7 +274,7 @@ public class IndexSummaryTest extends SchemaLoader
         for (SSTableReader sstable : sstables)
             sstable.readMeter = new RestorableMeter(100.0, 100.0);
 
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, originalOffHeapSize * sstables.size());
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, originalOffHeapSize * sstables.size() + extraSpace(sstables));
         for (SSTableReader sstable : sstables)
             assertEquals(BASE_SAMPLING_LEVEL, sstable.getIndexSummarySamplingLevel());
 
@@ -303,11 +303,19 @@ public class IndexSummaryTest extends SchemaLoader
         }
     };
 
+    private static long extraSpace(List<SSTableReader> sstables)
+    {
+        long max = 0;
+        for (SSTableReader sstable : sstables)
+            max = Math.max(max, sstable.getIndexSummaryOffHeapSize());
+        return max;
+    }
+
     @Test
     public void testRedistributeSummaries() throws IOException
     {
         String ksname = "Keyspace1";
-        String cfname = "StandardLowIndexInterval";
+        String cfname = "StandardLowIndexInterval"; // index interval of 8, no key caching
         Keyspace keyspace = Keyspace.open(ksname);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
         cfs.truncateBlocking();
@@ -336,37 +344,37 @@ public class IndexSummaryTest extends SchemaLoader
         for (SSTableReader sstable : sstables)
             sstable.readMeter = new RestorableMeter(100.0, 100.0);
 
-        long offHeapSize = sstables.get(0).getIndexSummaryOffHeapSize();
+        long singleSummaryOffHeapSpace = sstables.get(0).getIndexSummaryOffHeapSize();
 
         // there should be enough space to not downsample anything
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, offHeapSize * numSSTables);
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * numSSTables) + extraSpace(sstables));
         for (SSTableReader sstable : sstables)
-            assertEquals(sstable.getIndexSummarySamplingLevel(), BASE_SAMPLING_LEVEL);
-        assertEquals(offHeapSize * numSSTables, totalOffHeapSize(sstables));
+            assertEquals(BASE_SAMPLING_LEVEL, sstable.getIndexSummarySamplingLevel());
+        assertEquals(singleSummaryOffHeapSpace * numSSTables, totalOffHeapSize(sstables));
         validateData(cfs, numRows);
 
         // everything should get cut in half
         assert sstables.size() == 4;
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (offHeapSize * numSSTables) / 2);
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * (numSSTables / 2)) + extraSpace(sstables));
         for (SSTableReader sstable : sstables)
             assertEquals(BASE_SAMPLING_LEVEL / 2, sstable.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // everything should get cut to a quarter
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (offHeapSize * numSSTables) / 4);
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * (numSSTables / 4)) + extraSpace(sstables));
         for (SSTableReader sstable : sstables)
             assertEquals(BASE_SAMPLING_LEVEL / 4, sstable.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // upsample back up to half
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (offHeapSize * numSSTables) / 2);
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables,(singleSummaryOffHeapSpace * (numSSTables / 2)) + extraSpace(sstables));
         assert sstables.size() == 4;
         for (SSTableReader sstable : sstables)
             assertEquals(BASE_SAMPLING_LEVEL / 2, sstable.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // upsample back up to the original index summary
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, offHeapSize * numSSTables);
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * numSSTables) + extraSpace(sstables));
         for (SSTableReader sstable : sstables)
             assertEquals(BASE_SAMPLING_LEVEL, sstable.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
@@ -375,7 +383,7 @@ public class IndexSummaryTest extends SchemaLoader
         // so the two cold sstables should get downsampled to be half of their original size
         sstables.get(0).readMeter = new RestorableMeter(50.0, 50.0);
         sstables.get(1).readMeter = new RestorableMeter(50.0, 50.0);
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, offHeapSize * (numSSTables - 1));
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * 3) + extraSpace(sstables));
         Collections.sort(sstables, hotnessComparator);
         assertEquals(BASE_SAMPLING_LEVEL / 2, sstables.get(0).getIndexSummarySamplingLevel());
         assertEquals(BASE_SAMPLING_LEVEL / 2, sstables.get(1).getIndexSummarySamplingLevel());
@@ -388,7 +396,7 @@ public class IndexSummaryTest extends SchemaLoader
         double higherRate = 50.0 * (UPSAMPLE_THRESHOLD - (UPSAMPLE_THRESHOLD * 0.10));
         sstables.get(0).readMeter = new RestorableMeter(lowerRate, lowerRate);
         sstables.get(1).readMeter = new RestorableMeter(higherRate, higherRate);
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, offHeapSize * (numSSTables - 1));
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * 3) + extraSpace(sstables));
         Collections.sort(sstables, hotnessComparator);
         assertEquals(BASE_SAMPLING_LEVEL / 2, sstables.get(0).getIndexSummarySamplingLevel());
         assertEquals(BASE_SAMPLING_LEVEL / 2, sstables.get(1).getIndexSummarySamplingLevel());
@@ -397,27 +405,20 @@ public class IndexSummaryTest extends SchemaLoader
         validateData(cfs, numRows);
 
         // reset, and then this time, leave enough space for one of the cold sstables to not get downsampled
-        // as far as the other
-        sstables = resetSummaries(sstables, offHeapSize);
-        sstables.get(0).readMeter = new RestorableMeter(50.0, 50.0);
-        sstables.get(1).readMeter = new RestorableMeter(50.0, 50.0);
+        sstables = resetSummaries(sstables, singleSummaryOffHeapSpace);
+        sstables.get(0).readMeter = new RestorableMeter(1.0, 1.0);
+        sstables.get(1).readMeter = new RestorableMeter(2.0, 2.0);
+        sstables.get(2).readMeter = new RestorableMeter(1000.0, 1000.0);
+        sstables.get(3).readMeter = new RestorableMeter(1000.0, 1000.0);
 
-        int currentEntries = entriesAtSamplingLevel(BASE_SAMPLING_LEVEL / 2, sstables.get(0).getMaxIndexSummarySize());
-        int expectedLevel = BASE_SAMPLING_LEVEL / 2 + 1;
-        while (entriesAtSamplingLevel(expectedLevel, sstables.get(0).getMaxIndexSummarySize()) <= currentEntries)
-            expectedLevel += 1;
-
-        double avgSize = sstables.get(0).getIndexSummaryOffHeapSize() / (double) sstables.get(0).getIndexSummarySize();
-
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, offHeapSize * (numSSTables - 1) + (long) Math.ceil(avgSize));
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * 3) + extraSpace(sstables) + 50);
         Collections.sort(sstables, hotnessComparator);
 
-        int indexOfHigherLevel = sstables.get(0).getIndexSummarySamplingLevel() == expectedLevel ? 0 : 1;
-        int higherLevel = sstables.get(indexOfHigherLevel).getIndexSummarySamplingLevel();
-        int lowerLevel = sstables.get(indexOfHigherLevel == 0 ? 1 : 0).getIndexSummarySamplingLevel();
+        if (sstables.get(0).getIndexSummarySamplingLevel() == MIN_SAMPLING_LEVEL)
+            assertEquals(BASE_SAMPLING_LEVEL, sstables.get(1).getIndexSummarySamplingLevel());
+        else
+            assertEquals(BASE_SAMPLING_LEVEL, sstables.get(0).getIndexSummarySamplingLevel());
 
-        assertEquals(expectedLevel, higherLevel);
-        assertTrue(lowerLevel < higherLevel && lowerLevel >= BASE_SAMPLING_LEVEL / 2);
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(2).getIndexSummarySamplingLevel());
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
@@ -432,7 +433,7 @@ public class IndexSummaryTest extends SchemaLoader
         sstables.get(1).readMeter = new RestorableMeter(0.0, 0.0);
         sstables.get(2).readMeter = new RestorableMeter(leftovers, leftovers);
         sstables.get(3).readMeter = new RestorableMeter(128.0, 128.0);
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, offHeapSize * 2);
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * 2) + extraSpace(sstables));
         Collections.sort(sstables, hotnessComparator);
         assertEquals(MIN_SAMPLING_LEVEL, sstables.get(0).getIndexSummarySamplingLevel());
         assertEquals(MIN_SAMPLING_LEVEL, sstables.get(1).getIndexSummarySamplingLevel());
@@ -441,7 +442,7 @@ public class IndexSummaryTest extends SchemaLoader
         validateData(cfs, numRows);
 
         // Don't leave enough space for even the minimal index summaries
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (long) ((offHeapSize * numSSTables) * (MIN_SAMPLING_LEVEL / (double) BASE_SAMPLING_LEVEL) - 1));
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, 100);
         for (SSTableReader sstable : sstables)
             assertEquals(MIN_SAMPLING_LEVEL, sstable.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
@@ -486,4 +487,6 @@ public class IndexSummaryTest extends SchemaLoader
         assertEquals(64 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(0, 2, indexInterval));
         assertEquals(64 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(1, 2, indexInterval));
     }
+
+    // TODO test small SSTable with min sampling level and less than index interval rows
 }

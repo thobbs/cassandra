@@ -354,7 +354,7 @@ public class SSTableReaderTest extends SchemaLoader
     public void testIndexSummaryReplacement() throws IOException, ExecutionException, InterruptedException
     {
         Keyspace keyspace = Keyspace.open("Keyspace1");
-        final ColumnFamilyStore store = keyspace.getColumnFamilyStore("StandardLowIndexInterval"); // index interval of 8
+        final ColumnFamilyStore store = keyspace.getColumnFamilyStore("StandardLowIndexInterval"); // index interval of 8, no key caching
         CompactionManager.instance.disableAutoCompaction();
 
         final int NUM_ROWS = 1000;
