@@ -451,9 +451,9 @@ public class DatabaseDescriptor
                     + conf.key_cache_size_in_mb + "', supported values are <integer> >= 0.");
         }
 
-        // if set to empty/"auto" then use min(5% of Heap, 50 MB)
+        // if set to empty/"auto" then use 5% of Heap size
         indexSummaryCapacityInMB = (conf.index_summary_capacity_in_mb == null)
-            ? Math.min(Math.max(1, (int) (Runtime.getRuntime().totalMemory() * 0.05 / 1024 / 1024)), 50)
+            ? Math.max(1, (int) (Runtime.getRuntime().totalMemory() * 0.05 / 1024 / 1024))
             : conf.index_summary_capacity_in_mb;
 
         if (indexSummaryCapacityInMB < 0)
