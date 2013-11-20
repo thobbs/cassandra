@@ -1035,26 +1035,26 @@ public class SSTableReader extends SSTable implements Closeable
             }
         }
 
-        // next, see if the sampled index says it's impossible for the key to be present
-        int binarySearchResult = indexSummary.binarySearch(key);
-        long sampledPosition = getIndexScanPositionFromBinarySearchResult(binarySearchResult, indexSummary);
-        int sampledIndex = getIndexSummaryIndexFromBinarySearchResult(binarySearchResult);
-        if (sampledPosition == -1)
+        // check the smallest and greatest keys in the sstable to see if it can't be present
+        if (first.compareTo(key) > 0 || last.compareTo(key) < 0)
         {
             if (op == Operator.EQ && updateCacheAndStats)
                 bloomFilterTracker.addFalsePositive();
-            // we matched the -1th position: if the operator might match forward, we'll start at the first
-            // position. We however need to return the correct index entry for that first position.
-            if (op.apply(1) >= 0)
+
+            if (op.apply(1) < 0)
             {
-                sampledPosition = 0;
-            }
-            else
-            {
-                Tracing.trace("Partition summary allows skipping sstable {}", descriptor.generation);
+                Tracing.trace("Check against min and max keys allows skipping sstable {}", descriptor.generation);
                 return null;
             }
         }
+
+        int binarySearchResult = indexSummary.binarySearch(key);
+        long sampledPosition = getIndexScanPositionFromBinarySearchResult(binarySearchResult, indexSummary);
+        int sampledIndex = getIndexSummaryIndexFromBinarySearchResult(binarySearchResult);
+
+        // if we matched the -1th position, we'll start at the first position
+        sampledPosition = sampledPosition == -1 ? 0 : sampledPosition;
+
         int effectiveInterval = indexSummary.getEffectiveIndexIntervalAfterIndex(sampledIndex);
 
         // scan the on-disk index, starting at the nearest sampled position.
