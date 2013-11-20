@@ -91,7 +91,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                     indexSummarySizeInMB, interval);
 
         setMemoryPoolCapacityInMB(DatabaseDescriptor.getIndexSummaryCapacityInMB());
-        setResizeIntervalInMinutes(DatabaseDescriptor.getIndexSummaryResizeIntervalInMinutes());
+        setResizeIntervalInMinutes(DatabaseDescriptor.getIndexSummaryResizeIntervalInMinutes(), true);
     }
 
     public int getResizeIntervalInMinutes()
@@ -101,15 +101,25 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public void setResizeIntervalInMinutes(int resizeIntervalInMinutes)
     {
-        int difference = resizeIntervalInMinutes - this.resizeIntervalInMinutes;
+        setResizeIntervalInMinutes(resizeIntervalInMinutes, false);
+    }
+
+    private void setResizeIntervalInMinutes(int resizeIntervalInMinutes, boolean forInitialization)
+    {
+        int oldInterval = this.resizeIntervalInMinutes;
         this.resizeIntervalInMinutes = resizeIntervalInMinutes;
 
-        long initialDelay = 1;
+        long initialDelay;
         if (future != null)
         {
-            long remaining = future.getDelay(TimeUnit.MINUTES);
-            initialDelay = Math.max(0, remaining + difference);
+            initialDelay = oldInterval < 0
+                           ? resizeIntervalInMinutes
+                           : Math.max(0, resizeIntervalInMinutes - (oldInterval - future.getDelay(TimeUnit.MINUTES)));
             future.cancel(false);
+        }
+        else
+        {
+            initialDelay = forInitialization ? 1 : resizeIntervalInMinutes;
         }
 
         if (this.resizeIntervalInMinutes < 0)
@@ -125,6 +135,16 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                 redistributeSummaries();
             }
         }, initialDelay, resizeIntervalInMinutes, TimeUnit.MINUTES);
+    }
+
+    // for testing only
+    @VisibleForTesting
+    Long getTimeToNextResize(TimeUnit timeUnit)
+    {
+        if (future == null)
+            return null;
+
+        return future.getDelay(timeUnit);
     }
 
     public long getMemoryPoolCapacityInMB()
@@ -248,6 +268,8 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         remainingBytes -= largest;
 
 
+        logger.trace("Reserving {} MB for compacting SSTables and temporary usage while rebuilding summaries",
+                     (memoryPoolBytes - remainingBytes) / 1024.0 / 1024.0);
         List<SSTableReader> newSSTables = adjustSamplingLevels(sstablesByHotness, totalReadsPerSec, remainingBytes);
 
         total = 0;
