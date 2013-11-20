@@ -256,14 +256,14 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             // figure out how many entries our idealSpace would buy us, and pick a new sampling level based on that
             int currentNumEntries = sstable.getIndexSummarySize();
             double avgEntrySize = sstable.getIndexSummaryOffHeapSize() / (double) currentNumEntries;
-            long targetNumEntries = Math.round(idealSpace / avgEntrySize);
+            long targetNumEntries = Math.max(1, Math.round(idealSpace / avgEntrySize));
             int currentSamplingLevel = sstable.getIndexSummarySamplingLevel();
             int newSamplingLevel = IndexSummaryBuilder.calculateSamplingLevel(currentSamplingLevel, currentNumEntries, targetNumEntries);
-
-            logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes; target number of retained entries: {}",
-                         sstable.getFilename(), readsPerSec, idealSpace, targetNumEntries);
-
             int numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
+
+            logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes ({} entries); considering moving from level " +
+                         "{} ({} entries) to level {} ({} entries)",
+                         sstable.getFilename(), readsPerSec, idealSpace, targetNumEntries, currentSamplingLevel, currentNumEntries, newSamplingLevel, numEntriesAtNewSamplingLevel);
 
             if (targetNumEntries >= currentNumEntries * UPSAMPLE_THRESHOLD && newSamplingLevel > currentSamplingLevel)
             {
@@ -337,57 +337,40 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     @VisibleForTesting
     static Pair<List<SSTableReader>, List<ResampleEntry>> distributeRemainingSpace(List<ResampleEntry> toDownsample, long remainingSpace)
     {
-        // sort by read rate (descending)
+        // sort by the amount of space regained by doing the downsample operation; we want to try to avoid operations
+        // that will make little difference.
         Collections.sort(toDownsample, new Comparator<ResampleEntry>()
         {
             public int compare(ResampleEntry o1, ResampleEntry o2)
             {
-                RestorableMeter a = o1.sstable.readMeter;
-                RestorableMeter b = o2.sstable.readMeter;
-                if (a == null && b == null)
-                    return 0;
-                else if (a == null)
-                    return 1;
-                else if (b == null)
-                    return -1;
-                else
-                    return -1 * Double.compare(a.fifteenMinuteRate(), b.fifteenMinuteRate());
+                return Double.compare(o1.sstable.getIndexSummaryOffHeapSize() - o1.newSpaceUsed,
+                                      o2.sstable.getIndexSummaryOffHeapSize() - o2.newSpaceUsed);
             }
         });
 
+        int noDownsampleCutoff = 0;
         List<SSTableReader> willNotDownsample = new ArrayList<>();
-        while (remainingSpace > 0 && !toDownsample.isEmpty())
+        while (remainingSpace > 0 && noDownsampleCutoff < toDownsample.size())
         {
-            boolean didAdjust = false;
-            List<ResampleEntry> newToDownsample = new ArrayList<>(toDownsample.size());
-            for (ResampleEntry entry : toDownsample)
+            ResampleEntry entry = toDownsample.get(noDownsampleCutoff);
+
+            long extraSpaceRequired = entry.sstable.getIndexSummaryOffHeapSize() - entry.newSpaceUsed;
+            // see if we have enough leftover space to keep the current sampling level
+            if (extraSpaceRequired <= remainingSpace)
             {
-                int entriesAtNextLevel = IndexSummaryBuilder.entriesAtSamplingLevel(entry.newSamplingLevel + 1, entry.sstable.getMaxIndexSummarySize());
-                double avgEntrySize = entry.sstable.getIndexSummaryOffHeapSize() / (double) entry.sstable.getIndexSummarySize();
-                long spaceAtNextLevel = (long) Math.ceil(avgEntrySize * entriesAtNextLevel);
-                long extraSpaceRequired = (spaceAtNextLevel - entry.newSpaceUsed);
-                // see if we have enough leftover space to increase the sampling level
-                if (extraSpaceRequired <= remainingSpace)
-                {
-                    didAdjust = true;
-                    remainingSpace -= extraSpaceRequired;
-                    // if increasing the level would put us back to the original level, just leave this sstable out
-                    // of the set to downsample
-                    if (entry.newSamplingLevel + 1 >= entry.sstable.getIndexSummarySamplingLevel())
-                        willNotDownsample.add(entry.sstable);
-                    else
-                        newToDownsample.add(new ResampleEntry(entry.sstable, spaceAtNextLevel, entry.newSamplingLevel + 1));
-                }
-                else
-                {
-                    newToDownsample.add(entry);
-                }
+                logger.trace("Using leftover space to keep {} at the current sampling level ({})",
+                             entry.sstable, entry.sstable.getIndexSummarySamplingLevel());
+                willNotDownsample.add(entry.sstable);
+                remainingSpace -= extraSpaceRequired;
             }
-            toDownsample = newToDownsample;
-            if (!didAdjust)
+            else
+            {
                 break;
+            }
+
+            noDownsampleCutoff++;
         }
-        return Pair.create(willNotDownsample, toDownsample);
+        return Pair.create(willNotDownsample, toDownsample.subList(noDownsampleCutoff, toDownsample.size()));
     }
 
     private static class ResampleEntry
