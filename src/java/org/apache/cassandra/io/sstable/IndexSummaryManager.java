@@ -27,6 +27,8 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Sets;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,7 +38,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataTracker;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.WrappedRunnable;
 
@@ -137,9 +138,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public Map<String, Double> getSamplingRatios()
     {
-        List<SSTableReader> sstables = getAllNoncompactingSSTables();
-        Map<String, Double> ratios = new HashMap<>(sstables.size());
-        for (SSTableReader sstable : sstables)
+        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
+        Map<String, Double> ratios = new HashMap<>(compactingAndNonCompacting.left.size() + compactingAndNonCompacting.right.size());
+        for (SSTableReader sstable : Iterables.concat(compactingAndNonCompacting.left, compactingAndNonCompacting.right))
             ratios.put(sstable.getFilename(), sstable.getIndexSummarySamplingLevel() / (double) Downsampling.BASE_SAMPLING_LEVEL);
 
         return ratios;
@@ -147,11 +148,11 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public double getAverageSamplingRatio()
     {
-        List<SSTableReader> sstables = getAllNoncompactingSSTables();
+        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
         double total = 0.0;
-        for (SSTableReader sstable : sstables)
+        for (SSTableReader sstable : Iterables.concat(compactingAndNonCompacting.left, compactingAndNonCompacting.right))
             total += sstable.getIndexSummarySamplingLevel() / (double) Downsampling.BASE_SAMPLING_LEVEL;
-        return total / sstables.size();
+        return total / (compactingAndNonCompacting.left.size() + compactingAndNonCompacting.right.size());
     }
 
     public void setMemoryPoolCapacityInMB(long memoryPoolCapacityInMB)
@@ -160,47 +161,57 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     }
 
     /**
-     * Returns the actual space consumed by index summaries of non-compacting sstables in MB.
+     * Returns the actual space consumed by index summaries for all sstables.
      * @return space currently used in MB
      */
     public double getMemoryPoolSizeInMB()
     {
         long total = 0;
-        for (SSTableReader sstable : getAllNoncompactingSSTables())
+        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
+        for (SSTableReader sstable : Iterables.concat(compactingAndNonCompacting.left, compactingAndNonCompacting.right))
             total += sstable.getIndexSummaryOffHeapSize();
         return total / 1024.0 / 1024.0;
     }
 
-    private List<SSTableReader> getAllNoncompactingSSTables()
+    private Pair<List<SSTableReader>, List<SSTableReader>> getCompactingAndNonCompactingSSTables()
     {
-        List<SSTableReader> sstables = new ArrayList<>();
+        List<SSTableReader> allCompacting = new ArrayList<>();
+        List<SSTableReader> allNonCompacting = new ArrayList<>();
         for (Keyspace ks : Keyspace.all())
+        {
             for (ColumnFamilyStore cfStore: ks.getColumnFamilyStores())
-                sstables.addAll(cfStore.getDataTracker().getUncompactingSSTables());
-        return sstables;
+            {
+                Set<SSTableReader> allSSTables = cfStore.getDataTracker().getSSTables();
+                Set<SSTableReader> nonCompacting = Sets.newHashSet(cfStore.getDataTracker().getUncompactingSSTables(allSSTables));
+                allNonCompacting.addAll(nonCompacting);
+                allCompacting.addAll(Sets.difference(allSSTables, nonCompacting));
+            }
+        }
+        return Pair.create(allCompacting, allNonCompacting);
     }
 
     public void redistributeSummaries() throws IOException
     {
-        redistributeSummaries(getAllNoncompactingSSTables(), this.memoryPoolBytes);
+        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
+        redistributeSummaries(compactingAndNonCompacting.left, compactingAndNonCompacting.right, this.memoryPoolBytes);
     }
 
     /**
      * Attempts to fairly distribute a fixed pool of memory for index summaries across a set of SSTables based on
      * their recent read rates.
-     * @param sstables a list of sstables to share the memory pool across
+     * @param nonCompacting a list of sstables to share the memory pool across
      * @param memoryPoolBytes a size (in bytes) that the total index summary space usage should stay close to or
      *                        under, if possible
      * @return a list of new SSTableReader instances
      */
     @VisibleForTesting
-    public static List<SSTableReader> redistributeSummaries(List<SSTableReader> sstables, long memoryPoolBytes) throws IOException
+    public static List<SSTableReader> redistributeSummaries(List<SSTableReader> compacting, List<SSTableReader> nonCompacting, long memoryPoolBytes) throws IOException
     {
         logger.debug("Beginning redistribution of index summaries for {} sstables with memory pool size {} MB",
-                     sstables.size(), memoryPoolBytes / 1024L / 1024L);
+                     nonCompacting.size(), memoryPoolBytes / 1024L / 1024L);
 
         double totalReadsPerSec = 0.0;
-        for (SSTableReader sstable : sstables)
+        for (SSTableReader sstable : nonCompacting)
         {
             if (sstable.readMeter != null)
             {
@@ -210,7 +221,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         logger.trace("Total reads/sec across all sstables in index summary resize process: {}", totalReadsPerSec);
 
         // copy and sort by read rates (ascending)
-        List<SSTableReader> sstablesByHotness = new ArrayList<>(sstables);
+        List<SSTableReader> sstablesByHotness = new ArrayList<>(nonCompacting);
         Collections.sort(sstablesByHotness, new Comparator<SSTableReader>()
         {
             public int compare(SSTableReader o1, SSTableReader o2)
@@ -226,10 +237,14 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             }
         });
 
-        List<SSTableReader> newSSTables = adjustSamplingLevels(sstablesByHotness, totalReadsPerSec, memoryPoolBytes);
+        long remainingBytes = memoryPoolBytes;
+        for (SSTableReader sstable : compacting)
+            remainingBytes -= sstable.getIndexSummaryOffHeapSize();
+
+        List<SSTableReader> newSSTables = adjustSamplingLevels(sstablesByHotness, totalReadsPerSec, remainingBytes);
 
         long total = 0;
-        for (SSTableReader sstable : newSSTables)
+        for (SSTableReader sstable : Iterables.concat(compacting, newSSTables))
             total += sstable.getIndexSummaryOffHeapSize();
         logger.debug("Completed resizing of index summaries; current approximate memory used: {} MB",
                      total / 1024.0 / 1024.0);
@@ -238,7 +253,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     }
 
     private static List<SSTableReader> adjustSamplingLevels(List<SSTableReader> sstables,
-                                             double totalReadsPerSec, long memoryPoolCapacity) throws IOException
+                                                            double totalReadsPerSec, long memoryPoolCapacity) throws IOException
     {
 
         List<ResampleEntry> toDownsample = new ArrayList<>(sstables.size() / 4);
