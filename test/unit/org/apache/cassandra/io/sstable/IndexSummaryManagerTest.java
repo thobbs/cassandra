@@ -216,17 +216,17 @@ public class IndexSummaryManagerTest extends SchemaLoader
         // Cause a mix of upsampling and downsampling. We'll leave enough space for two full index summaries. The two
         // coldest sstables will get downsampled to 8/128 of their size, leaving us with 1 and 112/128th index
         // summaries worth of space.  The hottest sstable should get a full index summary, and the one in the middle
-        // should get the remaining 112/128th.
-        int leftovers = BASE_SAMPLING_LEVEL - (MIN_SAMPLING_LEVEL * 2);
+        // should get the remainder.
         sstables.get(0).readMeter = new RestorableMeter(0.0, 0.0);
         sstables.get(1).readMeter = new RestorableMeter(0.0, 0.0);
-        sstables.get(2).readMeter = new RestorableMeter(leftovers, leftovers);
+        sstables.get(2).readMeter = new RestorableMeter(100, 100);
         sstables.get(3).readMeter = new RestorableMeter(128.0, 128.0);
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * 2) + extraSpace(sstables));
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (long) (singleSummaryOffHeapSpace + (singleSummaryOffHeapSpace * (100.0 / BASE_SAMPLING_LEVEL)) + extraSpace(sstables)));
         Collections.sort(sstables, hotnessComparator);
         assertEquals(MIN_SAMPLING_LEVEL, sstables.get(0).getIndexSummarySamplingLevel());
         assertEquals(MIN_SAMPLING_LEVEL, sstables.get(1).getIndexSummarySamplingLevel());
-        assertEquals(leftovers, sstables.get(2).getIndexSummarySamplingLevel());
+        assertTrue(sstables.get(2).getIndexSummarySamplingLevel() > MIN_SAMPLING_LEVEL);
+        assertTrue(sstables.get(2).getIndexSummarySamplingLevel() < BASE_SAMPLING_LEVEL);
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
