@@ -335,7 +335,7 @@ public class DataTracker
      * @param oldSSTables replaced readers
      * @param newSSTables replacement readers
      */
-    public void replaceReaders(List<SSTableReader> oldSSTables, List<SSTableReader> newSSTables)
+    public void replaceReaders(Collection<SSTableReader> oldSSTables, Collection<SSTableReader> newSSTables)
     {
         long sizeIncrease = 0;
         for (SSTableReader sstable : oldSSTables)

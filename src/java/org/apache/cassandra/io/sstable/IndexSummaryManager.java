@@ -29,6 +29,8 @@ import javax.management.ObjectName;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
+import com.google.common.collect.HashMultimap;
+import com.google.common.collect.Multimap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -328,8 +330,8 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
         // downsample first, then upsample
         toDownsample.addAll(toUpsample);
-        Map<DataTracker, List<SSTableReader>> replacedByTracker = new HashMap<>();
-        Map<DataTracker, List<SSTableReader>> replacementsByTracker = new HashMap<>();
+        Multimap<DataTracker, SSTableReader> replacedByTracker = HashMultimap.create();
+        Multimap<DataTracker, SSTableReader> replacementsByTracker = HashMultimap.create();
         for (ResampleEntry entry : toDownsample)
         {
             SSTableReader sstable = entry.sstable;
@@ -339,26 +341,12 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             SSTableReader replacement = sstable.cloneWithNewSummarySamplingLevel(entry.newSamplingLevel);
             DataTracker tracker = Keyspace.open(sstable.getKeyspaceName()).getColumnFamilyStore(sstable.getColumnFamilyName()).getDataTracker();
 
-            List<SSTableReader> replaced = replacedByTracker.get(tracker);
-            if (replaced == null)
-            {
-                replaced = new ArrayList<>();
-                replacedByTracker.put(tracker, replaced);
-            }
-            replaced.add(sstable);
-
-            List<SSTableReader> replacements = replacementsByTracker.get(tracker);
-            if (replacements == null)
-            {
-                replacements = new ArrayList<>();
-                replacementsByTracker.put(tracker, replacements);
-            }
-            replacements.add(replacement);
+            replacedByTracker.put(tracker, sstable);
+            replacementsByTracker.put(tracker, replacement);
         }
 
-        for (Map.Entry<DataTracker, List<SSTableReader>> entry : replacedByTracker.entrySet())
+        for (DataTracker tracker : replacedByTracker.keySet())
         {
-            DataTracker tracker = entry.getKey();
             tracker.replaceReaders(replacedByTracker.get(tracker), replacementsByTracker.get(tracker));
             newSSTables.addAll(replacementsByTracker.get(tracker));
         }
