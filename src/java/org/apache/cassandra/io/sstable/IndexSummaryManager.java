@@ -261,14 +261,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         for (SSTableReader sstable : compacting)
             remainingBytes -= sstable.getIndexSummaryOffHeapSize();
 
-        // leave enough space for rebuilding the largest summary
-        long largest = 0;
-        for (SSTableReader sstable : nonCompacting)
-            largest = Math.max(largest, sstable.getIndexSummaryOffHeapSize());
-        remainingBytes -= largest;
-
-
-        logger.trace("Reserving {} MB for compacting SSTables and temporary usage while rebuilding summaries",
+        logger.trace("Index summaries for compacting SSTables are using {} MB of space",
                      (memoryPoolBytes - remainingBytes) / 1024.0 / 1024.0);
         List<SSTableReader> newSSTables = adjustSamplingLevels(sstablesByHotness, totalReadsPerSec, remainingBytes);
 
