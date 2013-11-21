@@ -91,7 +91,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                     indexSummarySizeInMB, interval);
 
         setMemoryPoolCapacityInMB(DatabaseDescriptor.getIndexSummaryCapacityInMB());
-        setResizeIntervalInMinutes(DatabaseDescriptor.getIndexSummaryResizeIntervalInMinutes(), true);
+        setResizeIntervalInMinutes(DatabaseDescriptor.getIndexSummaryResizeIntervalInMinutes());
     }
 
     public int getResizeIntervalInMinutes()
@@ -100,11 +100,6 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     }
 
     public void setResizeIntervalInMinutes(int resizeIntervalInMinutes)
-    {
-        setResizeIntervalInMinutes(resizeIntervalInMinutes, false);
-    }
-
-    private void setResizeIntervalInMinutes(int resizeIntervalInMinutes, boolean forInitialization)
     {
         int oldInterval = this.resizeIntervalInMinutes;
         this.resizeIntervalInMinutes = resizeIntervalInMinutes;
@@ -119,7 +114,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         }
         else
         {
-            initialDelay = forInitialization ? 1 : resizeIntervalInMinutes;
+            initialDelay = resizeIntervalInMinutes;
         }
 
         if (this.resizeIntervalInMinutes < 0)
