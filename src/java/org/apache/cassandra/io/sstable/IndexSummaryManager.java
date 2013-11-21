@@ -27,10 +27,7 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Sets;
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.Multimap;
+import com.google.common.collect.*;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -151,9 +148,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public Map<String, Double> getSamplingRatios()
     {
-        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
-        Map<String, Double> ratios = new HashMap<>(compactingAndNonCompacting.left.size() + compactingAndNonCompacting.right.size());
-        for (SSTableReader sstable : Iterables.concat(compactingAndNonCompacting.left, compactingAndNonCompacting.right))
+        List<SSTableReader> sstables = getAllSSTables();
+        Map<String, Double> ratios = new HashMap<>(sstables.size());
+        for (SSTableReader sstable : sstables)
             ratios.put(sstable.getFilename(), sstable.getIndexSummarySamplingLevel() / (double) Downsampling.BASE_SAMPLING_LEVEL);
 
         return ratios;
@@ -161,11 +158,11 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public double getAverageSamplingRatio()
     {
-        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
+        List<SSTableReader> sstables = getAllSSTables();
         double total = 0.0;
-        for (SSTableReader sstable : Iterables.concat(compactingAndNonCompacting.left, compactingAndNonCompacting.right))
+        for (SSTableReader sstable : sstables)
             total += sstable.getIndexSummarySamplingLevel() / (double) Downsampling.BASE_SAMPLING_LEVEL;
-        return total / (compactingAndNonCompacting.left.size() + compactingAndNonCompacting.right.size());
+        return total / sstables.size();
     }
 
     public void setMemoryPoolCapacityInMB(long memoryPoolCapacityInMB)
@@ -180,23 +177,43 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
     public double getMemoryPoolSizeInMB()
     {
         long total = 0;
-        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
-        for (SSTableReader sstable : Iterables.concat(compactingAndNonCompacting.left, compactingAndNonCompacting.right))
+        for (SSTableReader sstable : getAllSSTables())
             total += sstable.getIndexSummaryOffHeapSize();
         return total / 1024.0 / 1024.0;
     }
 
-    private Pair<List<SSTableReader>, List<SSTableReader>> getCompactingAndNonCompactingSSTables()
+    private List<SSTableReader> getAllSSTables()
+    {
+        List<SSTableReader> result = new ArrayList<>();
+        for (Keyspace ks : Keyspace.all())
+        {
+            for (ColumnFamilyStore cfStore: ks.getColumnFamilyStores())
+                result.addAll(cfStore.getSSTables());
+        }
+
+        return result;
+    }
+
+    /**
+     * Returns a Pair of all compacting and non-compacting sstables.  Non-compacting sstables will be marked as
+     * compacting.
+     */
+    private Pair<List<SSTableReader>, Multimap<DataTracker, SSTableReader>> getCompactingAndNonCompactingSSTables()
     {
         List<SSTableReader> allCompacting = new ArrayList<>();
-        List<SSTableReader> allNonCompacting = new ArrayList<>();
+        Multimap<DataTracker, SSTableReader> allNonCompacting = HashMultimap.create();
         for (Keyspace ks : Keyspace.all())
         {
             for (ColumnFamilyStore cfStore: ks.getColumnFamilyStores())
             {
-                Set<SSTableReader> allSSTables = cfStore.getDataTracker().getSSTables();
-                Set<SSTableReader> nonCompacting = Sets.newHashSet(cfStore.getDataTracker().getUncompactingSSTables(allSSTables));
-                allNonCompacting.addAll(nonCompacting);
+                Set<SSTableReader> nonCompacting, allSSTables;
+                do
+                {
+                    allSSTables = cfStore.getDataTracker().getSSTables();
+                    nonCompacting = Sets.newHashSet(cfStore.getDataTracker().getUncompactingSSTables(allSSTables));
+                }
+                while (!(nonCompacting.isEmpty() || cfStore.getDataTracker().markCompacting(nonCompacting)));
+                allNonCompacting.putAll(cfStore.getDataTracker(), nonCompacting);
                 allCompacting.addAll(Sets.difference(allSSTables, nonCompacting));
             }
         }
@@ -205,8 +222,16 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
     public void redistributeSummaries() throws IOException
     {
-        Pair<List<SSTableReader>, List<SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
-        redistributeSummaries(compactingAndNonCompacting.left, compactingAndNonCompacting.right, this.memoryPoolBytes);
+        Pair<List<SSTableReader>, Multimap<DataTracker, SSTableReader>> compactingAndNonCompacting = getCompactingAndNonCompactingSSTables();
+        try
+        {
+            redistributeSummaries(compactingAndNonCompacting.left, Lists.newArrayList(compactingAndNonCompacting.right.values()), this.memoryPoolBytes);
+        }
+        finally
+        {
+            for(DataTracker tracker : compactingAndNonCompacting.right.keySet())
+                tracker.unmarkCompacting(compactingAndNonCompacting.right.get(tracker));
+        }
     }
 
     /**
