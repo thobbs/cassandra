@@ -18,15 +18,20 @@
 */
 package org.apache.cassandra.db.compaction;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 import org.junit.Assert;
 
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Column;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.DecoratedKey;
@@ -34,12 +39,17 @@ import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.filter.QueryFilter;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.Util;
 
 import static org.junit.Assert.assertEquals;
 import static org.apache.cassandra.db.KeyspaceTest.assertColumns;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
+import static org.apache.cassandra.cql3.QueryProcessor.processInternal;
 
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -315,5 +325,36 @@ public class CompactionsPurgeTest extends SchemaLoader
         assertEquals(10, cf.getColumnCount());
         for (Column c : cf)
             assert !c.isMarkedForDelete(System.currentTimeMillis());
+    }
+
+    @Test
+    public void testRowTombstoneObservedBeforePurging() throws InterruptedException, ExecutionException, IOException
+    {
+        String keyspace = "cql_keyspace";
+        String table = "table1";
+        ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
+        cfs.disableAutoCompaction();
+
+        processInternal(String.format("INSERT INTO %s.%s (k, v1, v2) VALUES (%d, '%s', %d)",
+                                      keyspace, table, 1, "foo", 1));
+        cfs.forceBlockingFlush();
+
+        UntypedResultSet result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
+        assertEquals(1, result.size());
+
+        processInternal(String.format("DELETE FROM %s.%s WHERE k = %d", keyspace, table, 1));
+        cfs.forceBlockingFlush();
+
+        assertEquals(2, cfs.getSSTables().size());
+        result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
+        assertEquals(0, result.size());
+
+        Future future = CompactionManager.instance.submitMaximal(cfs, (int) (System.currentTimeMillis() / 1000) + 10000);
+        future.get();
+
+        assertEquals(1, cfs.getSSTables().size());
+
+        result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
+        assertEquals(0, result.size());
     }
 }
