@@ -223,7 +223,7 @@ public class CompactionsPurgeTest extends SchemaLoader
         assert cfs.getSSTables().size() == 1 : cfs.getSSTables(); // inserts & deletes were in the same memtable -> only deletes in sstable
 
         // compact and test that the row is completely gone
-        Util.compactAll(cfs).get();
+        Util.compactAll(cfs, Integer.MAX_VALUE).get();
         assert cfs.getSSTables().isEmpty();
         ColumnFamily cf = keyspace.getColumnFamilyStore(cfName).getColumnFamily(QueryFilter.getIdentityFilter(key, cfName, System.currentTimeMillis()));
         assert cf == null : cf;
@@ -260,7 +260,7 @@ public class CompactionsPurgeTest extends SchemaLoader
 
         // flush and major compact
         cfs.forceBlockingFlush();
-        Util.compactAll(cfs).get();
+        Util.compactAll(cfs, Integer.MAX_VALUE).get();
 
         // re-inserts with timestamp lower than delete
         rm = new RowMutation(keyspaceName, key.key);
@@ -302,7 +302,7 @@ public class CompactionsPurgeTest extends SchemaLoader
 
         // flush and major compact (with tombstone purging)
         cfs.forceBlockingFlush();
-        Util.compactAll(cfs).get();
+        Util.compactAll(cfs, Integer.MAX_VALUE).get();
 
         // re-inserts with timestamp lower than delete
         rm = new RowMutation(keyspaceName, key.key);
