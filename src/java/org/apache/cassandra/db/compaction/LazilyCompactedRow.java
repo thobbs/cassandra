@@ -71,15 +71,23 @@ public class LazilyCompactedRow extends AbstractCompactedRow
         {
             ColumnFamily cf = row.getColumnFamily();
 
+            // Apply any tombstones in `cf` to `rawCf`.  This will leave us with whichever top-level tombstone has
+            // the highest markedForDeleteAt timestamp and a combination of all the range tombstones in `rawCf`.
             if (rawCf == null)
                 rawCf = cf;
             else
                 rawCf.delete(cf);
         }
+
+        // tombstones with a localDeletionTime before this can be purged.  This is the minimum timestamp for any sstable
+        // containing `key` outside of the set of sstables involved in this compaction..
         maxPurgeableTimestamp = controller.maxPurgeableTimestamp(key);
+
         // even if we can't delete all the tombstones allowed by gcBefore, we should still call removeDeleted
         // to get rid of redundant row-level and range tombstones
         assert rawCf != null;
+
+        // if we can't purge every tombstone, use MIN_VALUE for gcBefore when purging tombstones (i.e. don't purge any tombstones)
         int overriddenGcBefore = rawCf.deletionInfo().maxTimestamp() < maxPurgeableTimestamp ? controller.gcBefore : Integer.MIN_VALUE;
         ColumnFamily purgedCf = ColumnFamilyStore.removeDeleted(rawCf, overriddenGcBefore);
         emptyColumnFamily = purgedCf == null ? ArrayBackedSortedColumns.factory.create(controller.cfs.metadata) : purgedCf;
@@ -90,14 +98,16 @@ public class LazilyCompactedRow extends AbstractCompactedRow
 
     public static ColumnFamily removeDeletedAndOldShards(DecoratedKey key, boolean shouldPurge, CompactionController controller, ColumnFamily cf)
     {
-        // We should only gc tombstone if shouldPurge == true. But otherwise,
-        // it is still ok to collect column that shadowed by their (deleted)
-        // container, which removeDeleted(cf, Integer.MAX_VALUE) will do
+        // We should only purge tombstones if shouldPurge is true, but regardless, it's still ok to remove columns that
+        // are shadowed by a tombstone; removeDeleted(cf, Integer.MIN_VALUE) will accomplish this without purging tombstones
         ColumnFamily compacted = ColumnFamilyStore.removeDeleted(cf,
                                                                  shouldPurge ? controller.gcBefore : Integer.MIN_VALUE,
                                                                  controller.cfs.indexManager.updaterFor(key));
+
+        // if we have counters, remove old shards
         if (shouldPurge && compacted != null && compacted.metadata().getDefaultValidator().isCommutative())
             CounterColumn.mergeAndRemoveOldShards(key, compacted, controller.gcBefore, controller.mergeShardBefore);
+
         return compacted;
     }
 
@@ -112,6 +122,7 @@ public class LazilyCompactedRow extends AbstractCompactedRow
             columnsIndex = indexBuilder.buildForCompaction(merger);
             if (columnsIndex.columnsIndex.isEmpty())
             {
+                // if all tombstones are purgeable and there's nothing left after we purge them, or there aren't any tombstones at all, return null
                 boolean cfIrrelevant = emptyColumnFamily.deletionInfo().maxTimestamp() < maxPurgeableTimestamp
                                      ? ColumnFamilyStore.removeDeletedCF(emptyColumnFamily, controller.gcBefore) == null
                                      : !emptyColumnFamily.isMarkedForDelete(); // tombstones are relevant
