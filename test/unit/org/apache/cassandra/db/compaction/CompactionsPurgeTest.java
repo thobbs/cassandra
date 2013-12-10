@@ -298,6 +298,7 @@ public class CompactionsPurgeTest extends SchemaLoader
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfName);
         DecoratedKey key = Util.dk("key3");
         RowMutation rm;
+        QueryFilter filter = QueryFilter.getIdentityFilter(key, cfName, System.currentTimeMillis());
 
         // inserts
         rm = new RowMutation(keyspaceName, key.key);
@@ -309,10 +310,13 @@ public class CompactionsPurgeTest extends SchemaLoader
         rm = new RowMutation(keyspaceName, key.key);
         rm.delete(cfName, 4);
         rm.apply();
+        ColumnFamily cf = cfs.getColumnFamily(filter);
+        assertTrue(cf.isMarkedForDelete());
 
         // flush and major compact (with tombstone purging)
         cfs.forceBlockingFlush();
         Util.compactAll(cfs, Integer.MAX_VALUE).get();
+        assertFalse(cfs.getColumnFamily(filter).isMarkedForDelete());
 
         // re-inserts with timestamp lower than delete
         rm = new RowMutation(keyspaceName, key.key);
@@ -321,7 +325,7 @@ public class CompactionsPurgeTest extends SchemaLoader
         rm.apply();
 
         // Check that the second insert went in
-        ColumnFamily cf = cfs.getColumnFamily(QueryFilter.getIdentityFilter(key, cfName, System.currentTimeMillis()));
+        cf = cfs.getColumnFamily(filter);
         assertEquals(10, cf.getColumnCount());
         for (Column c : cf)
             assert !c.isMarkedForDelete(System.currentTimeMillis());
@@ -352,7 +356,7 @@ public class CompactionsPurgeTest extends SchemaLoader
         Future future = CompactionManager.instance.submitMaximal(cfs, (int) (System.currentTimeMillis() / 1000) + 10000);
         future.get();
 
-        assertEquals(1, cfs.getSSTables().size());
+        assertEquals(0, cfs.getSSTables().size());
 
         result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
         assertEquals(0, result.size());
