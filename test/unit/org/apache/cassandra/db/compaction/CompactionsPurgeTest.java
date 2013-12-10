@@ -18,19 +18,14 @@
 */
 package org.apache.cassandra.db.compaction;
 
-import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-import org.junit.Assert;
-
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Column;
 import org.apache.cassandra.db.Keyspace;
@@ -39,14 +34,12 @@ import org.apache.cassandra.db.RowMutation;
 import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.filter.QueryFilter;
-import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.Util;
 
 import static org.junit.Assert.assertEquals;
 import static org.apache.cassandra.db.KeyspaceTest.assertColumns;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import static org.apache.cassandra.cql3.QueryProcessor.processInternal;
@@ -339,6 +332,7 @@ public class CompactionsPurgeTest extends SchemaLoader
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
 
+        // write a row out to one sstable
         processInternal(String.format("INSERT INTO %s.%s (k, v1, v2) VALUES (%d, '%s', %d)",
                                       keyspace, table, 1, "foo", 1));
         cfs.forceBlockingFlush();
@@ -346,18 +340,42 @@ public class CompactionsPurgeTest extends SchemaLoader
         UntypedResultSet result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
         assertEquals(1, result.size());
 
+        // write a row tombstone out to a second sstable
         processInternal(String.format("DELETE FROM %s.%s WHERE k = %d", keyspace, table, 1));
         cfs.forceBlockingFlush();
 
+        // basic check that the row is considered deleted
         assertEquals(2, cfs.getSSTables().size());
         result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
         assertEquals(0, result.size());
 
-        Future future = CompactionManager.instance.submitMaximal(cfs, (int) (System.currentTimeMillis() / 1000) + 10000);
+        // compact the two sstables with a gcBefore that does *not* allow the row tombstone to be purged
+        Future future = CompactionManager.instance.submitMaximal(cfs, (int) (System.currentTimeMillis() / 1000) - 10000);
         future.get();
 
-        assertEquals(0, cfs.getSSTables().size());
+        // the data should be gone, but the tombstone should still exist
+        assertEquals(1, cfs.getSSTables().size());
+        result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
+        assertEquals(0, result.size());
 
+        // write a row out to one sstable
+        processInternal(String.format("INSERT INTO %s.%s (k, v1, v2) VALUES (%d, '%s', %d)",
+                                      keyspace, table, 1, "foo", 1));
+        cfs.forceBlockingFlush();
+        assertEquals(2, cfs.getSSTables().size());
+        result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
+        assertEquals(1, result.size());
+
+        // write a row tombstone out to a different sstable
+        processInternal(String.format("DELETE FROM %s.%s WHERE k = %d", keyspace, table, 1));
+        cfs.forceBlockingFlush();
+
+        // compact the two sstables with a gcBefore that *does* allow the row tombstone to be purged
+        future = CompactionManager.instance.submitMaximal(cfs, (int) (System.currentTimeMillis() / 1000) + 10000);
+        future.get();
+
+        // both the data and the tombstone should be gone this time
+        assertEquals(0, cfs.getSSTables().size());
         result = processInternal(String.format("SELECT * FROM %s.%s WHERE k = %d", keyspace, table, 1));
         assertEquals(0, result.size());
     }
