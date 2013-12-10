@@ -77,19 +77,10 @@ public class LazilyCompactedRow extends AbstractCompactedRow
         // containing `key` outside of the set of sstables involved in this compaction.
         maxPurgeableTimestamp = controller.maxPurgeableTimestamp(key);
 
-        ColumnFamily emptyCf = ArrayBackedSortedColumns.factory.create(controller.cfs.metadata);
-        emptyCf.setDeletionInfo(deletionInfo.copy());
-
-        // only if we can purge all tombstones do we purge any of them (TODO: why?)
+        emptyColumnFamily = ArrayBackedSortedColumns.factory.create(controller.cfs.metadata);
+        emptyColumnFamily.setDeletionInfo(deletionInfo.copy());
         if (deletionInfo.maxTimestamp() < maxPurgeableTimestamp)
-        {
-            ColumnFamily purgedCf = ColumnFamilyStore.removeDeleted(emptyCf, controller.gcBefore);
-            emptyColumnFamily = purgedCf == null ? ArrayBackedSortedColumns.factory.create(controller.cfs.metadata) : purgedCf;
-        }
-        else
-        {
-            emptyColumnFamily = emptyCf;
-        }
+            emptyColumnFamily.purgeTombstones(controller.gcBefore);
 
         reducer = new Reducer();
         merger = Iterators.filter(MergeIterator.get(rows, emptyColumnFamily.getComparator().onDiskAtomComparator, reducer), Predicates.notNull());
@@ -97,8 +88,9 @@ public class LazilyCompactedRow extends AbstractCompactedRow
 
     private static ColumnFamily removeDeletedAndOldShards(DecoratedKey key, boolean shouldPurge, CompactionController controller, ColumnFamily cf)
     {
-        // We should only purge tombstones if shouldPurge is true, but regardless, it's still ok to remove columns that
-        // are shadowed by a tombstone; removeDeleted(cf, Integer.MIN_VALUE) will accomplish this without purging tombstones
+        // We should only purge cell tombstones if shouldPurge is true, but regardless, it's still ok to remove cells that
+        // are shadowed by a row or range tombstone; removeDeletedColumnsOnly(cf, Integer.MIN_VALUE) will accomplish this
+        // without purging tombstones.
         int overriddenGCBefore = shouldPurge ? controller.gcBefore : Integer.MIN_VALUE;
         ColumnFamilyStore.removeDeletedColumnsOnly(cf, overriddenGCBefore, controller.cfs.indexManager.updaterFor(key));
 
@@ -116,7 +108,6 @@ public class LazilyCompactedRow extends AbstractCompactedRow
         ColumnIndex columnsIndex;
         try
         {
-
             indexBuilder = new ColumnIndex.Builder(emptyColumnFamily, key.key, out);
             columnsIndex = indexBuilder.buildForCompaction(merger);
 
@@ -200,7 +191,8 @@ public class LazilyCompactedRow extends AbstractCompactedRow
         // in the container; we just want to leverage the conflict resolution code from CF
         ColumnFamily container = emptyColumnFamily.cloneMeShallow(ArrayBackedSortedColumns.factory, false);
 
-        // tombstone reference; will be reconciled w/ column during getReduced
+        // tombstone reference; will be reconciled w/ column during getReduced.  Note that the top-level (row) tombstone
+        // is held by LCR.deletionInfo.
         RangeTombstone tombstone;
 
         int columns = 0;
@@ -211,11 +203,16 @@ public class LazilyCompactedRow extends AbstractCompactedRow
         List<ByteBuffer> minColumnNameSeen = Collections.emptyList();
         List<ByteBuffer> maxColumnNameSeen = Collections.emptyList();
 
+        /**
+         * Called once per version of a cell that we need to merge, after which getReduced() is called.  In other words,
+         * this will be called one or more times with cells that share the same column name.
+         */
         public void reduce(OnDiskAtom current)
         {
             if (current instanceof RangeTombstone)
             {
-                tombstone = (RangeTombstone)current;
+                if (tombstone == null || current.maxTimestamp() >= tombstone.maxTimestamp())
+                    tombstone = (RangeTombstone)current;
             }
             else
             {
@@ -234,6 +231,9 @@ public class LazilyCompactedRow extends AbstractCompactedRow
             }
         }
 
+        /**
+         * Called after reduce() has been called for each cell sharing the same name.
+         */
         protected OnDiskAtom getReduced()
         {
             if (tombstone != null)

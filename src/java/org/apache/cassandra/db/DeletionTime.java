@@ -32,7 +32,9 @@ import org.apache.cassandra.utils.ObjectSizes;
  */
 public class DeletionTime implements Comparable<DeletionTime>
 {
-    /** This is the opposite of a row tombstone; it signifies that the entire row is alive, not deleted. */
+    /**
+     * A special DeletionTime that signifies that there is no top-level (row) tombstone.
+     */
     public static final DeletionTime LIVE = new DeletionTime(Long.MIN_VALUE, Integer.MAX_VALUE);
 
     /**
