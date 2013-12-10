@@ -253,7 +253,8 @@ public class LazilyCompactedRow extends AbstractCompactedRow
             else
             {
                 boolean shouldPurge = container.getSortedColumns().iterator().next().timestamp() < maxPurgeableTimestamp;
-                container.setDeletionInfo(deletionInfo); // container.clear() also removes deletion info
+                // when we clear() the container, it removes the deletion info, so this needs to be reset each time
+                container.setDeletionInfo(deletionInfo);
                 ColumnFamily purged = removeDeletedAndOldShards(key, shouldPurge, controller, container);
                 if (purged == null || !purged.iterator().hasNext())
                 {

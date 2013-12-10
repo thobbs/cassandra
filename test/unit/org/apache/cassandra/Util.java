@@ -245,12 +245,6 @@ public class Util
             assertTrue(ss.getTokenMetadata().isMember(hosts.get(i)));
     }
 
-
-    public static Future<?> compactAll(ColumnFamilyStore cfs)
-    {
-        return compactAll(cfs, cfs.gcBefore(System.currentTimeMillis()));
-    }
-
     public static Future<?> compactAll(ColumnFamilyStore cfs, int gcBefore)
     {
         List<Descriptor> descriptors = new ArrayList<>();
