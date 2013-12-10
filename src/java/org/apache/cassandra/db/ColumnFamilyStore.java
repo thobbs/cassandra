@@ -885,6 +885,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             return null;
         }
 
+        return removeDeletedCF(removeDeletedColumnsOnly(cf, gcBefore, indexer), gcBefore);
+    }
+
+    public static ColumnFamily removeDeletedColumnsOnly(ColumnFamily cf, int gcBefore, SecondaryIndexManager.Updater indexer)
+    {
         Iterator<Column> iter = cf.iterator();
         DeletionInfo.InOrderTester tester = cf.inOrderDeletionTester();
         boolean hasDroppedColumns = !cf.metadata.getDroppedColumns().isEmpty();
@@ -901,8 +906,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 indexer.remove(c);
             }
         }
-
-        return removeDeletedCF(cf, gcBefore);
+        return cf;
     }
 
     // returns true if
