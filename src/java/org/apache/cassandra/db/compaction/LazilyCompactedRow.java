@@ -112,7 +112,7 @@ public class LazilyCompactedRow extends AbstractCompactedRow
             columnsIndex = indexBuilder.buildForCompaction(merger);
 
             // if there aren't any columns or tombstones, return null
-            if (columnsIndex.columnsIndex.isEmpty() && emptyColumnFamily.getColumnCount() == 0 && !emptyColumnFamily.isMarkedForDelete())
+            if (columnsIndex.columnsIndex.isEmpty() && !emptyColumnFamily.isMarkedForDelete())
                 return null;
         }
         catch (IOException e)
