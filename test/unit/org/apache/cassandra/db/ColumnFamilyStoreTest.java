@@ -1581,7 +1581,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
     }
 
     @Test
-    public void testRemoveUnifinishedCompactionLeftovers() throws Throwable
+    public void testRemoveUnfinishedCompactionLeftovers() throws Throwable
     {
         String ks = "Keyspace1";
         String cf = "Standard3"; // should be empty
@@ -1628,6 +1628,56 @@ public class ColumnFamilyStoreTest extends SchemaLoader
         ColumnFamilyStore.removeUnfinishedCompactionLeftovers(ks, cf, Sets.newHashSet(sstable1.descriptor.generation));
 
         // 2nd sstable should be removed (only 1st sstable exists in set of size 1)
+        sstables = dir.sstableLister().list();
+        assert sstables.size() == 1;
+        assert sstables.containsKey(sstable1.descriptor);
+    }
+
+    /**
+     * @see <a href="https://issues.apache.org/jira/browse/CASSANDRA-6086">CASSANDRA-6086</a>
+     */
+    @Test
+    public void testFailedToRemoveUnfinishedCompactionLeftovers() throws Throwable
+    {
+        final String ks = "Keyspace1";
+        final String cf = "Standard4"; // should be empty
+
+        final CFMetaData cfmeta = Schema.instance.getCFMetaData(ks, cf);
+        Directories dir = Directories.create(ks, cf);
+        ByteBuffer key = bytes("key");
+
+        // Write SSTable generation 3 that has ancestors 1 and 2
+        final Set<Integer> ancestors = Sets.newHashSet(1, 2);
+        SSTableSimpleWriter writer = new SSTableSimpleWriter(dir.getDirectoryForNewSSTables(),
+                                                cfmeta, StorageService.getPartitioner())
+        {
+            protected SSTableWriter getWriter()
+            {
+                SSTableMetadata.Collector collector = SSTableMetadata.createCollector(cfmeta.comparator);
+                for (int ancestor : ancestors)
+                    collector.addAncestor(ancestor);
+                String file = new Descriptor(directory, ks, cf, 3, true).filenameFor(Component.DATA);
+                return new SSTableWriter(file,
+                                         0,
+                                         metadata,
+                                         StorageService.getPartitioner(),
+                                         collector);
+            }
+        };
+        writer.newRow(key);
+        writer.addColumn(bytes("col"), bytes("val"), 1);
+        writer.close();
+
+        Map<Descriptor, Set<Component>> sstables = dir.sstableLister().list();
+        assert sstables.size() == 1;
+
+        Map.Entry<Descriptor, Set<Component>> sstableToOpen = sstables.entrySet().iterator().next();
+        final SSTableReader sstable1 = SSTableReader.open(sstableToOpen.getKey());
+
+        // simulate we don't have generation in compaction_history
+        ColumnFamilyStore.removeUnfinishedCompactionLeftovers(ks, cf, ancestors);
+
+        // SSTable should not be deleted
         sstables = dir.sstableLister().list();
         assert sstables.size() == 1;
         assert sstables.containsKey(sstable1.descriptor);
