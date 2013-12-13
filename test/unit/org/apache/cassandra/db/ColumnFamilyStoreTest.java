@@ -52,6 +52,7 @@ import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.WrappedRunnable;
 
 import static org.junit.Assert.*;
@@ -1597,14 +1598,14 @@ public class ColumnFamilyStoreTest extends SchemaLoader
         writer.close();
 
         Map<Descriptor, Set<Component>> sstables = dir.sstableLister().list();
-        assert sstables.size() == 1;
+        assertEquals(1, sstables.size());
 
         Map.Entry<Descriptor, Set<Component>> sstableToOpen = sstables.entrySet().iterator().next();
         final SSTableReader sstable1 = SSTableReader.open(sstableToOpen.getKey());
 
         // simulate incomplete compaction
         writer = new SSTableSimpleWriter(dir.getDirectoryForNewSSTables(),
-                                                             cfmeta, StorageService.getPartitioner())
+                                         cfmeta, StorageService.getPartitioner())
         {
             protected SSTableWriter getWriter()
             {
@@ -1623,14 +1624,23 @@ public class ColumnFamilyStoreTest extends SchemaLoader
 
         // should have 2 sstables now
         sstables = dir.sstableLister().list();
-        assert sstables.size() == 2;
+        assertEquals(2, sstables.size());
 
-        ColumnFamilyStore.removeUnfinishedCompactionLeftovers(ks, cf, Sets.newHashSet(sstable1.descriptor.generation));
+        UUID compactionTaskID = SystemKeyspace.startCompaction(
+                Keyspace.open(ks).getColumnFamilyStore(cf),
+                Collections.singleton(SSTableReader.open(sstable1.descriptor)));
+
+        Map<Integer, UUID> unfinishedCompaction = new HashMap<>();
+        unfinishedCompaction.put(sstable1.descriptor.generation, compactionTaskID);
+        ColumnFamilyStore.removeUnfinishedCompactionLeftovers(ks, cf, unfinishedCompaction);
 
         // 2nd sstable should be removed (only 1st sstable exists in set of size 1)
         sstables = dir.sstableLister().list();
-        assert sstables.size() == 1;
-        assert sstables.containsKey(sstable1.descriptor);
+        assertEquals(1, sstables.size());
+        assertTrue(sstables.containsKey(sstable1.descriptor));
+
+        Map<Pair<String, String>, Map<Integer, UUID>> unfinished = SystemKeyspace.getUnfinishedCompactions();
+        assertTrue(unfinished.isEmpty());
     }
 
     private ColumnFamilyStore prepareMultiRangeSlicesTest(int valueSize, boolean flush) throws Throwable

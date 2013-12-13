@@ -289,11 +289,11 @@ public class CompactionsTest extends SchemaLoader
             }
         }));
         UUID taskId = SystemKeyspace.startCompaction(cfs, sstables);
-        SetMultimap<Pair<String, String>, Integer> compactionLogs = SystemKeyspace.getUnfinishedCompactions();
-        Set<Integer> unfinishedCompactions = compactionLogs.get(Pair.create(KEYSPACE1, cf));
+        Map<Pair<String, String>, Map<Integer, UUID>> compactionLogs = SystemKeyspace.getUnfinishedCompactions();
+        Set<Integer> unfinishedCompactions = compactionLogs.get(Pair.create(KEYSPACE1, cf)).keySet();
         assert unfinishedCompactions.containsAll(generations);
 
-        SystemKeyspace.finishCompaction(taskId);
+        SystemKeyspace.finishCompaction(taskId, false);
         compactionLogs = SystemKeyspace.getUnfinishedCompactions();
         assert !compactionLogs.containsKey(Pair.create(KEYSPACE1, cf));
     }

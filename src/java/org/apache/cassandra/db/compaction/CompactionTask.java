@@ -222,7 +222,7 @@ public class CompactionTask extends AbstractCompactionTask
             // point of no return -- the new sstables are live on disk; next we'll start deleting the old ones
             // (in replaceCompactedSSTables)
             if (taskId != null)
-                SystemKeyspace.finishCompaction(taskId);
+                SystemKeyspace.finishCompaction(taskId, true);
 
             if (collector != null)
                 collector.finishCompaction(ci);
