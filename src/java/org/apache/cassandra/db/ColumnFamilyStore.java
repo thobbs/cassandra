@@ -482,20 +482,22 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * compactions, we remove the new ones (since those may be incomplete -- under LCS, we may create multiple
      * sstables from any given ancestor).
      */
-    public static void removeUnfinishedCompactionLeftovers(String keyspace, String columnfamily, Set<Integer> unfinishedGenerations)
+    public static void removeUnfinishedCompactionLeftovers(String keyspace, String columnfamily, Map<Integer, UUID> unfinishedCompactions)
     {
         Directories directories = Directories.create(keyspace, columnfamily);
 
-        // sanity-check unfinishedGenerations
         Set<Integer> allGenerations = new HashSet<>();
         for (Descriptor desc : directories.sstableLister().list().keySet())
             allGenerations.add(desc.generation);
+
+        // sanity-check unfinishedCompactions
+        Set<Integer> unfinishedGenerations = unfinishedCompactions.keySet();
         if (!allGenerations.containsAll(unfinishedGenerations))
         {
             HashSet<Integer> missingGenerations = new HashSet<>(unfinishedGenerations);
             missingGenerations.removeAll(allGenerations);
-            logger.warn("Unfinished compactions of {}.{} reference missing sstables of generations {}. (No user action needed)",
-                        keyspace, columnfamily, missingGenerations);
+            logger.debug("Unfinished compactions of {}.{} reference missing sstables of generations {}",
+                         keyspace, columnfamily, missingGenerations);
         }
 
         // remove new sstables from compactions that didn't complete, and compute
@@ -504,7 +506,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         for (Map.Entry<Descriptor, Set<Component>> sstableFiles : directories.sstableLister().list().entrySet())
         {
             Descriptor desc = sstableFiles.getKey();
-            Set<Component> components = sstableFiles.getValue();
 
             Set<Integer> ancestors;
             try
@@ -520,7 +521,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 && unfinishedGenerations.containsAll(ancestors)
                 && allGenerations.containsAll(ancestors))
             {
-                SSTable.delete(desc, components);
+                // any of the ancestors would work, so we'll just lookup the compaction task ID with the first one
+                UUID compactionTaskID = unfinishedCompactions.get(ancestors.iterator().next());
+                assert compactionTaskID != null;
+                logger.debug("Going to delete unfinished compaction product {}", desc);
+                SSTable.delete(desc, sstableFiles.getValue());
+                SystemKeyspace.finishCompaction(compactionTaskID);
             }
             else
             {
@@ -532,10 +538,15 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         for (Map.Entry<Descriptor, Set<Component>> sstableFiles : directories.sstableLister().list().entrySet())
         {
             Descriptor desc = sstableFiles.getKey();
-            Set<Component> components = sstableFiles.getValue();
-
             if (completedAncestors.contains(desc.generation))
-                SSTable.delete(desc, components);
+            {
+                // if any of the ancestors were participating in a compaction, finish that compaction
+                logger.debug("Going to delete leftover compaction ancestor {}", desc);
+                SSTable.delete(desc, sstableFiles.getValue());
+                UUID compactionTaskID = unfinishedCompactions.get(desc.generation);
+                if (compactionTaskID != null)
+                    SystemKeyspace.finishCompaction(unfinishedCompactions.get(desc.generation));
+            }
         }
     }
 

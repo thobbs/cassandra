@@ -33,6 +33,8 @@ import com.google.common.primitives.Ints;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.RowPosition;
 import org.apache.cassandra.dht.Bounds;
@@ -601,5 +603,17 @@ public class LeveledManifest
         if (!FBUtilities.isUnix())
             FileUtils.delete(filename);
         FileUtils.renameWithConfirm(filename + "-tmp", filename);
+    }
+
+    public static void maybeMigrateManifests() throws IOException
+    {
+        for (String keyspaceName : Schema.instance.getKeyspaces())
+        {
+            for (CFMetaData cfm : Schema.instance.getKeyspaceMetaData(keyspaceName).values())
+            {
+                if (LegacyLeveledManifest.manifestNeedsMigration(keyspaceName,cfm.cfName))
+                    LegacyLeveledManifest.migrateManifests(keyspaceName, cfm.cfName);
+            }
+        }
     }
 }
