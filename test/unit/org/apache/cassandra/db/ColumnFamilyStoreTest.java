@@ -1633,6 +1633,55 @@ public class ColumnFamilyStoreTest extends SchemaLoader
         assert sstables.containsKey(sstable1.descriptor);
     }
 
+    @Test
+    public void testLoadNewSSTablesAvoidsOverwrites() throws Throwable
+    {
+        String ks = "Keyspace1";
+        String cf = "Standard1"; // should be empty
+
+        final CFMetaData cfmeta = Schema.instance.getCFMetaData(ks, cf);
+        Directories dir = Directories.create(ks, cf);
+        ByteBuffer key = bytes("key");
+
+        SSTableSimpleWriter writer = new SSTableSimpleWriter(dir.getDirectoryForNewSSTables(),
+                                                              cfmeta, StorageService.getPartitioner());
+        writer.newRow(key);
+        writer.addColumn(bytes("col"), bytes("val"), 1);
+        writer.close();
+
+        writer = new SSTableSimpleWriter(dir.getDirectoryForNewSSTables(),
+                                         cfmeta, StorageService.getPartitioner());
+        writer.newRow(key);
+        writer.addColumn(bytes("col"), bytes("val"), 1);
+        writer.close();
+
+        Set<Integer> generations = new HashSet<>();
+        for (Descriptor descriptor : dir.sstableLister().list().keySet())
+            generations.add(descriptor.generation);
+
+        // we should have two generations: [1, 2]
+        assertEquals(2, generations.size());
+        assertTrue(generations.contains(1));
+        assertTrue(generations.contains(2));
+
+        ColumnFamilyStore cfs = Keyspace.open(ks).getColumnFamilyStore(cf);
+        assertEquals(0, cfs.getSSTables().size());
+
+        // sstables always get renamed when we load them
+        cfs.loadNewSSTables();
+
+        assertEquals(2, cfs.getSSTables().size());
+        generations = new HashSet<>();
+        for (Descriptor descriptor : dir.sstableLister().list().keySet())
+            generations.add(descriptor.generation);
+
+        // normally they would get renamed to generations 1 and 2, but since those filenames already exist,
+        // they get skipped and we end up with generations 3 and 4
+        assertEquals(2, generations.size());
+        assertTrue(generations.contains(3));
+        assertTrue(generations.contains(4));
+    }
+
     private ColumnFamilyStore prepareMultiRangeSlicesTest(int valueSize, boolean flush) throws Throwable
     {
         String keyspaceName = "Keyspace1";
