@@ -231,9 +231,7 @@ public class Scrubber implements Closeable
                         catch (Throwable th2)
                         {
                             throwIfFatal(th2);
-                            // Skipping rows is dangerous for counters (see CASSANDRA-2759)
-                            if (isCommutative)
-                                throw new IOError(th2);
+                            throwIfCommutative(key, th2);
 
                             outputHandler.warn("Retry failed too. Skipping to next row (retry's stacktrace follows)", th2);
                             writer.resetAndTruncate();
@@ -243,9 +241,7 @@ public class Scrubber implements Closeable
                     }
                     else
                     {
-                        // Skipping rows is dangerous for counters (see CASSANDRA-2759)
-                        if (isCommutative)
-                            throw new IOError(th);
+                        throwIfCommutative(key, th);
 
                         outputHandler.warn("Row at " + dataStart + " is unreadable; skipping to next");
                         if (currentIndexKey != null)
@@ -322,6 +318,17 @@ public class Scrubber implements Closeable
     {
         if (th instanceof Error && !(th instanceof AssertionError || th instanceof IOError))
             throw (Error) th;
+    }
+
+    private void throwIfCommutative(DecoratedKey key, Throwable th)
+    {
+        if (isCommutative)
+        {
+            outputHandler.warn(String.format("Corrupt rows cannot be skipped in counter tables (see CASSANDRA-2759 " +
+                               "for more details); the following error occurred while scrubbing the row with key '%s':",
+                               key));
+            throw new IOError(th);
+        }
     }
 
     public void close()
