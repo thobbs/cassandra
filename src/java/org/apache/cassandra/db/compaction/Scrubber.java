@@ -35,6 +35,7 @@ public class Scrubber implements Closeable
     public final ColumnFamilyStore cfs;
     public final SSTableReader sstable;
     public final File destination;
+    public final boolean skipCorrupted;
 
     private final CompactionController controller;
     private final boolean isCommutative;
@@ -63,16 +64,17 @@ public class Scrubber implements Closeable
     };
     private final SortedSet<Row> outOfOrderRows = new TreeSet<>(rowComparator);
 
-    public Scrubber(ColumnFamilyStore cfs, SSTableReader sstable) throws IOException
+    public Scrubber(ColumnFamilyStore cfs, SSTableReader sstable, boolean skipCorrupted) throws IOException
     {
-        this(cfs, sstable, new OutputHandler.LogOutput(), false);
+        this(cfs, sstable, skipCorrupted, new OutputHandler.LogOutput(), false);
     }
 
-    public Scrubber(ColumnFamilyStore cfs, SSTableReader sstable, OutputHandler outputHandler, boolean isOffline) throws IOException
+    public Scrubber(ColumnFamilyStore cfs, SSTableReader sstable, boolean skipCorrupted, OutputHandler outputHandler, boolean isOffline) throws IOException
     {
         this.cfs = cfs;
         this.sstable = sstable;
         this.outputHandler = outputHandler;
+        this.skipCorrupted = skipCorrupted;
 
         // Calculate the expected compacted filesize
         this.destination = cfs.directories.getDirectoryForNewSSTables();
@@ -166,7 +168,9 @@ public class Scrubber implements Closeable
                 if (!sstable.descriptor.version.hasRowSizeAndColumnCount)
                 {
                     dataSize = dataSizeFromIndex;
-                    outputHandler.debug(String.format("row %s is %s bytes", ByteBufferUtil.bytesToHex(key.key), dataSize));
+                    // avoid an NPE if key is null
+                    String keyName = key == null ? "(unreadable key)" : ByteBufferUtil.bytesToHex(key.key);
+                    outputHandler.debug(String.format("row %s is %s bytes", keyName, dataSize));
                 }
                 else
                 {
@@ -203,7 +207,7 @@ public class Scrubber implements Closeable
                 catch (Throwable th)
                 {
                     throwIfFatal(th);
-                    outputHandler.warn("Non-fatal error reading row (stacktrace follows)", th);
+                    outputHandler.warn("Error reading row (stacktrace follows):", th);
                     writer.resetAndTruncate();
 
                     if (currentIndexKey != null
@@ -243,7 +247,7 @@ public class Scrubber implements Closeable
                     {
                         throwIfCommutative(key, th);
 
-                        outputHandler.warn("Row at " + dataStart + " is unreadable; skipping to next");
+                        outputHandler.warn("Row starting at position " + dataStart + " is unreadable; skipping to next");
                         if (currentIndexKey != null)
                             dataFile.seek(nextRowPositionFromIndex);
                         badRows++;
@@ -322,11 +326,13 @@ public class Scrubber implements Closeable
 
     private void throwIfCommutative(DecoratedKey key, Throwable th)
     {
-        if (isCommutative)
+        if (isCommutative && !skipCorrupted)
         {
-            outputHandler.warn(String.format("Corrupt rows cannot be skipped in counter tables (see CASSANDRA-2759 " +
-                               "for more details); the following error occurred while scrubbing the row with key '%s':",
-                               key));
+            outputHandler.warn(String.format("An error occurred while scrubbing the row with key '%s'.  Skipping corrupt " +
+                                             "rows in counter tables will result in undercounts for the affected " +
+                                             "counters (see CASSANDRA-2759 for more details), so by default the scrub will " +
+                                             "stop at this point.  If you would like to skip the row anyway and continue " +
+                                             "scrubbing, re-run the scrub with the --skip-corrupted option.", key));
             throw new IOError(th);
         }
     }
