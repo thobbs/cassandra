@@ -3636,6 +3636,23 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void bulkLoad(String directory)
     {
+        try
+        {
+            bulkLoadInternal(directory).get();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public String bulkLoadAsync(String directory)
+    {
+        return bulkLoadInternal(directory).planId.toString();
+    }
+
+    private StreamResultFuture bulkLoadInternal(String directory)
+    {
         File dir = new File(directory);
 
         if (!dir.exists() || !dir.isDirectory())
@@ -3668,14 +3685,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         };
 
         SSTableLoader loader = new SSTableLoader(dir, client, new OutputHandler.LogOutput());
-        try
-        {
-            loader.stream().get();
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        return loader.stream();
     }
 
     public int getExceptionCount()
