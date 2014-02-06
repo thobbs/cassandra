@@ -134,7 +134,7 @@ public class IndexSummaryBuilder
 
     public static int entriesAtSamplingLevel(int samplingLevel, int maxSummarySize)
     {
-        return (samplingLevel * maxSummarySize) / BASE_SAMPLING_LEVEL;
+        return (int) Math.ceil((samplingLevel * maxSummarySize) / (double) BASE_SAMPLING_LEVEL);
     }
 
     public static int calculateSamplingLevel(int currentSamplingLevel, int currentNumEntries, long targetNumEntries, int minIndexInterval, int maxIndexInterval)

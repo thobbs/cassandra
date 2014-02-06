@@ -134,10 +134,10 @@ public class IndexSummaryTest
         assertEquals(Arrays.asList(0), Downsampling.getSamplingPattern(0));
         assertEquals(Arrays.asList(0), Downsampling.getSamplingPattern(1));
 
-        assertEquals(Arrays.asList(0, 1), Downsampling.getSamplingPattern(2));
-        assertEquals(Arrays.asList(0, 2, 1, 3), Downsampling.getSamplingPattern(4));
-        assertEquals(Arrays.asList(0, 4, 2, 6, 1, 5, 3, 7), Downsampling.getSamplingPattern(8));
-        assertEquals(Arrays.asList(0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15), Downsampling.getSamplingPattern(16));
+        assertEquals(Arrays.asList(1, 0), Downsampling.getSamplingPattern(2));
+        assertEquals(Arrays.asList(3, 1, 2, 0), Downsampling.getSamplingPattern(4));
+        assertEquals(Arrays.asList(7, 3, 5, 1, 6, 2, 4, 0), Downsampling.getSamplingPattern(8));
+        assertEquals(Arrays.asList(15, 7, 11, 3, 13, 5, 9, 1, 14, 6, 10, 2, 12, 4, 8, 0), Downsampling.getSamplingPattern(16));
     }
 
     private static boolean shouldSkip(int index, List<Integer> startPoints)
@@ -223,13 +223,13 @@ public class IndexSummaryTest
             full.add(i);
 
         assertEquals(full, Downsampling.getOriginalIndexes(BASE_SAMPLING_LEVEL));
-        // the entry at index 0 is the first to go
-        assertEquals(full.subList(1, full.size()), Downsampling.getOriginalIndexes(BASE_SAMPLING_LEVEL - 1));
+        // the entry at index 127 is the first to go
+        assertEquals(full.subList(0, full.size() - 1), Downsampling.getOriginalIndexes(BASE_SAMPLING_LEVEL - 1));
 
         // spot check a few values (these depend on BASE_SAMPLING_LEVEL being 128)
         assert BASE_SAMPLING_LEVEL == 128;
-        assertEquals(Arrays.asList(31, 63, 95, 127), Downsampling.getOriginalIndexes(4));
-        assertEquals(Arrays.asList(63, 127), Downsampling.getOriginalIndexes(2));
+        assertEquals(Arrays.asList(0, 32, 64, 96), Downsampling.getOriginalIndexes(4));
+        assertEquals(Arrays.asList(0, 64), Downsampling.getOriginalIndexes(2));
         assertEquals(Arrays.asList(), Downsampling.getOriginalIndexes(0));
     }
 
@@ -240,13 +240,13 @@ public class IndexSummaryTest
         for (int i = 0; i < BASE_SAMPLING_LEVEL; i++)
             assertEquals(indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(i, BASE_SAMPLING_LEVEL, indexInterval));
 
-        // with one round of downsampling, only the first summary has been removed, so only the last index will have
+        // with one round of downsampling, only the last summary entry has been removed, so only the last index will have
         // double the gap until the next sample
         for (int i = 0; i < BASE_SAMPLING_LEVEL - 2; i++)
             assertEquals(indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(i, BASE_SAMPLING_LEVEL - 1, indexInterval));
         assertEquals(indexInterval * 2, Downsampling.getEffectiveIndexIntervalAfterIndex(BASE_SAMPLING_LEVEL - 2, BASE_SAMPLING_LEVEL - 1, indexInterval));
 
-        // at samplingLevel=2, the retained summary points are [63, 127] (assumes BASE_SAMPLING_LEVEL is 128)
+        // at samplingLevel=2, the retained summary points are [0, 64] (assumes BASE_SAMPLING_LEVEL is 128)
         assert BASE_SAMPLING_LEVEL == 128;
         assertEquals(64 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(0, 2, indexInterval));
         assertEquals(64 * indexInterval, Downsampling.getEffectiveIndexIntervalAfterIndex(1, 2, indexInterval));
