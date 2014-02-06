@@ -72,11 +72,11 @@ public class IndexSummaryManagerTest extends SchemaLoader
     {
         for (int i = 0; i < numRows; i++)
         {
-            DecoratedKey key = Util.dk(String.valueOf(i));
+            DecoratedKey key = Util.dk(String.format("%3d", i));
             QueryFilter filter = QueryFilter.getIdentityFilter(key, cfs.getColumnFamilyName(), System.currentTimeMillis());
             ColumnFamily row = cfs.getColumnFamily(filter);
             assertNotNull(row);
-            Cell cell = row.getColumn(Util.cellname("cell"));
+            Cell cell = row.getColumn(Util.cellname("column"));
             assertNotNull(cell);
             assertEquals(100, cell.value().array().length);
         }
@@ -110,7 +110,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         {
             for (int row = 0; row < numRows; row++)
             {
-                DecoratedKey key = Util.dk(String.valueOf(row));
+                DecoratedKey key = Util.dk(String.format("%3d", row));
                 Mutation rm = new Mutation(ksname, key.key);
                 rm.add(cfname, Util.cellname("column"), value, 0);
                 rm.apply();
@@ -148,7 +148,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         validateData(cfs, numRows);
 
         // upsample back up to half
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables,(singleSummaryOffHeapSpace * (numSSTables / 2)));
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables,(singleSummaryOffHeapSpace * (numSSTables / 2) + 4));
         assert sstables.size() == 4;
         for (SSTableReader sstable : sstables)
             assertEquals(BASE_SAMPLING_LEVEL / 2, sstable.getIndexSummarySamplingLevel());
@@ -206,26 +206,26 @@ public class IndexSummaryManagerTest extends SchemaLoader
 
 
         // Cause a mix of upsampling and downsampling. We'll leave enough space for two full index summaries. The two
-        // coldest sstables will get downsampled to 8/128 of their size, leaving us with 1 and 112/128th index
+        // coldest sstables will get downsampled to 4/128 of their size, leaving us with 1 and 92/128th index
         // summaries worth of space.  The hottest sstable should get a full index summary, and the one in the middle
         // should get the remainder.
         sstables.get(0).readMeter = new RestorableMeter(0.0, 0.0);
         sstables.get(1).readMeter = new RestorableMeter(0.0, 0.0);
-        sstables.get(2).readMeter = new RestorableMeter(100, 100);
+        sstables.get(2).readMeter = new RestorableMeter(92, 92);
         sstables.get(3).readMeter = new RestorableMeter(128.0, 128.0);
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (long) (singleSummaryOffHeapSpace + (singleSummaryOffHeapSpace * (100.0 / BASE_SAMPLING_LEVEL))));
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (long) (singleSummaryOffHeapSpace + (singleSummaryOffHeapSpace * (92.0 / BASE_SAMPLING_LEVEL))));
         Collections.sort(sstables, hotnessComparator);
-        assertEquals(minSamplingLevel, sstables.get(0).getIndexSummarySamplingLevel());
-        assertEquals(minSamplingLevel, sstables.get(1).getIndexSummarySamplingLevel());
+        assertEquals(1, sstables.get(0).getIndexSummarySize());  // at the min sampling level
+        assertEquals(1, sstables.get(0).getIndexSummarySize());  // at the min sampling level
         assertTrue(sstables.get(2).getIndexSummarySamplingLevel() > minSamplingLevel);
         assertTrue(sstables.get(2).getIndexSummarySamplingLevel() < BASE_SAMPLING_LEVEL);
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
 
         // Don't leave enough space for even the minimal index summaries
-        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, 100);
+        sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, 10);
         for (SSTableReader sstable : sstables)
-            assertEquals(minSamplingLevel, sstable.getIndexSummarySamplingLevel());
+            assertEquals(1, sstable.getIndexSummarySize());  // at the min sampling level
         validateData(cfs, numRows);
     }
 
@@ -258,7 +258,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         SSTableReader original = sstables.get(0);
 
         SSTableReader sstable = original;
-        for (int samplingLevel = minSamplingLevel; samplingLevel < BASE_SAMPLING_LEVEL; samplingLevel++)
+        for (int samplingLevel = 1; samplingLevel < BASE_SAMPLING_LEVEL; samplingLevel++)
         {
             sstable = sstable.cloneWithNewSummarySamplingLevel(samplingLevel);
             assertEquals(samplingLevel, sstable.getIndexSummarySamplingLevel());

@@ -321,9 +321,11 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                     sstable.metadata.getMinIndexInterval(), sstable.metadata.getMaxIndexInterval());
             int numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
 
-            logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes ({} entries); considering moving from level " +
-                         "{} ({} entries) to level {} ({} entries)",
-                         sstable.getFilename(), readsPerSec, idealSpace, targetNumEntries, currentSamplingLevel, currentNumEntries, newSamplingLevel, numEntriesAtNewSamplingLevel);
+            logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes ({} entries); considering moving " +
+                         "from level {} ({} entries, {} bytes) to level {} ({} entries, {} bytes)",
+                         sstable.getFilename(), readsPerSec, idealSpace, targetNumEntries, currentSamplingLevel, currentNumEntries,
+                         currentNumEntries * avgEntrySize, newSamplingLevel, numEntriesAtNewSamplingLevel,
+                         numEntriesAtNewSamplingLevel * avgEntrySize);
 
             if (targetNumEntries >= currentNumEntries * UPSAMPLE_THRESHOLD && newSamplingLevel > currentSamplingLevel)
             {

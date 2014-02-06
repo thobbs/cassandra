@@ -1521,7 +1521,6 @@ public final class CFMetaData
         if (maxIndexInterval < minIndexInterval)
             throw new ConfigurationException(String.format("Max index interval (%d) must be greater than the min index " +
                                                            "interval (%d).", maxIndexInterval, minIndexInterval));
-
     }
 
     /**
@@ -1733,7 +1732,7 @@ public final class CFMetaData
             if (result.has("min_index_interval"))
                 cfm.minIndexInterval(result.getInt("min_index_interval"));
             if (result.has("max_index_interval"))
-                cfm.minIndexInterval(result.getInt("max_index_interval"));
+                cfm.maxIndexInterval(result.getInt("max_index_interval"));
 
             if (result.has("populate_io_cache_on_flush"))
                 cfm.populateIoCacheOnFlush(result.getBoolean("populate_io_cache_on_flush"));

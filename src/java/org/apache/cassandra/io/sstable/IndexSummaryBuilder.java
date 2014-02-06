@@ -75,8 +75,6 @@ public class IndexSummaryBuilder
     {
         if (keysWritten % minIndexInterval == 0)
         {
-            indexIntervalMatches++;
-
             // see if we should skip this key based on our sampling level
             boolean shouldSkip = false;
             for (int start : startPoints)
@@ -96,6 +94,8 @@ public class IndexSummaryBuilder
                 positions.add(indexPosition);
                 offheapSize += TypeSizes.NATIVE.sizeof(indexPosition);
             }
+
+            indexIntervalMatches++;
         }
         keysWritten++;
 
@@ -141,7 +141,7 @@ public class IndexSummaryBuilder
     {
         // effective index interval == (BASE_SAMPLING_LEVEL / samplingLevel) * minIndexInterval
         // so we can just solve for minSamplingLevel here:
-        // maxIndexInterval == (BASE_SAMPLINE_LEVEL / minSamplingLevel) * minIndexInterval
+        // maxIndexInterval == (BASE_SAMPLING_LEVEL / minSamplingLevel) * minIndexInterval
         int effectiveMinSamplingLevel = Math.max(1, (BASE_SAMPLING_LEVEL * minIndexInterval) / maxIndexInterval);
 
         // Algebraic explanation for calculating the new sampling level (solve for newSamplingLevel):
