@@ -39,7 +39,6 @@ import org.apache.cassandra.utils.Pair;
 import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.downsample;
 import static org.apache.cassandra.io.sstable.IndexSummaryBuilder.entriesAtSamplingLevel;
 import static org.apache.cassandra.io.sstable.Downsampling.BASE_SAMPLING_LEVEL;
-import static org.apache.cassandra.io.sstable.Downsampling.MIN_SAMPLING_LEVEL;
 
 import static org.junit.Assert.*;
 
@@ -81,7 +80,7 @@ public class IndexSummaryTest
         dos.writeUTF("JUNK");
         FileUtils.closeQuietly(dos);
         DataInputStream dis = new DataInputStream(new ByteArrayInputStream(aos.toByteArray()));
-        IndexSummary is = IndexSummary.serializer.deserialize(dis, DatabaseDescriptor.getPartitioner(), false, 1);
+        IndexSummary is = IndexSummary.serializer.deserialize(dis, DatabaseDescriptor.getPartitioner(), false, 1, 1);
         for (int i = 0; i < 100; i++)
             assertEquals(i, is.binarySearch(random.left.get(i)));
         // read the junk
@@ -94,7 +93,7 @@ public class IndexSummaryTest
     public void testAddEmptyKey() throws Exception
     {
         IPartitioner p = new RandomPartitioner();
-        IndexSummaryBuilder builder = new IndexSummaryBuilder(1, 1, BASE_SAMPLING_LEVEL);
+        IndexSummaryBuilder builder = new IndexSummaryBuilder(1, 1, 1, BASE_SAMPLING_LEVEL);
         builder.maybeAddEntry(p.decorateKey(ByteBufferUtil.EMPTY_BYTE_BUFFER), 0);
         IndexSummary summary = builder.build(p);
         assertEquals(1, summary.size());
@@ -105,7 +104,7 @@ public class IndexSummaryTest
         DataOutputStream dos = new DataOutputStream(aos);
         IndexSummary.serializer.serialize(summary, dos, false);
         DataInputStream dis = new DataInputStream(new ByteArrayInputStream(aos.toByteArray()));
-        IndexSummary loaded = IndexSummary.serializer.deserialize(dis, p, false, 1);
+        IndexSummary loaded = IndexSummary.serializer.deserialize(dis, p, false, 1, 1);
 
         assertEquals(1, loaded.size());
         assertEquals(summary.getPosition(0), loaded.getPosition(0));
@@ -115,7 +114,7 @@ public class IndexSummaryTest
     private Pair<List<DecoratedKey>, IndexSummary> generateRandomIndex(int size, int interval)
     {
         List<DecoratedKey> list = Lists.newArrayList();
-        IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(), interval, BASE_SAMPLING_LEVEL);
+        IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(), interval, interval, BASE_SAMPLING_LEVEL);
         for (int i = 0; i < size; i++)
         {
             UUID uuid = UUID.randomUUID();
@@ -171,7 +170,7 @@ public class IndexSummaryTest
 
         // downsample by one level, then two levels, then three levels...
         int downsamplingRound = 1;
-        for (int samplingLevel = BASE_SAMPLING_LEVEL - 1; samplingLevel >= MIN_SAMPLING_LEVEL; samplingLevel--)
+        for (int samplingLevel = BASE_SAMPLING_LEVEL - 1; samplingLevel >= 1; samplingLevel--)
         {
             IndexSummary downsampled = downsample(original, samplingLevel, DatabaseDescriptor.getPartitioner());
             assertEquals(entriesAtSamplingLevel(samplingLevel, original.getMaxNumberOfEntries()), downsampled.size());
@@ -192,7 +191,7 @@ public class IndexSummaryTest
         // downsample one level each time
         IndexSummary previous = original;
         downsamplingRound = 1;
-        for (int downsampleLevel = BASE_SAMPLING_LEVEL - 1; downsampleLevel >= MIN_SAMPLING_LEVEL; downsampleLevel--)
+        for (int downsampleLevel = BASE_SAMPLING_LEVEL - 1; downsampleLevel >= 1; downsampleLevel--)
         {
             IndexSummary downsampled = downsample(previous, downsampleLevel, DatabaseDescriptor.getPartitioner());
             assertEquals(entriesAtSamplingLevel(downsampleLevel, original.getMaxNumberOfEntries()), downsampled.size());
@@ -216,7 +215,7 @@ public class IndexSummaryTest
     @Test
     public void testOriginalIndexLookup()
     {
-        for (int i = BASE_SAMPLING_LEVEL; i >= MIN_SAMPLING_LEVEL; i--)
+        for (int i = BASE_SAMPLING_LEVEL; i >= 1; i--)
             assertEquals(i, Downsampling.getOriginalIndexes(i).size());
 
         ArrayList<Integer> full = new ArrayList<>();

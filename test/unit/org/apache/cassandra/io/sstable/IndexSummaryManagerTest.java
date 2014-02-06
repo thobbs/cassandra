@@ -34,7 +34,6 @@ import org.apache.cassandra.db.filter.QueryFilter;
 import org.apache.cassandra.metrics.RestorableMeter;
 
 import static org.apache.cassandra.io.sstable.Downsampling.BASE_SAMPLING_LEVEL;
-import static org.apache.cassandra.io.sstable.Downsampling.MIN_SAMPLING_LEVEL;
 import static org.apache.cassandra.io.sstable.IndexSummaryManager.DOWNSAMPLE_THESHOLD;
 import static org.apache.cassandra.io.sstable.IndexSummaryManager.UPSAMPLE_THRESHOLD;
 import static org.apache.cassandra.io.sstable.IndexSummaryManager.redistributeSummaries;
@@ -100,6 +99,8 @@ public class IndexSummaryManagerTest extends SchemaLoader
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
+
+        int minSamplingLevel = (BASE_SAMPLING_LEVEL * cfs.metadata.getMinIndexInterval()) / cfs.metadata.getMaxIndexInterval();
 
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
 
@@ -194,7 +195,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (singleSummaryOffHeapSpace * 3) + 50);
         Collections.sort(sstables, hotnessComparator);
 
-        if (sstables.get(0).getIndexSummarySamplingLevel() == MIN_SAMPLING_LEVEL)
+        if (sstables.get(0).getIndexSummarySamplingLevel() == minSamplingLevel)
             assertEquals(BASE_SAMPLING_LEVEL, sstables.get(1).getIndexSummarySamplingLevel());
         else
             assertEquals(BASE_SAMPLING_LEVEL, sstables.get(0).getIndexSummarySamplingLevel());
@@ -214,9 +215,9 @@ public class IndexSummaryManagerTest extends SchemaLoader
         sstables.get(3).readMeter = new RestorableMeter(128.0, 128.0);
         sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, (long) (singleSummaryOffHeapSpace + (singleSummaryOffHeapSpace * (100.0 / BASE_SAMPLING_LEVEL))));
         Collections.sort(sstables, hotnessComparator);
-        assertEquals(MIN_SAMPLING_LEVEL, sstables.get(0).getIndexSummarySamplingLevel());
-        assertEquals(MIN_SAMPLING_LEVEL, sstables.get(1).getIndexSummarySamplingLevel());
-        assertTrue(sstables.get(2).getIndexSummarySamplingLevel() > MIN_SAMPLING_LEVEL);
+        assertEquals(minSamplingLevel, sstables.get(0).getIndexSummarySamplingLevel());
+        assertEquals(minSamplingLevel, sstables.get(1).getIndexSummarySamplingLevel());
+        assertTrue(sstables.get(2).getIndexSummarySamplingLevel() > minSamplingLevel);
         assertTrue(sstables.get(2).getIndexSummarySamplingLevel() < BASE_SAMPLING_LEVEL);
         assertEquals(BASE_SAMPLING_LEVEL, sstables.get(3).getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
@@ -224,7 +225,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         // Don't leave enough space for even the minimal index summaries
         sstables = redistributeSummaries(Collections.EMPTY_LIST, sstables, 100);
         for (SSTableReader sstable : sstables)
-            assertEquals(MIN_SAMPLING_LEVEL, sstable.getIndexSummarySamplingLevel());
+            assertEquals(minSamplingLevel, sstable.getIndexSummarySamplingLevel());
         validateData(cfs, numRows);
     }
 
@@ -237,6 +238,8 @@ public class IndexSummaryManagerTest extends SchemaLoader
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
+
+        int minSamplingLevel = (BASE_SAMPLING_LEVEL * cfs.metadata.getMinIndexInterval()) / cfs.metadata.getMaxIndexInterval();
 
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
 
@@ -255,11 +258,11 @@ public class IndexSummaryManagerTest extends SchemaLoader
         SSTableReader original = sstables.get(0);
 
         SSTableReader sstable = original;
-        for (int samplingLevel = MIN_SAMPLING_LEVEL; samplingLevel < BASE_SAMPLING_LEVEL; samplingLevel++)
+        for (int samplingLevel = minSamplingLevel; samplingLevel < BASE_SAMPLING_LEVEL; samplingLevel++)
         {
             sstable = sstable.cloneWithNewSummarySamplingLevel(samplingLevel);
             assertEquals(samplingLevel, sstable.getIndexSummarySamplingLevel());
-            int expectedSize = (numRows * samplingLevel) / (sstable.metadata.getIndexInterval() * BASE_SAMPLING_LEVEL);
+            int expectedSize = (numRows * samplingLevel) / (sstable.metadata.getMinIndexInterval() * BASE_SAMPLING_LEVEL);
             assertEquals(expectedSize, sstable.getIndexSummarySize(), 1);
         }
 

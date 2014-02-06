@@ -543,7 +543,7 @@ public class CompactionManager implements CompactionManagerMBean
 
             long totalkeysWritten = 0;
 
-            int expectedBloomFilterSize = Math.max(cfs.metadata.getIndexInterval(),
+            int expectedBloomFilterSize = Math.max(cfs.metadata.getMinIndexInterval(),
                                                    (int) (SSTableReader.getApproximateKeyCount(Arrays.asList(sstable))));
             if (logger.isDebugEnabled())
                 logger.debug("Expected bloom filter size : {}", expectedBloomFilterSize);

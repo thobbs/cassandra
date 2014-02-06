@@ -15,13 +15,6 @@ public class Downsampling
      */
     public static final int BASE_SAMPLING_LEVEL = 128;
 
-    /**
-     * The lowest level we will downsample to: the coarsest summary will have (MSL / BSL) entries left.
-     *
-     * This can be anywhere from 1 to the base sampling level.
-     */
-    public static final int MIN_SAMPLING_LEVEL = 8;
-
     private static final Map<Integer, List<Integer>> samplePatternCache = new HashMap<>();
 
     private static final Map<Integer, List<Integer>> originalIndexCache = new HashMap<>();
@@ -101,25 +94,25 @@ public class Downsampling
      * the index summary.  If samplingLevel == BASE_SAMPLING_LEVEL, this will be equal to the index interval.
      * @param index an index into an IndexSummary
      * @param samplingLevel the current sampling level for that IndexSummary
-     * @param indexInterval the index interval
+     * @param minIndexInterval the min index interval (effective index interval at full sampling)
      * @return the number of partitions before the next index summary entry, inclusive on one end
      */
-    public static int getEffectiveIndexIntervalAfterIndex(int index, int samplingLevel, int indexInterval)
+    public static int getEffectiveIndexIntervalAfterIndex(int index, int samplingLevel, int minIndexInterval)
     {
         assert index >= -1;
         List<Integer> originalIndexes = getOriginalIndexes(samplingLevel);
         if (index == -1)
-            return originalIndexes.get(0) * indexInterval;
+            return originalIndexes.get(0) * minIndexInterval;
 
         index %= samplingLevel;
         if (index == originalIndexes.size() - 1)
         {
             // account for partitions after the "last" entry as well as partitions before the "first" entry
-            return ((BASE_SAMPLING_LEVEL - originalIndexes.get(index)) + originalIndexes.get(0)) * indexInterval;
+            return ((BASE_SAMPLING_LEVEL - originalIndexes.get(index)) + originalIndexes.get(0)) * minIndexInterval;
         }
         else
         {
-            return (originalIndexes.get(index + 1) - originalIndexes.get(index)) * indexInterval;
+            return (originalIndexes.get(index + 1) - originalIndexes.get(index)) * minIndexInterval;
         }
     }
 

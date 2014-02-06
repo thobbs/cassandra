@@ -317,7 +317,8 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             double avgEntrySize = sstable.getIndexSummaryOffHeapSize() / (double) currentNumEntries;
             long targetNumEntries = Math.max(1, Math.round(idealSpace / avgEntrySize));
             int currentSamplingLevel = sstable.getIndexSummarySamplingLevel();
-            int newSamplingLevel = IndexSummaryBuilder.calculateSamplingLevel(currentSamplingLevel, currentNumEntries, targetNumEntries);
+            int newSamplingLevel = IndexSummaryBuilder.calculateSamplingLevel(currentSamplingLevel, currentNumEntries, targetNumEntries,
+                    sstable.metadata.getMinIndexInterval(), sstable.metadata.getMaxIndexInterval());
             int numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
 
             logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes ({} entries); considering moving from level " +

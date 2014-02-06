@@ -242,7 +242,7 @@ public class SSTableReaderTest extends SchemaLoader
 
         DecoratedKey firstKey = null, lastKey = null;
         long timestamp = System.currentTimeMillis();
-        for (int i = 0; i < store.metadata.getIndexInterval(); i++)
+        for (int i = 0; i < store.metadata.getMinIndexInterval(); i++)
         {
             DecoratedKey key = Util.dk(String.valueOf(i));
             if (firstKey == null)
@@ -402,7 +402,7 @@ public class SSTableReaderTest extends SchemaLoader
             }));
         }
 
-        SSTableReader replacement = sstable.cloneWithNewSummarySamplingLevel(Downsampling.MIN_SAMPLING_LEVEL);
+        SSTableReader replacement = sstable.cloneWithNewSummarySamplingLevel(1);
         store.getDataTracker().replaceReaders(Arrays.asList(sstable), Arrays.asList(replacement));
         for (Future future : futures)
             future.get();
