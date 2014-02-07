@@ -46,7 +46,6 @@ public class IndexSummaryManagerTest extends SchemaLoader
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexSummaryManagerTest.class);
 
-
     private static long totalOffHeapSize(List<SSTableReader> sstables)
     {
         long total = 0;
@@ -90,22 +89,14 @@ public class IndexSummaryManagerTest extends SchemaLoader
         }
     };
 
-    @Test
-    public void testRedistributeSummaries() throws IOException
+    private void createSSTables(String ksname, String cfname, int numSSTables, int numRows)
     {
-        String ksname = "Keyspace1";
-        String cfname = "StandardLowIndexInterval"; // index interval of 8, no key caching
         Keyspace keyspace = Keyspace.open(ksname);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
 
-        int minSamplingLevel = (BASE_SAMPLING_LEVEL * cfs.metadata.getMinIndexInterval()) / cfs.metadata.getMaxIndexInterval();
-
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
-
-        int numSSTables = 4;
-        int numRows = 256;
         for (int sstable = 0; sstable < numSSTables; sstable++)
         {
             for (int row = 0; row < numRows; row++)
@@ -117,11 +108,101 @@ public class IndexSummaryManagerTest extends SchemaLoader
             }
             cfs.forceBlockingFlush();
         }
+        assertEquals(numSSTables, cfs.getSSTables().size());
+        validateData(cfs, numRows);
+    }
+
+    @Test
+    public void testChangeMinIndexInterval() throws IOException
+    {
+        String ksname = "Keyspace1";
+        String cfname = "StandardLowIndexInterval"; // index interval of 8, no key caching
+        Keyspace keyspace = Keyspace.open(ksname);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
+        int numSSTables = 1;
+        int numRows = 256;
+        createSSTables(ksname, cfname, numSSTables, numRows);
 
         List<SSTableReader> sstables = new ArrayList<>(cfs.getSSTables());
-        assertEquals(numSSTables, sstables.size());
-        validateData(cfs, numRows);
+        for (SSTableReader sstable : sstables)
+            sstable.readMeter = new RestorableMeter(100.0, 100.0);
 
+        for (SSTableReader sstable : sstables)
+            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval());
+
+        // double the min_index_interval
+        cfs.metadata.minIndexInterval(cfs.metadata.getMinIndexInterval() * 2);
+        IndexSummaryManager.instance.redistributeSummaries();
+        for (SSTableReader sstable : cfs.getSSTables())
+        {
+            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(numRows / cfs.metadata.getMinIndexInterval(), sstable.getIndexSummarySize());
+        }
+
+        // return min_index_interval to its original value
+        cfs.metadata.minIndexInterval(cfs.metadata.getMinIndexInterval() / 2);
+        IndexSummaryManager.instance.redistributeSummaries();
+        for (SSTableReader sstable : cfs.getSSTables())
+        {
+            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(numRows / cfs.metadata.getMinIndexInterval(), sstable.getIndexSummarySize());
+        }
+    }
+
+    @Test
+    public void testChangeMaxIndexInterval() throws IOException
+    {
+        String ksname = "Keyspace1";
+        String cfname = "StandardLowIndexInterval"; // index interval of 8, no key caching
+        Keyspace keyspace = Keyspace.open(ksname);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
+        int numSSTables = 1;
+        int numRows = 256;
+        createSSTables(ksname, cfname, numSSTables, numRows);
+
+        List<SSTableReader> sstables = new ArrayList<>(cfs.getSSTables());
+        for (SSTableReader sstable : sstables)
+            sstable.readMeter = new RestorableMeter(100.0, 100.0);
+
+        IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, sstables, 1);
+        sstables = new ArrayList<>(cfs.getSSTables());
+        for (SSTableReader sstable : sstables)
+            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval());
+
+        // halve the max_index_interval
+        cfs.metadata.maxIndexInterval(cfs.metadata.getMaxIndexInterval() / 2);
+        IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, sstables, 1);
+        sstables = new ArrayList<>(cfs.getSSTables());
+        for (SSTableReader sstable : sstables)
+        {
+            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(numRows / cfs.metadata.getMaxIndexInterval(), sstable.getIndexSummarySize());
+        }
+
+        // return max_index_interval to its original value
+        cfs.metadata.maxIndexInterval(cfs.metadata.getMaxIndexInterval() * 2);
+        IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, sstables, 1);
+        for (SSTableReader sstable : cfs.getSSTables())
+        {
+            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(numRows / cfs.metadata.getMaxIndexInterval(), sstable.getIndexSummarySize());
+        }
+    }
+
+    @Test
+    public void testRedistributeSummaries() throws IOException
+    {
+        String ksname = "Keyspace1";
+        String cfname = "StandardLowIndexInterval"; // index interval of 8, no key caching
+        Keyspace keyspace = Keyspace.open(ksname);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
+        int numSSTables = 4;
+        int numRows = 256;
+        createSSTables(ksname, cfname, numSSTables, numRows);
+
+        int minSamplingLevel = (BASE_SAMPLING_LEVEL * cfs.metadata.getMinIndexInterval()) / cfs.metadata.getMaxIndexInterval();
+
+        List<SSTableReader> sstables = new ArrayList<>(cfs.getSSTables());
         for (SSTableReader sstable : sstables)
             sstable.readMeter = new RestorableMeter(100.0, 100.0);
 
@@ -238,8 +319,6 @@ public class IndexSummaryManagerTest extends SchemaLoader
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
-
-        int minSamplingLevel = (BASE_SAMPLING_LEVEL * cfs.metadata.getMinIndexInterval()) / cfs.metadata.getMaxIndexInterval();
 
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
 

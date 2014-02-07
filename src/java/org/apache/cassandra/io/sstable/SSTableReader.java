@@ -811,6 +811,11 @@ public class SSTableReader extends SSTable implements Closeable
         return indexSummary.getOffHeapSize();
     }
 
+    public int getMinIndexInterval()
+    {
+        return indexSummary.getMinIndexInterval();
+    }
+
     public int getEffectiveIndexInterval()
     {
         return indexSummary.getEffectiveIndexInterval();

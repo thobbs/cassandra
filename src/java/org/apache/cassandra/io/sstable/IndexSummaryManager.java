@@ -305,7 +305,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
         List<ResampleEntry> toDownsample = new ArrayList<>(sstables.size() / 4);
         List<ResampleEntry> toUpsample = new ArrayList<>(sstables.size() / 4);
-        List<ResampleEntry> forceDownsample = new ArrayList<>();
+        List<ResampleEntry> forceResample = new ArrayList<>();
         List<ResampleEntry> forceUpsample = new ArrayList<>();
         List<SSTableReader> newSSTables = new ArrayList<>(sstables.size());
 
@@ -348,16 +348,16 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                 toDownsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
                 remainingSpace -= spaceUsed;
             }
-            else if (effectiveIndexInterval < minIndexInterval)
+            else if (sstable.getMinIndexInterval() != minIndexInterval)
             {
                 // The min_index_interval was raised and now we need to downsample to match it.
                 // Using BASE_SAMPLING_LEVEL as the new sampling level is fine; what will really make the summary
                 // change is the new min_index_interval.
-                logger.debug("Forcing downsample of {} because the current index interval ({}) is below the current min_index_interval ({})",
-                        sstable, effectiveIndexInterval, minIndexInterval);
+                logger.debug("Forcing resample of {} because min_index_interval was changed from {} to {}",
+                        sstable, sstable.getMinIndexInterval(), minIndexInterval);
                 newSamplingLevel = BASE_SAMPLING_LEVEL;
                 long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
-                forceDownsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
+                forceResample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
                 remainingSpace -= spaceUsed;
             }
             else if (effectiveIndexInterval > maxIndexInterval)
@@ -389,7 +389,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         }
 
         // downsample first, then upsample
-        toDownsample.addAll(forceDownsample);
+        toDownsample.addAll(forceResample);
         toDownsample.addAll(toUpsample);
         toDownsample.addAll(forceUpsample);
         Multimap<DataTracker, SSTableReader> replacedByTracker = HashMultimap.create();

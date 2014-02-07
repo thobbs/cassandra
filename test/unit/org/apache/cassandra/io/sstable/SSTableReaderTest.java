@@ -359,7 +359,7 @@ public class SSTableReaderTest extends SchemaLoader
         final ColumnFamilyStore store = keyspace.getColumnFamilyStore("StandardLowIndexInterval"); // index interval of 8, no key caching
         CompactionManager.instance.disableAutoCompaction();
 
-        final int NUM_ROWS = 1000;
+        final int NUM_ROWS = 512;
         for (int j = 0; j < NUM_ROWS; j++)
         {
             ByteBuffer key = ByteBufferUtil.bytes(String.format("%3d", j));
