@@ -237,7 +237,10 @@ public class NodeProbe implements AutoCloseable
                 ssProxy.removeNotificationListener(runner);
                 jmxc.removeConnectionNotificationListener(runner);
             }
-            catch (Throwable ignored) {}
+            catch (Throwable e) 
+            {
+                out.println("Exception occurred during clean-up. " + e);
+            }
         }
     }
 
@@ -262,7 +265,10 @@ public class NodeProbe implements AutoCloseable
                 ssProxy.removeNotificationListener(runner);
                 jmxc.removeConnectionNotificationListener(runner);
             }
-            catch (Throwable ignored) {}
+            catch (Throwable e)
+            {
+                out.println("Exception occurred during clean-up. " + e);
+            }
         }
     }
 
@@ -485,6 +491,11 @@ public class NodeProbe implements AutoCloseable
     public void move(String newToken) throws IOException
     {
         ssProxy.move(newToken);
+    }
+
+    public void takeTokens(List<String> tokens) throws IOException
+    {
+        ssProxy.relocate(tokens);
     }
 
     public void removeNode(String token)

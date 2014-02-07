@@ -42,6 +42,7 @@ import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.composites.CellNames;
+import org.apache.cassandra.db.filter.ColumnCounter;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.io.sstable.ColumnNameHelper;
 import org.apache.cassandra.io.sstable.ColumnStats;
@@ -85,6 +86,14 @@ public abstract class ColumnFamily implements Iterable<Cell>, IRowCacheEntry
     public ColumnFamilyType getType()
     {
         return metadata.cfType;
+    }
+
+    public int liveCQL3RowCount(long now)
+    {
+        ColumnCounter counter = getComparator().isDense()
+                              ? new ColumnCounter(now)
+                              : new ColumnCounter.GroupByPrefix(now, getComparator(), metadata.clusteringColumns().size());
+        return counter.countAll(this).live();
     }
 
     /**
@@ -425,6 +434,14 @@ public abstract class ColumnFamily implements Iterable<Cell>, IRowCacheEntry
         List<ByteBuffer> maxColumnNamesSeen = Collections.emptyList();
         for (Cell cell : this)
         {
+            if (deletionInfo().getTopLevelDeletion().localDeletionTime < Integer.MAX_VALUE)
+                tombstones.update(deletionInfo().getTopLevelDeletion().localDeletionTime);
+            Iterator<RangeTombstone> it = deletionInfo().rangeIterator();
+            while (it.hasNext())
+            {
+                RangeTombstone rangeTombstone = it.next();
+                tombstones.update(rangeTombstone.getLocalDeletionTime());
+            }
             minTimestampSeen = Math.min(minTimestampSeen, cell.minTimestamp());
             maxTimestampSeen = Math.max(maxTimestampSeen, cell.maxTimestamp());
             maxLocalDeletionTime = Math.max(maxLocalDeletionTime, cell.getLocalDeletionTime());
@@ -491,7 +508,6 @@ public abstract class ColumnFamily implements Iterable<Cell>, IRowCacheEntry
         return builder.build();
     }
 
-    // Note: the returned ColumnFamily will be an UnsortedColumns.
     public static ColumnFamily fromBytes(ByteBuffer bytes)
     {
         if (bytes == null)
@@ -499,7 +515,10 @@ public abstract class ColumnFamily implements Iterable<Cell>, IRowCacheEntry
 
         try
         {
-            return serializer.deserialize(new DataInputStream(ByteBufferUtil.inputStream(bytes)), UnsortedColumns.factory, ColumnSerializer.Flag.LOCAL, MessagingService.current_version);
+            return serializer.deserialize(new DataInputStream(ByteBufferUtil.inputStream(bytes)),
+                                                              ArrayBackedSortedColumns.factory,
+                                                              ColumnSerializer.Flag.LOCAL,
+                                                              MessagingService.current_version);
         }
         catch (IOException e)
         {

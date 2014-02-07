@@ -2326,8 +2326,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 {
                     for (SecondaryIndex si : cfStore.indexManager.getIndexes())
                     {
-                        logger.info("adding secondary index {} to operation", si.getIndexName());
-                        valid.add(si.getIndexCfs());
+                        if (si.getIndexCfs() != null) {
+                            logger.info("adding secondary index {} to operation", si.getIndexName());
+                            valid.add(si.getIndexCfs());
+                        }
                     }
 
                 }
@@ -2375,8 +2377,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 {
                     for(SecondaryIndex si : cfStore.indexManager.getIndexes())
                     {
-                        logger.info("adding secondary index {} to operation", si.getIndexName());
-                        valid.add(si.getIndexCfs());
+                        if (si.getIndexCfs() != null) {
+                            logger.info("adding secondary index {} to operation", si.getIndexName());
+                            valid.add(si.getIndexCfs());
+                        }
                     }
                 }
             }
@@ -3122,6 +3126,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (String srcT : srcTokens)
             {
                 getPartitioner().getTokenFactory().validate(srcT);
+                Token token = getPartitioner().getTokenFactory().fromString(srcT);
+                if (tokenMetadata.getTokens(tokenMetadata.getEndpoint(token)).size() < 2)
+                    throw new IOException("Cannot relocate " + srcT + "; source node would have no tokens left");
                 tokens.add(getPartitioner().getTokenFactory().fromString(srcT));
             }
         }
@@ -3695,6 +3702,23 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void bulkLoad(String directory)
     {
+        try
+        {
+            bulkLoadInternal(directory).get();
+        }
+        catch (Exception e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public String bulkLoadAsync(String directory)
+    {
+        return bulkLoadInternal(directory).planId.toString();
+    }
+
+    private StreamResultFuture bulkLoadInternal(String directory)
+    {
         File dir = new File(directory);
 
         if (!dir.exists() || !dir.isDirectory())
@@ -3727,14 +3751,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         };
 
         SSTableLoader loader = new SSTableLoader(dir, client, new OutputHandler.LogOutput());
-        try
-        {
-            loader.stream().get();
-        }
-        catch (Exception e)
-        {
-            throw new RuntimeException(e);
-        }
+        return loader.stream();
     }
 
     public int getExceptionCount()
