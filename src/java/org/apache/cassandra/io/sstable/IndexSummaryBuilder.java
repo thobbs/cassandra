@@ -36,16 +36,14 @@ public class IndexSummaryBuilder
     private final ArrayList<Long> positions;
     private final ArrayList<byte[]> keys;
     private final int minIndexInterval;
-    private final int maxIndexInterval;
     private final int samplingLevel;
     private final int[] startPoints;
     private long keysWritten = 0;
     private long indexIntervalMatches = 0;
     private long offheapSize = 0;
 
-    public IndexSummaryBuilder(long expectedKeys, int minIndexInterval, int maxIndexInterval, int samplingLevel)
+    public IndexSummaryBuilder(long expectedKeys, int minIndexInterval, int samplingLevel)
     {
-        this.maxIndexInterval = maxIndexInterval;
         this.samplingLevel = samplingLevel;
         this.startPoints = Downsampling.getStartPoints(BASE_SAMPLING_LEVEL, samplingLevel);
 
@@ -129,7 +127,7 @@ public class IndexSummaryBuilder
             keyPosition += TypeSizes.NATIVE.sizeof(actualIndexPosition);
         }
         int sizeAtFullSampling = (int) Math.ceil(keysWritten / (double) minIndexInterval);
-        return new IndexSummary(partitioner, memory, keys.size(), sizeAtFullSampling, minIndexInterval, maxIndexInterval, samplingLevel);
+        return new IndexSummary(partitioner, memory, keys.size(), sizeAtFullSampling, minIndexInterval, samplingLevel);
     }
 
     public static int entriesAtSamplingLevel(int samplingLevel, int maxSummarySize)
@@ -162,7 +160,7 @@ public class IndexSummaryBuilder
      * @param partitioner the partitioner used for the index summary
      * @return a new IndexSummary
      */
-    public static IndexSummary downsample(IndexSummary existing, int newSamplingLevel, IPartitioner partitioner)
+    public static IndexSummary downsample(IndexSummary existing, int newSamplingLevel, int minIndexInterval, IPartitioner partitioner)
     {
         // To downsample the old index summary, we'll go through (potentially) several rounds of downsampling.
         // Conceptually, each round starts at position X and then removes every Nth item.  The value of X follows
@@ -171,6 +169,7 @@ public class IndexSummaryBuilder
 
         int currentSamplingLevel = existing.getSamplingLevel();
         assert currentSamplingLevel > newSamplingLevel;
+        assert minIndexInterval == existing.getMinIndexInterval();
 
         // calculate starting indexes for downsampling rounds
         int[] startPoints = Downsampling.getStartPoints(currentSamplingLevel, newSamplingLevel);
@@ -217,6 +216,6 @@ public class IndexSummaryBuilder
             keyPosition += entry.length;
         }
         return new IndexSummary(partitioner, memory, newKeyCount, existing.getMaxNumberOfEntries(),
-                existing.getMinIndexInterval(), existing.getMaxIndexInterval(), newSamplingLevel);
+                                minIndexInterval, newSamplingLevel);
     }
 }

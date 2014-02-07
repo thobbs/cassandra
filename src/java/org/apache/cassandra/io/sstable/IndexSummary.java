@@ -59,12 +59,6 @@ public class IndexSummary implements Closeable
      */
     private final int minIndexInterval;
 
-    /**
-     * An upper bound for the average number of partitions in between each index summary entry. A higher value means
-     * that fewer partitions will have an entry in the index summary when at the minimum sampling level.
-     */
-    private final int maxIndexInterval;
-
     private final IPartitioner partitioner;
     private final int summarySize;
     private final int sizeAtFullSampling;
@@ -79,11 +73,10 @@ public class IndexSummary implements Closeable
     private final int samplingLevel;
 
     public IndexSummary(IPartitioner partitioner, Memory memory, int summarySize, int sizeAtFullSampling,
-                        int minIndexInterval, int maxIndexInterval, int samplingLevel)
+                        int minIndexInterval, int samplingLevel)
     {
         this.partitioner = partitioner;
         this.minIndexInterval = minIndexInterval;
-        this.maxIndexInterval = maxIndexInterval;
         this.summarySize = summarySize;
         this.sizeAtFullSampling = sizeAtFullSampling;
         this.bytes = memory;
@@ -160,11 +153,6 @@ public class IndexSummary implements Closeable
         return minIndexInterval;
     }
 
-    public int getMaxIndexInterval()
-    {
-        return maxIndexInterval;
-    }
-
     public int getEffectiveIndexInterval()
     {
         return (int) Math.ceil((BASE_SAMPLING_LEVEL / (double) samplingLevel) * minIndexInterval);
@@ -225,8 +213,6 @@ public class IndexSummary implements Closeable
         public void serialize(IndexSummary t, DataOutputStream out, boolean withSamplingLevel) throws IOException
         {
             out.writeInt(t.minIndexInterval);
-            if (withSamplingLevel)
-                out.writeInt(t.maxIndexInterval);
             out.writeInt(t.summarySize);
             out.writeLong(t.bytes.size());
             if (withSamplingLevel)
@@ -269,7 +255,7 @@ public class IndexSummary implements Closeable
 
             Memory memory = Memory.allocate(offheapSize);
             FBUtilities.copy(in, new MemoryOutputStream(memory), offheapSize);
-            return new IndexSummary(partitioner, memory, summarySize, fullSamplingSummarySize, minIndexInterval, maxIndexInterval, samplingLevel);
+            return new IndexSummary(partitioner, memory, summarySize, fullSamplingSummarySize, minIndexInterval, samplingLevel);
         }
     }
 

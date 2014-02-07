@@ -29,6 +29,7 @@ import javax.management.ObjectName;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.*;
 
+import org.apache.cassandra.config.CFMetaData;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +40,8 @@ import org.apache.cassandra.db.DataTracker;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.WrappedRunnable;
+
+import static org.apache.cassandra.io.sstable.Downsampling.BASE_SAMPLING_LEVEL;
 
 /**
  * Manages the fixed-size memory pool for index summaries, periodically resizing them
@@ -302,6 +305,8 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
         List<ResampleEntry> toDownsample = new ArrayList<>(sstables.size() / 4);
         List<ResampleEntry> toUpsample = new ArrayList<>(sstables.size() / 4);
+        List<ResampleEntry> forceDownsample = new ArrayList<>();
+        List<ResampleEntry> forceUpsample = new ArrayList<>();
         List<SSTableReader> newSSTables = new ArrayList<>(sstables.size());
 
         // Going from the coldest to the hottest sstables, try to give each sstable an amount of space proportional
@@ -309,6 +314,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         long remainingSpace = memoryPoolCapacity;
         for (SSTableReader sstable : sstables)
         {
+            int minIndexInterval = sstable.metadata.getMinIndexInterval();
+            int maxIndexInterval = sstable.metadata.getMaxIndexInterval();
+
             double readsPerSec = sstable.readMeter == null ? 0.0 : sstable.readMeter.fifteenMinuteRate();
             long idealSpace = Math.round(remainingSpace * (readsPerSec / totalReadsPerSec));
 
@@ -318,8 +326,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             long targetNumEntries = Math.max(1, Math.round(idealSpace / avgEntrySize));
             int currentSamplingLevel = sstable.getIndexSummarySamplingLevel();
             int newSamplingLevel = IndexSummaryBuilder.calculateSamplingLevel(currentSamplingLevel, currentNumEntries, targetNumEntries,
-                    sstable.metadata.getMinIndexInterval(), sstable.metadata.getMaxIndexInterval());
+                    minIndexInterval, maxIndexInterval);
             int numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
+            int effectiveIndexInterval = sstable.getEffectiveIndexInterval();
 
             logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes ({} entries); considering moving " +
                          "from level {} ({} entries, {} bytes) to level {} ({} entries, {} bytes)",
@@ -339,6 +348,29 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                 toDownsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
                 remainingSpace -= spaceUsed;
             }
+            else if (effectiveIndexInterval < minIndexInterval)
+            {
+                // The min_index_interval was raised and now we need to downsample to match it.
+                // Using BASE_SAMPLING_LEVEL as the new sampling level is fine; what will really make the summary
+                // change is the new min_index_interval.
+                logger.debug("Forcing downsample of {} because the current index interval ({}) is below the current min_index_interval ({})",
+                        sstable, effectiveIndexInterval, minIndexInterval);
+                newSamplingLevel = BASE_SAMPLING_LEVEL;
+                long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
+                forceDownsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
+                remainingSpace -= spaceUsed;
+            }
+            else if (effectiveIndexInterval > maxIndexInterval)
+            {
+                // The max_index_interval was lowered; force an upsample to the effective minimum sampling level
+                logger.debug("Forcing upsample of {} because the current index interval ({}) is above the current max_index_interval ({})",
+                        sstable, effectiveIndexInterval, maxIndexInterval);
+                newSamplingLevel = Math.max(1, (BASE_SAMPLING_LEVEL * minIndexInterval) / maxIndexInterval);
+                numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
+                long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
+                forceUpsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
+                remainingSpace -= avgEntrySize * numEntriesAtNewSamplingLevel;
+            }
             else
             {
                 // keep the same sampling level
@@ -357,7 +389,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         }
 
         // downsample first, then upsample
+        toDownsample.addAll(forceDownsample);
         toDownsample.addAll(toUpsample);
+        toDownsample.addAll(forceUpsample);
         Multimap<DataTracker, SSTableReader> replacedByTracker = HashMultimap.create();
         Multimap<DataTracker, SSTableReader> replacementsByTracker = HashMultimap.create();
         for (ResampleEntry entry : toDownsample)

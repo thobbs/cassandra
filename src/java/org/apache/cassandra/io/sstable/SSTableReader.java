@@ -604,7 +604,7 @@ public class SSTableReader extends SSTable implements Closeable
 
             IndexSummaryBuilder summaryBuilder = null;
             if (!summaryLoaded)
-                summaryBuilder = new IndexSummaryBuilder(estimatedKeys, metadata.getMinIndexInterval(), metadata.getMaxIndexInterval(), samplingLevel);
+                summaryBuilder = new IndexSummaryBuilder(estimatedKeys, metadata.getMinIndexInterval(), samplingLevel);
 
             long indexPosition;
             while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
@@ -734,10 +734,25 @@ public class SSTableReader extends SSTable implements Closeable
      */
     public SSTableReader cloneWithNewSummarySamplingLevel(int samplingLevel) throws IOException
     {
+        int minIndexInterval = metadata.getMinIndexInterval();
+        int maxIndexInterval = metadata.getMaxIndexInterval();
+        int effectiveInterval = indexSummary.getEffectiveIndexInterval();
+
         IndexSummary newSummary;
-        if (samplingLevel < indexSummary.getSamplingLevel())
+
+         // We have to rebuild the summary from the on-disk primary index in three cases:
+         // 1. The sampling level went up, so we need to read more entries off disk
+         // 2. The min_index_interval changed (in either direction); this changes what entries would be in the summary
+         //    at full sampling (and consequently at any other sampling level)
+         // 3. The max_index_interval was lowered, forcing us to raise the sampling level
+        if (samplingLevel > indexSummary.getSamplingLevel() || indexSummary.getMinIndexInterval() != minIndexInterval || effectiveInterval > maxIndexInterval)
         {
-            newSummary = IndexSummaryBuilder.downsample(indexSummary, samplingLevel, partitioner);
+            newSummary = buildSummaryAtLevel(samplingLevel);
+        }
+        else if (samplingLevel < indexSummary.getSamplingLevel())
+        {
+            // we can use the existing index summary to make a smaller one
+            newSummary = IndexSummaryBuilder.downsample(indexSummary, samplingLevel, minIndexInterval, partitioner);
 
             SegmentedFile.Builder ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
             SegmentedFile.Builder dbuilder = compression
@@ -745,13 +760,10 @@ public class SSTableReader extends SSTable implements Closeable
                                            : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
             saveSummary(ibuilder, dbuilder, newSummary);
         }
-        else if (samplingLevel > indexSummary.getSamplingLevel())
-        {
-            newSummary = upsampleSummary(samplingLevel);
-        }
         else
         {
-            throw new AssertionError("Attempted to clone SSTableReader with the same index summary sampling level");
+            throw new AssertionError("Attempted to clone SSTableReader with the same index summary sampling level and " +
+                                     "no adjustments to min/max_index_interval");
         }
 
         markReplaced();
@@ -765,14 +777,14 @@ public class SSTableReader extends SSTable implements Closeable
         return replacement;
     }
 
-    private IndexSummary upsampleSummary(int newSamplingLevel) throws IOException
+    private IndexSummary buildSummaryAtLevel(int newSamplingLevel) throws IOException
     {
         // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
         RandomAccessReader primaryIndex = RandomAccessReader.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX)));
         try
         {
             long indexSize = primaryIndex.length();
-            IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata.getMinIndexInterval(), metadata.getMaxIndexInterval(), newSamplingLevel);
+            IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata.getMinIndexInterval(), newSamplingLevel);
 
             long indexPosition;
             while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)

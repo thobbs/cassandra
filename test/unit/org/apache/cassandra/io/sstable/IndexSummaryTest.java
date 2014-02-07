@@ -93,7 +93,7 @@ public class IndexSummaryTest
     public void testAddEmptyKey() throws Exception
     {
         IPartitioner p = new RandomPartitioner();
-        IndexSummaryBuilder builder = new IndexSummaryBuilder(1, 1, 1, BASE_SAMPLING_LEVEL);
+        IndexSummaryBuilder builder = new IndexSummaryBuilder(1, 1, BASE_SAMPLING_LEVEL);
         builder.maybeAddEntry(p.decorateKey(ByteBufferUtil.EMPTY_BYTE_BUFFER), 0);
         IndexSummary summary = builder.build(p);
         assertEquals(1, summary.size());
@@ -114,7 +114,7 @@ public class IndexSummaryTest
     private Pair<List<DecoratedKey>, IndexSummary> generateRandomIndex(int size, int interval)
     {
         List<DecoratedKey> list = Lists.newArrayList();
-        IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(), interval, interval, BASE_SAMPLING_LEVEL);
+        IndexSummaryBuilder builder = new IndexSummaryBuilder(list.size(), interval, BASE_SAMPLING_LEVEL);
         for (int i = 0; i < size; i++)
         {
             UUID uuid = UUID.randomUUID();
@@ -172,7 +172,7 @@ public class IndexSummaryTest
         int downsamplingRound = 1;
         for (int samplingLevel = BASE_SAMPLING_LEVEL - 1; samplingLevel >= 1; samplingLevel--)
         {
-            IndexSummary downsampled = downsample(original, samplingLevel, DatabaseDescriptor.getPartitioner());
+            IndexSummary downsampled = downsample(original, samplingLevel, 128, DatabaseDescriptor.getPartitioner());
             assertEquals(entriesAtSamplingLevel(samplingLevel, original.getMaxNumberOfEntries()), downsampled.size());
 
             int sampledCount = 0;
@@ -193,7 +193,7 @@ public class IndexSummaryTest
         downsamplingRound = 1;
         for (int downsampleLevel = BASE_SAMPLING_LEVEL - 1; downsampleLevel >= 1; downsampleLevel--)
         {
-            IndexSummary downsampled = downsample(previous, downsampleLevel, DatabaseDescriptor.getPartitioner());
+            IndexSummary downsampled = downsample(previous, downsampleLevel, 128, DatabaseDescriptor.getPartitioner());
             assertEquals(entriesAtSamplingLevel(downsampleLevel, original.getMaxNumberOfEntries()), downsampled.size());
 
             int sampledCount = 0;
