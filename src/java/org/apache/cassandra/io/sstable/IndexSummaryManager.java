@@ -350,12 +350,9 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             }
             else if (sstable.getMinIndexInterval() != minIndexInterval)
             {
-                // The min_index_interval was raised and now we need to downsample to match it.
-                // Using BASE_SAMPLING_LEVEL as the new sampling level is fine; what will really make the summary
-                // change is the new min_index_interval.
+                // The min_index_interval was change and now we need to re-sample to match it.
                 logger.debug("Forcing resample of {} because min_index_interval was changed from {} to {}",
                         sstable, sstable.getMinIndexInterval(), minIndexInterval);
-                newSamplingLevel = BASE_SAMPLING_LEVEL;
                 long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
                 forceResample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
                 remainingSpace -= spaceUsed;
