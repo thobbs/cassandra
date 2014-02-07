@@ -169,7 +169,7 @@ public class SchemaLoader
                                            standardCFMD(ks1, "legacyleveled")
                                                                                .compactionStrategyClass(LeveledCompactionStrategy.class)
                                                                                .compactionStrategyOptions(leveledOptions),
-                                           standardCFMD(ks1, "StandardLowIndexInterval").minIndexInterval(8).maxIndexInterval(8).caching(CFMetaData.Caching.NONE)));
+                                           standardCFMD(ks1, "StandardLowIndexInterval").minIndexInterval(8).maxIndexInterval(256).caching(CFMetaData.Caching.NONE)));
 
         // Keyspace 2
         schema.add(KSMetaData.testMetadata(ks2,

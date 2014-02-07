@@ -146,22 +146,22 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         return memoryPoolBytes / 1024L / 1024L;
     }
 
-    public Map<String, Double> getSamplingRatios()
+    public Map<String, Integer> getIndexIntervals()
     {
         List<SSTableReader> sstables = getAllSSTables();
-        Map<String, Double> ratios = new HashMap<>(sstables.size());
+        Map<String, Integer> intervals = new HashMap<>(sstables.size());
         for (SSTableReader sstable : sstables)
-            ratios.put(sstable.getFilename(), sstable.getIndexSummarySamplingLevel() / (double) Downsampling.BASE_SAMPLING_LEVEL);
+            intervals.put(sstable.getFilename(), sstable.getEffectiveIndexInterval());
 
-        return ratios;
+        return intervals;
     }
 
-    public double getAverageSamplingRatio()
+    public double getAverageIndexInterval()
     {
         List<SSTableReader> sstables = getAllSSTables();
         double total = 0.0;
         for (SSTableReader sstable : sstables)
-            total += sstable.getIndexSummarySamplingLevel() / (double) Downsampling.BASE_SAMPLING_LEVEL;
+            total += sstable.getEffectiveIndexInterval();
         return total / sstables.size();
     }
 

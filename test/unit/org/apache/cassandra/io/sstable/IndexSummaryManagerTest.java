@@ -314,19 +314,20 @@ public class IndexSummaryManagerTest extends SchemaLoader
             cfs.forceBlockingFlush();
         }
 
-        assertEquals(1.0, manager.getAverageSamplingRatio(), 0.001);
-        Map<String, Double> samplingRatios = manager.getSamplingRatios();
-        for (Map.Entry<String, Double> entry : samplingRatios.entrySet())
-            assertEquals(1.0, entry.getValue(), 0.001);
+        assertTrue(manager.getAverageIndexInterval() >= cfs.metadata.getMinIndexInterval());
+        Map<String, Integer> intervals = manager.getIndexIntervals();
+        for (Map.Entry<String, Integer> entry : intervals.entrySet())
+            if (entry.getKey().contains("StandardLowIndexInterval"))
+                assertEquals(cfs.metadata.getMinIndexInterval(), entry.getValue(), 0.001);
 
         manager.setMemoryPoolCapacityInMB(0);
         manager.redistributeSummaries();
-        assertTrue(manager.getAverageSamplingRatio() < 0.99);
-        samplingRatios = manager.getSamplingRatios();
-        for (Map.Entry<String, Double> entry : samplingRatios.entrySet())
+        assertTrue(manager.getAverageIndexInterval() > cfs.metadata.getMinIndexInterval());
+        intervals = manager.getIndexIntervals();
+        for (Map.Entry<String, Integer> entry : intervals.entrySet())
         {
             if (entry.getKey().contains("StandardLowIndexInterval"))
-                assertTrue(entry.getValue() < 0.9);
+                assertTrue(entry.getValue() >= cfs.metadata.getMinIndexInterval());
         }
     }
 }
