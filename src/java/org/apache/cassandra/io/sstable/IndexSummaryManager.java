@@ -154,7 +154,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         List<SSTableReader> sstables = getAllSSTables();
         Map<String, Integer> intervals = new HashMap<>(sstables.size());
         for (SSTableReader sstable : sstables)
-            intervals.put(sstable.getFilename(), sstable.getEffectiveIndexInterval());
+            intervals.put(sstable.getFilename(), (int) Math.round(sstable.getEffectiveIndexInterval()));
 
         return intervals;
     }
@@ -325,18 +325,50 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             double avgEntrySize = sstable.getIndexSummaryOffHeapSize() / (double) currentNumEntries;
             long targetNumEntries = Math.max(1, Math.round(idealSpace / avgEntrySize));
             int currentSamplingLevel = sstable.getIndexSummarySamplingLevel();
+            int maxSummarySize = sstable.getMaxIndexSummarySize();
+
+            // if the min_index_interval changed, calculate what our current sampling level would be under the new min
+            if (sstable.getMinIndexInterval() != minIndexInterval)
+            {
+                int effectiveSamplingLevel = (int) Math.round(currentSamplingLevel * (minIndexInterval / (double) sstable.getMinIndexInterval()));
+                maxSummarySize = (int) Math.round(maxSummarySize * (sstable.getMinIndexInterval() / (double) minIndexInterval));
+                logger.trace("min_index_interval changed from {} to {}, so the current sampling level for {} is effectively now {} (was {})",
+                             sstable.getMinIndexInterval(), minIndexInterval, sstable, effectiveSamplingLevel, currentSamplingLevel);
+                currentSamplingLevel = effectiveSamplingLevel;
+            }
+
             int newSamplingLevel = IndexSummaryBuilder.calculateSamplingLevel(currentSamplingLevel, currentNumEntries, targetNumEntries,
                     minIndexInterval, maxIndexInterval);
-            int numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
-            int effectiveIndexInterval = sstable.getEffectiveIndexInterval();
+            int numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, maxSummarySize);
+            double effectiveIndexInterval = sstable.getEffectiveIndexInterval();
 
             logger.trace("{} has {} reads/sec; ideal space for index summary: {} bytes ({} entries); considering moving " +
-                         "from level {} ({} entries, {} bytes) to level {} ({} entries, {} bytes)",
-                         sstable.getFilename(), readsPerSec, idealSpace, targetNumEntries, currentSamplingLevel, currentNumEntries,
-                         currentNumEntries * avgEntrySize, newSamplingLevel, numEntriesAtNewSamplingLevel,
-                         numEntriesAtNewSamplingLevel * avgEntrySize);
+                    "from level {} ({} entries, {} bytes) to level {} ({} entries, {} bytes)",
+                    sstable.getFilename(), readsPerSec, idealSpace, targetNumEntries, currentSamplingLevel, currentNumEntries,
+                    currentNumEntries * avgEntrySize, newSamplingLevel, numEntriesAtNewSamplingLevel,
+                    numEntriesAtNewSamplingLevel * avgEntrySize);
 
-            if (targetNumEntries >= currentNumEntries * UPSAMPLE_THRESHOLD && newSamplingLevel > currentSamplingLevel)
+            if (effectiveIndexInterval < minIndexInterval)
+            {
+                // The min_index_interval was changed; re-sample to match it.
+                logger.debug("Forcing resample of {} because the current index interval ({}) is below min_index_interval ({})",
+                        sstable, effectiveIndexInterval, minIndexInterval);
+                long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
+                forceResample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
+                remainingSpace -= spaceUsed;
+            }
+            else if (effectiveIndexInterval > maxIndexInterval)
+            {
+                // The max_index_interval was lowered; force an upsample to the effective minimum sampling level
+                logger.debug("Forcing upsample of {} because the current index interval ({}) is above max_index_interval ({})",
+                        sstable, effectiveIndexInterval, maxIndexInterval);
+                newSamplingLevel = Math.max(1, (BASE_SAMPLING_LEVEL * minIndexInterval) / maxIndexInterval);
+                numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
+                long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
+                forceUpsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
+                remainingSpace -= avgEntrySize * numEntriesAtNewSamplingLevel;
+            }
+            else if (targetNumEntries >= currentNumEntries * UPSAMPLE_THRESHOLD && newSamplingLevel > currentSamplingLevel)
             {
                 long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
                 toUpsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
@@ -347,26 +379,6 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
                 long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
                 toDownsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
                 remainingSpace -= spaceUsed;
-            }
-            else if (sstable.getMinIndexInterval() != minIndexInterval)
-            {
-                // The min_index_interval was change and now we need to re-sample to match it.
-                logger.debug("Forcing resample of {} because min_index_interval was changed from {} to {}",
-                        sstable, sstable.getMinIndexInterval(), minIndexInterval);
-                long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
-                forceResample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
-                remainingSpace -= spaceUsed;
-            }
-            else if (effectiveIndexInterval > maxIndexInterval)
-            {
-                // The max_index_interval was lowered; force an upsample to the effective minimum sampling level
-                logger.debug("Forcing upsample of {} because the current index interval ({}) is above the current max_index_interval ({})",
-                        sstable, effectiveIndexInterval, maxIndexInterval);
-                newSamplingLevel = Math.max(1, (BASE_SAMPLING_LEVEL * minIndexInterval) / maxIndexInterval);
-                numEntriesAtNewSamplingLevel = IndexSummaryBuilder.entriesAtSamplingLevel(newSamplingLevel, sstable.getMaxIndexSummarySize());
-                long spaceUsed = (long) Math.ceil(avgEntrySize * numEntriesAtNewSamplingLevel);
-                forceUpsample.add(new ResampleEntry(sstable, spaceUsed, newSamplingLevel));
-                remainingSpace -= avgEntrySize * numEntriesAtNewSamplingLevel;
             }
             else
             {

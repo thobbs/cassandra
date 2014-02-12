@@ -20,8 +20,12 @@ package org.apache.cassandra.io.sstable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import org.slf4j.Logger;
@@ -45,6 +49,34 @@ import static org.junit.Assert.assertTrue;
 public class IndexSummaryManagerTest extends SchemaLoader
 {
     private static final Logger logger = LoggerFactory.getLogger(IndexSummaryManagerTest.class);
+
+    int originalMinIndexInterval;
+    int originalMaxIndexInterval;
+    long originalCapacity;
+
+    @Before
+    public void beforeTest()
+    {
+        String ksname = "Keyspace1";
+        String cfname = "StandardLowIndexInterval"; // index interval of 8, no key caching
+        Keyspace keyspace = Keyspace.open(ksname);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
+        originalMinIndexInterval = cfs.metadata.getMinIndexInterval();
+        originalMaxIndexInterval = cfs.metadata.getMaxIndexInterval();
+        originalCapacity = IndexSummaryManager.instance.getMemoryPoolCapacityInMB();
+    }
+
+    @After
+    public void afterTest()
+    {
+        String ksname = "Keyspace1";
+        String cfname = "StandardLowIndexInterval"; // index interval of 8, no key caching
+        Keyspace keyspace = Keyspace.open(ksname);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfname);
+        cfs.metadata.minIndexInterval(originalMinIndexInterval);
+        cfs.metadata.maxIndexInterval(originalMaxIndexInterval);
+        IndexSummaryManager.instance.setMemoryPoolCapacityInMB(originalCapacity);
+    }
 
     private static long totalOffHeapSize(List<SSTableReader> sstables)
     {
@@ -96,6 +128,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         cfs.truncateBlocking();
         cfs.disableAutoCompaction();
 
+        ArrayList<Future> futures = new ArrayList<>(numSSTables);
         ByteBuffer value = ByteBuffer.wrap(new byte[100]);
         for (int sstable = 0; sstable < numSSTables; sstable++)
         {
@@ -104,9 +137,23 @@ public class IndexSummaryManagerTest extends SchemaLoader
                 DecoratedKey key = Util.dk(String.format("%3d", row));
                 Mutation rm = new Mutation(ksname, key.key);
                 rm.add(cfname, Util.cellname("column"), value, 0);
-                rm.apply();
+                rm.applyUnsafe();
             }
-            cfs.forceBlockingFlush();
+            futures.add(cfs.forceFlush());
+        }
+        for (Future future : futures)
+        {
+            try
+            {
+                future.get();
+            } catch (InterruptedException e)
+            {
+                throw new RuntimeException(e);
+            }
+            catch (ExecutionException e)
+            {
+                throw new RuntimeException(e);
+            }
         }
         assertEquals(numSSTables, cfs.getSSTables().size());
         validateData(cfs, numRows);
@@ -128,25 +175,60 @@ public class IndexSummaryManagerTest extends SchemaLoader
             sstable.readMeter = new RestorableMeter(100.0, 100.0);
 
         for (SSTableReader sstable : sstables)
-            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval(), 0.001);
 
         // double the min_index_interval
-        cfs.metadata.minIndexInterval(cfs.metadata.getMinIndexInterval() * 2);
+        cfs.metadata.minIndexInterval(originalMinIndexInterval * 2);
         IndexSummaryManager.instance.redistributeSummaries();
         for (SSTableReader sstable : cfs.getSSTables())
         {
-            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval(), 0.001);
             assertEquals(numRows / cfs.metadata.getMinIndexInterval(), sstable.getIndexSummarySize());
         }
 
         // return min_index_interval to its original value
-        cfs.metadata.minIndexInterval(cfs.metadata.getMinIndexInterval() / 2);
+        cfs.metadata.minIndexInterval(originalMinIndexInterval);
         IndexSummaryManager.instance.redistributeSummaries();
         for (SSTableReader sstable : cfs.getSSTables())
         {
-            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval(), 0.001);
             assertEquals(numRows / cfs.metadata.getMinIndexInterval(), sstable.getIndexSummarySize());
         }
+
+        // halve the min_index_interval, but constrain the available space to exactly what we have now; as a result,
+        // the summary shouldn't change
+        cfs.metadata.minIndexInterval(originalMinIndexInterval / 2);
+        SSTableReader sstable = cfs.getSSTables().iterator().next();
+        long summarySpace = sstable.getIndexSummaryOffHeapSize();
+        IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, Arrays.asList(sstable), summarySpace);
+        sstable = cfs.getSSTables().iterator().next();
+        assertEquals(originalMinIndexInterval, sstable.getEffectiveIndexInterval(), 0.001);
+        assertEquals(numRows / originalMinIndexInterval, sstable.getIndexSummarySize());
+
+        // keep the min_index_interval the same, but now give the summary enough space to grow by 50%
+        double previousInterval = sstable.getEffectiveIndexInterval();
+        int previousSize = sstable.getIndexSummarySize();
+        IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, Arrays.asList(sstable), (long) Math.ceil(summarySpace * 1.5));
+        sstable = cfs.getSSTables().iterator().next();
+        assertEquals(previousSize * 1.5, (double) sstable.getIndexSummarySize(), 1);
+        assertEquals(previousInterval * (1.0 / 1.5), sstable.getEffectiveIndexInterval(), 0.001);
+
+        // return min_index_interval to it's original value (double it), but only give the summary enough space
+        // to have an effective index interval of twice the new min
+        cfs.metadata.minIndexInterval(originalMinIndexInterval);
+        IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, Arrays.asList(sstable), (long) Math.ceil(summarySpace / 2));
+        sstable = cfs.getSSTables().iterator().next();
+        assertEquals(originalMinIndexInterval * 2, sstable.getEffectiveIndexInterval(), 0.001);
+        assertEquals(numRows / (originalMinIndexInterval * 2), sstable.getIndexSummarySize());
+
+        // raise the min_index_interval above our current effective interval, but set the max_index_interval lower
+        // than what we actually have space for (meaning the index summary would ideally be smaller, but this would
+        // result in an effective interval above the new max)
+        cfs.metadata.minIndexInterval(originalMinIndexInterval * 4);
+        cfs.metadata.maxIndexInterval(originalMinIndexInterval * 4);
+        IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, Arrays.asList(sstable), 10);
+        sstable = cfs.getSSTables().iterator().next();
+        assertEquals(cfs.metadata.getMinIndexInterval(), sstable.getEffectiveIndexInterval(), 0.001);
     }
 
     @Test
@@ -167,7 +249,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, sstables, 1);
         sstables = new ArrayList<>(cfs.getSSTables());
         for (SSTableReader sstable : sstables)
-            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval(), 0.01);
 
         // halve the max_index_interval
         cfs.metadata.maxIndexInterval(cfs.metadata.getMaxIndexInterval() / 2);
@@ -175,7 +257,7 @@ public class IndexSummaryManagerTest extends SchemaLoader
         sstables = new ArrayList<>(cfs.getSSTables());
         for (SSTableReader sstable : sstables)
         {
-            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval(), 0.01);
             assertEquals(numRows / cfs.metadata.getMaxIndexInterval(), sstable.getIndexSummarySize());
         }
 
@@ -184,12 +266,12 @@ public class IndexSummaryManagerTest extends SchemaLoader
         IndexSummaryManager.redistributeSummaries(Collections.EMPTY_LIST, sstables, 1);
         for (SSTableReader sstable : cfs.getSSTables())
         {
-            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval());
+            assertEquals(cfs.metadata.getMaxIndexInterval(), sstable.getEffectiveIndexInterval(), 0.01);
             assertEquals(numRows / cfs.metadata.getMaxIndexInterval(), sstable.getIndexSummarySize());
         }
     }
 
-    @Test
+    @Test(timeout = 10000)
     public void testRedistributeSummaries() throws IOException
     {
         String ksname = "Keyspace1";

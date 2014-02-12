@@ -736,7 +736,7 @@ public class SSTableReader extends SSTable implements Closeable
     {
         int minIndexInterval = metadata.getMinIndexInterval();
         int maxIndexInterval = metadata.getMaxIndexInterval();
-        int effectiveInterval = indexSummary.getEffectiveIndexInterval();
+        double effectiveInterval = indexSummary.getEffectiveIndexInterval();
 
         IndexSummary newSummary;
 
@@ -816,7 +816,7 @@ public class SSTableReader extends SSTable implements Closeable
         return indexSummary.getMinIndexInterval();
     }
 
-    public int getEffectiveIndexInterval()
+    public double getEffectiveIndexInterval()
     {
         return indexSummary.getEffectiveIndexInterval();
     }

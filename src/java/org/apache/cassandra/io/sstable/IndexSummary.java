@@ -153,9 +153,9 @@ public class IndexSummary implements Closeable
         return minIndexInterval;
     }
 
-    public int getEffectiveIndexInterval()
+    public double getEffectiveIndexInterval()
     {
-        return (int) Math.ceil((BASE_SAMPLING_LEVEL / (double) samplingLevel) * minIndexInterval);
+        return (BASE_SAMPLING_LEVEL / (double) samplingLevel) * minIndexInterval;
     }
 
     /**
