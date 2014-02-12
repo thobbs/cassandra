@@ -111,6 +111,8 @@ public class SystemKeyspace
     {
         setupVersion();
 
+        migrateIndexInterval();
+
         // add entries to system schema columnfamilies for the hardcoded system definitions
         for (String ksname : Schema.systemKeyspaceNames)
         {
@@ -141,6 +143,47 @@ public class SystemKeyspace
                                          snitch.getDatacenter(FBUtilities.getBroadcastAddress()),
                                          snitch.getRack(FBUtilities.getBroadcastAddress()),
                                          DatabaseDescriptor.getPartitioner().getClass().getName()));
+    }
+
+    /** Migrates index_interval values to min_index_interval and sets index_interval to null */
+    private static void migrateIndexInterval()
+    {
+        // see if the index_interval column still has values
+        String req = String.format("SELECT index_interval FROM system.%s", SystemKeyspace.SCHEMA_COLUMNFAMILIES_CF);
+        UntypedResultSet resultSet = processInternal(req);
+        boolean needToMigrate = false;
+        for (UntypedResultSet.Row row : resultSet)
+        {
+            if (row.has("index_interval"))
+            {
+                needToMigrate = true;
+                break;
+            }
+        }
+
+        if (!needToMigrate)
+            return;
+
+        logger.info("Migrating index_interval to min_index_interval");
+        for (UntypedResultSet.Row row : processInternal(String.format("SELECT * FROM system.%s", SCHEMA_COLUMNFAMILIES_CF)))
+        {
+            CFMetaData table = CFMetaData.fromSchema(row);
+            String query = String.format("SELECT writetime(type) "
+                    + "FROM system.%s "
+                    + "WHERE keyspace_name = '%s' AND columnfamily_name = '%s'",
+                    SCHEMA_COLUMNFAMILIES_CF,
+                    table.ksName,
+                    table.cfName);
+            long timestamp = processInternal(query).one().getLong("writetime(type)");
+            try
+            {
+                table.toSchema(timestamp).apply();
+            }
+            catch (ConfigurationException e)
+            {
+                // shouldn't happen
+            }
+        }
     }
 
     /**

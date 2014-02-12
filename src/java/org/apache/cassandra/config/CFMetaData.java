@@ -145,6 +145,7 @@ public final class CFMetaData
                                                                     + "compaction_strategy_options text,"
                                                                     + "speculative_retry text,"
                                                                     + "populate_io_cache_on_flush boolean,"
+                                                                    + "index_interval int,"
                                                                     + "min_index_interval int,"
                                                                     + "max_index_interval int,"
                                                                     + "dropped_columns map<text, bigint>,"
@@ -1730,6 +1731,7 @@ public final class CFMetaData
         adder.add("compaction_strategy_options", json(compactionStrategyOptions));
         adder.add("min_index_interval", minIndexInterval);
         adder.add("max_index_interval", maxIndexInterval);
+        adder.add("index_interval", null);
         adder.add("speculative_retry", speculativeRetry.toString());
 
         for (Map.Entry<ColumnIdentifier, Long> entry : droppedColumns.entrySet())
@@ -1800,8 +1802,12 @@ public final class CFMetaData
             cfm.compressionParameters(CompressionParameters.create(fromJsonMap(result.getString("compression_parameters"))));
             cfm.compactionStrategyOptions(fromJsonMap(result.getString("compaction_strategy_options")));
 
+            // migrate old index_interval values to min_index_interval, if present
             if (result.has("min_index_interval"))
                 cfm.minIndexInterval(result.getInt("min_index_interval"));
+            else if (result.has("index_interval"))
+                cfm.minIndexInterval(result.getInt("index_interval"));
+
             if (result.has("max_index_interval"))
                 cfm.maxIndexInterval(result.getInt("max_index_interval"));
 
