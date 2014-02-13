@@ -50,6 +50,7 @@ import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -773,7 +774,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
 
     private static void putColsSuper(ColumnFamilyStore cfs, DecoratedKey key, ByteBuffer scfName, Cell... cols) throws Throwable
     {
-        ColumnFamily cf = TreeMapBackedSortedColumns.factory.create(cfs.keyspace.getName(), cfs.name);
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(cfs.keyspace.getName(), cfs.name);
         for (Cell col : cols)
             cf.addColumn(col.withUpdatedName(CellNames.compositeDense(scfName, col.name().toByteBuffer())));
         Mutation rm = new Mutation(cfs.keyspace.getName(), key.key, cf);
@@ -782,7 +783,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
 
     private static void putColsStandard(ColumnFamilyStore cfs, DecoratedKey key, Cell... cols) throws Throwable
     {
-        ColumnFamily cf = TreeMapBackedSortedColumns.factory.create(cfs.keyspace.getName(), cfs.name);
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(cfs.keyspace.getName(), cfs.name);
         for (Cell col : cols)
             cf.addColumn(col);
         Mutation rm = new Mutation(cfs.keyspace.getName(), key.key, cf);
@@ -1596,6 +1597,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
                 collector.addAncestor(sstable1.descriptor.generation); // add ancestor from previously written sstable
                 return new SSTableWriter(makeFilename(directory, metadata.ksName, metadata.cfName),
                                          0,
+                                         ActiveRepairService.UNREPAIRED_SSTABLE,
                                          metadata,
                                          StorageService.getPartitioner(),
                                          collector);
@@ -1652,6 +1654,7 @@ public class ColumnFamilyStoreTest extends SchemaLoader
                 String file = new Descriptor(directory, ks, cf, 3, true).filenameFor(Component.DATA);
                 return new SSTableWriter(file,
                                          0,
+                                         ActiveRepairService.UNREPAIRED_SSTABLE,
                                          metadata,
                                          StorageService.getPartitioner(),
                                          collector);

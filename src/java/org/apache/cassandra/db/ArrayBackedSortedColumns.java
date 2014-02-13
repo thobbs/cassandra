@@ -29,19 +29,25 @@ import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.filter.ColumnSlice;
-import org.apache.cassandra.utils.memory.AbstractAllocator;
 
 /**
- * A ColumnFamily backed by an ArrayList.
+ * A ColumnFamily backed by an array.
  * This implementation is not synchronized and should only be used when
  * thread-safety is not required. This implementation makes sense when the
- * main operations performed are iterating over the map and adding cells
+ * main operations performed are iterating over the cells and adding cells
  * (especially if insertion is in sorted order).
  */
-public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
+public class ArrayBackedSortedColumns extends ColumnFamily
 {
+    private static final Cell[] EMPTY_ARRAY = new Cell[0];
+    private static final int MINIMAL_CAPACITY = 10;
+
     private final boolean reversed;
-    private final ArrayList<Cell> cells;
+    private DeletionInfo deletionInfo;
+
+    private Cell[] cells;
+    private int size;
+    private int sortedSize;
 
     public static final ColumnFamily.Factory<ArrayBackedSortedColumns> factory = new Factory<ArrayBackedSortedColumns>()
     {
@@ -55,14 +61,20 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
     {
         super(metadata);
         this.reversed = reversed;
-        this.cells = new ArrayList<Cell>();
+        this.deletionInfo = DeletionInfo.live();
+        this.cells = EMPTY_ARRAY;
+        this.size = 0;
+        this.sortedSize = 0;
     }
 
-    private ArrayBackedSortedColumns(Collection<Cell> cells, CFMetaData metadata, boolean reversed)
+    private ArrayBackedSortedColumns(ArrayBackedSortedColumns original)
     {
-        super(metadata);
-        this.reversed = reversed;
-        this.cells = new ArrayList<Cell>(cells);
+        super(original.metadata);
+        this.reversed = original.reversed;
+        this.deletionInfo = DeletionInfo.live(); // this is INTENTIONALLY not set to original.deletionInfo.
+        this.cells = Arrays.copyOf(original.cells, original.size);
+        this.size = original.size;
+        this.sortedSize = original.sortedSize;
     }
 
     public ColumnFamily.Factory getFactory()
@@ -72,7 +84,7 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
 
     public ColumnFamily cloneMe()
     {
-        return new ArrayBackedSortedColumns(cells, metadata, reversed);
+        return new ArrayBackedSortedColumns(this);
     }
 
     public boolean isInsertReversed()
@@ -85,177 +97,269 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
         return reversed ? getComparator().reverseComparator() : getComparator();
     }
 
-    public Cell getColumn(CellName name)
+    private void maybeSortCells()
     {
-        int pos = binarySearch(name);
-        return pos >= 0 ? cells.get(pos) : null;
+        if (size != sortedSize)
+            sortCells();
     }
 
-    public void addColumn(Cell cell, AbstractAllocator allocator)
+    private void sortCells()
     {
-        if (cells.isEmpty())
+        Comparator<Cell> comparator = reversed
+                                    ? getComparator().columnReverseComparator()
+                                    : getComparator().columnComparator();
+
+        // Sort the unsorted segment - will still potentially contain duplicate (non-reconciled) cells
+        Arrays.sort(cells, sortedSize, size, comparator);
+
+        // Determine the merge start position for that segment
+        int pos = binarySearch(0, sortedSize, cells[sortedSize].name, internalComparator());
+        if (pos < 0)
+            pos = -pos - 1;
+
+        // Copy [pos, lastSortedCellIndex] cells into a separate array
+        Cell[] leftCopy = pos == sortedSize
+                        ? EMPTY_ARRAY
+                        : Arrays.copyOfRange(cells, pos, sortedSize);
+
+        // Store the beginning (inclusive) and the end (exclusive) indexes of the right segment
+        int rightStart = sortedSize;
+        int rightEnd = size;
+
+        // 'Trim' the size to what's left without the leftCopy
+        size = sortedSize = pos;
+
+        // Merge the cells from both segments. When adding from the left segment we can rely on it not having any
+        // duplicate cells, and thus omit the comparison with the previously entered cell - we'll never need to reconcile.
+        int l = 0, r = rightStart;
+        while (l < leftCopy.length && r < rightEnd)
         {
-            cells.add(cell);
+            int cmp = comparator.compare(leftCopy[l], cells[r]);
+            if (cmp < 0)
+                internalAppend(leftCopy[l++]);
+            else if (cmp == 0)
+                internalAppend(leftCopy[l++].reconcile(cells[r++]));
+            else
+                internalAppendOrReconcile(cells[r++]);
+        }
+        while (l < leftCopy.length)
+            internalAppend(leftCopy[l++]);
+        while (r < rightEnd)
+            internalAppendOrReconcile(cells[r++]);
+
+        // Nullify the remainder of the array (in case we had duplicate cells that got reconciled)
+        for (int i = size; i < rightEnd; i++)
+            cells[i] = null;
+    }
+
+    public Cell getColumn(CellName name)
+    {
+        maybeSortCells();
+        int pos = binarySearch(name);
+        return pos >= 0 ? cells[pos] : null;
+    }
+
+    public void addColumn(Cell cell)
+    {
+        if (size == 0)
+        {
+            internalAdd(cell);
+            sortedSize++;
             return;
         }
 
-        int c = internalComparator().compare(cells.get(getColumnCount() - 1).name(), cell.name());
+        if (size != sortedSize)
+        {
+            internalAdd(cell);
+            return;
+        }
 
+        int c = internalComparator().compare(cells[size - 1].name(), cell.name());
         if (c < 0)
         {
-            // Insert as last
-            cells.add(cell);
+            // Append to the end
+            internalAdd(cell);
+            sortedSize++;
         }
         else if (c == 0)
         {
-            // Resolve against last
-            resolveAgainst(getColumnCount() - 1, cell, allocator);
+            // Resolve against the last cell
+            reconcileWith(size - 1, cell);
         }
         else
         {
             int pos = binarySearch(cell.name());
-            if (pos >= 0)
-                resolveAgainst(pos, cell, allocator);
+            if (pos >= 0) // Reconcile with an existing cell
+                reconcileWith(pos, cell);
             else
-                cells.add(-pos - 1, cell);
+                internalAdd(cell); // Append to the end, making cells unsorted from now on
         }
     }
 
+    public void addAll(ColumnFamily other)
+    {
+        delete(other.deletionInfo());
+
+        if (other.getColumnCount() == 0)
+            return;
+
+        Iterator<Cell> iterator = reversed ? other.reverseIterator() : other.iterator();
+        while (iterator.hasNext())
+            addColumn(iterator.next());
+    }
+
     /**
-     * Resolve against element at position i.
+     * Add a cell to the array, 'resizing' it first if necessary (if it doesn't fit).
+     */
+    private void internalAdd(Cell cell)
+    {
+        if (cells == EMPTY_ARRAY)
+            cells = new Cell[MINIMAL_CAPACITY];
+        else if (cells.length == size)
+            cells = Arrays.copyOf(cells, size * 3 / 2 + 1);
+
+        cells[size++] = cell;
+    }
+
+    /**
+     * Appends a cell to the array, with the knowledge that array has enough capacity for the new cell, and that
+     * the cell is being added in the sorted order, but may or may not need to be reconciled with the previously
+     * appended one.
+     */
+    private void internalAppendOrReconcile(Cell cell)
+    {
+        if (size > 0 && cells[size - 1].name().equals(cell.name()))
+            reconcileWith(size - 1, cell);
+        else
+            internalAppend(cell);
+    }
+
+    /**
+     * Appends a cell to the array, with the knowledge that array has enough capacity for the new cell, and that
+     * the cell is being added in the sorted order, and the added cell is not a duplicate of a previously inserted one.
+     */
+    private void internalAppend(Cell cell)
+    {
+        cells[size] = cell;
+        size++;
+        sortedSize++;
+    }
+
+    /**
+     * Remove the cell at a given index, shifting the rest of the array to the left if needed.
+     * Please note that we mostly remove from the end, so the shifting should be rare.
+     */
+    private void internalRemove(int index)
+    {
+        int moving = size - index - 1;
+        if (moving > 0)
+            System.arraycopy(cells, index + 1, cells, index, moving);
+        cells[--size] = null;
+    }
+
+    /**
+     * Reconcile with a cell at position i.
      * Assume that i is a valid position.
      */
-    private void resolveAgainst(int i, Cell cell, AbstractAllocator allocator)
+    private void reconcileWith(int i, Cell cell)
     {
-        Cell oldCell = cells.get(i);
-
-        // calculate reconciled col from old (existing) col and new col
-        Cell reconciledCell = cell.reconcile(oldCell, allocator);
-        cells.set(i, reconciledCell);
+        cells[i] = cell.reconcile(cells[i]);
     }
 
     private int binarySearch(CellName name)
     {
-        return binarySearch(cells, internalComparator(), name, 0);
+        return binarySearch(0, size, name, internalComparator());
     }
 
     /**
-     * Simple binary search for a given column name.
+     * Simple binary search for a given cell name.
      * The return value has the exact same meaning that the one of Collections.binarySearch().
      * (We don't use Collections.binarySearch() directly because it would require us to create
      * a fake Cell (as well as an Cell comparator) to do the search, which is ugly.
      */
-    private static int binarySearch(List<Cell> cells, Comparator<Composite> comparator, Composite name, int start)
+    private int binarySearch(int fromIndex, int toIndex, Composite name, Comparator<Composite> comparator)
     {
-        int low = start;
-        int mid = cells.size();
+        int low = fromIndex;
+        int mid = toIndex;
         int high = mid - 1;
         int result = -1;
         while (low <= high)
         {
             mid = (low + high) >> 1;
-            if ((result = comparator.compare(name, cells.get(mid).name())) > 0)
-            {
+            if ((result = comparator.compare(name, cells[mid].name())) > 0)
                 low = mid + 1;
-            }
             else if (result == 0)
-            {
                 return mid;
-            }
             else
-            {
                 high = mid - 1;
-            }
         }
         return -mid - (result < 0 ? 1 : 2);
     }
 
-    public void addAll(ColumnFamily cm, AbstractAllocator allocator, Function<Cell, Cell> transformation)
-    {
-        delete(cm.deletionInfo());
-        if (cm.getColumnCount() == 0)
-            return;
-
-        Cell[] copy = cells.toArray(new Cell[getColumnCount()]);
-        int idx = 0;
-        Iterator<Cell> other = reversed ? cm.reverseIterator(ColumnSlice.ALL_COLUMNS_ARRAY) : cm.iterator();
-        Cell otherCell = other.next();
-
-        cells.clear();
-
-        while (idx < copy.length && otherCell != null)
-        {
-            int c = internalComparator().compare(copy[idx].name(), otherCell.name());
-            if (c < 0)
-            {
-                cells.add(copy[idx]);
-                idx++;
-            }
-            else if (c > 0)
-            {
-                cells.add(transformation.apply(otherCell));
-                otherCell = other.hasNext() ? other.next() : null;
-            }
-            else // c == 0
-            {
-                cells.add(copy[idx]);
-                resolveAgainst(getColumnCount() - 1, transformation.apply(otherCell), allocator);
-                idx++;
-                otherCell = other.hasNext() ? other.next() : null;
-            }
-        }
-        while (idx < copy.length)
-        {
-            cells.add(copy[idx++]);
-        }
-        while (otherCell != null)
-        {
-            cells.add(transformation.apply(otherCell));
-            otherCell = other.hasNext() ? other.next() : null;
-        }
-    }
-
-    public boolean replace(Cell oldCell, Cell newCell)
-    {
-        if (!oldCell.name().equals(newCell.name()))
-            throw new IllegalArgumentException();
-
-        int pos = binarySearch(oldCell.name());
-        if (pos >= 0)
-        {
-            cells.set(pos, newCell);
-        }
-
-        return pos >= 0;
-    }
-
     public Collection<Cell> getSortedColumns()
     {
-        return reversed ? new ReverseSortedCollection() : cells;
+        maybeSortCells();
+        return reversed ? new ReverseSortedCollection() : new ForwardSortedCollection();
     }
 
     public Collection<Cell> getReverseSortedColumns()
     {
-        // If reversed, the element are sorted reversely, so we could expect
-        // to return *this*, but *this* redefine the iterator to be in sorted
-        // order, so we need a collection that uses the super constructor
+        maybeSortCells();
         return reversed ? new ForwardSortedCollection() : new ReverseSortedCollection();
     }
 
     public int getColumnCount()
     {
-        return cells.size();
+        maybeSortCells();
+        return size;
     }
 
     public void clear()
     {
         setDeletionInfo(DeletionInfo.live());
-        cells.clear();
+        for (int i = 0; i < size; i++)
+            cells[i] = null;
+        size = sortedSize = 0;
+    }
+
+    public DeletionInfo deletionInfo()
+    {
+        return deletionInfo;
+    }
+
+    public void delete(DeletionTime delTime)
+    {
+        deletionInfo.add(delTime);
+    }
+
+    public void delete(DeletionInfo newInfo)
+    {
+        deletionInfo.add(newInfo);
+    }
+
+    protected void delete(RangeTombstone tombstone)
+    {
+        deletionInfo.add(tombstone, getComparator());
+    }
+
+    public void setDeletionInfo(DeletionInfo newInfo)
+    {
+        deletionInfo = newInfo;
+    }
+
+    /**
+     * Purges any tombstones with a local deletion time before gcBefore.
+     * @param gcBefore a timestamp (in seconds) before which tombstones should be purged
+     */
+    public void purgeTombstones(int gcBefore)
+    {
+        deletionInfo.purge(gcBefore);
     }
 
     public Iterable<CellName> getColumnNames()
     {
-        return Iterables.transform(cells, new Function<Cell, CellName>()
+        maybeSortCells();
+        return Iterables.transform(new ForwardSortedCollection(), new Function<Cell, CellName>()
         {
             public CellName apply(Cell cell)
             {
@@ -264,24 +368,21 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
         });
     }
 
-    public Iterator<Cell> iterator()
-    {
-        return reversed ? Lists.reverse(cells).iterator() : cells.iterator();
-    }
-
     public Iterator<Cell> iterator(ColumnSlice[] slices)
     {
-        return new SlicesIterator(cells, getComparator(), slices, reversed);
+        maybeSortCells();
+        return new SlicesIterator(Arrays.asList(cells).subList(0, size), getComparator(), slices, reversed);
     }
 
     public Iterator<Cell> reverseIterator(ColumnSlice[] slices)
     {
-        return new SlicesIterator(cells, getComparator(), slices, !reversed);
+        maybeSortCells();
+        return new SlicesIterator(Arrays.asList(cells).subList(0, size), getComparator(), slices, !reversed);
     }
 
     private static class SlicesIterator extends AbstractIterator<Cell>
     {
-        private final List<Cell> list;
+        private final List<Cell> cells;
         private final ColumnSlice[] slices;
         private final Comparator<Composite> comparator;
 
@@ -289,9 +390,9 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
         private int previousSliceEnd = 0;
         private Iterator<Cell> currentSlice;
 
-        public SlicesIterator(List<Cell> list, CellNameType comparator, ColumnSlice[] slices, boolean reversed)
+        public SlicesIterator(List<Cell> cells, CellNameType comparator, ColumnSlice[] slices, boolean reversed)
         {
-            this.list = reversed ? Lists.reverse(list) : list;
+            this.cells = reversed ? Lists.reverse(cells) : cells;
             this.slices = slices;
             this.comparator = reversed ? comparator.reverseComparator() : comparator;
         }
@@ -305,21 +406,21 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
 
                 ColumnSlice slice = slices[idx++];
                 // The first idx to include
-                int startIdx = slice.start.isEmpty() ? 0 : binarySearch(list, comparator, slice.start, previousSliceEnd);
+                int startIdx = slice.start.isEmpty() ? 0 : binarySearch(previousSliceEnd, slice.start);
                 if (startIdx < 0)
                     startIdx = -startIdx - 1;
 
                 // The first idx to exclude
-                int finishIdx = slice.finish.isEmpty() ? list.size() - 1 : binarySearch(list, comparator, slice.finish, previousSliceEnd);
+                int finishIdx = slice.finish.isEmpty() ? cells.size() - 1 : binarySearch(previousSliceEnd, slice.finish);
                 if (finishIdx >= 0)
                     finishIdx++;
                 else
                     finishIdx = -finishIdx - 1;
 
-                if (startIdx == 0 && finishIdx == list.size())
-                    currentSlice = list.iterator();
+                if (startIdx == 0 && finishIdx == cells.size())
+                    currentSlice = cells.iterator();
                 else
-                    currentSlice = list.subList(startIdx, finishIdx).iterator();
+                    currentSlice = cells.subList(startIdx, finishIdx).iterator();
 
                 previousSliceEnd = finishIdx > 0 ? finishIdx - 1 : 0;
             }
@@ -330,20 +431,40 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
             currentSlice = null;
             return computeNext();
         }
+
+        // Copy of ABSC.binarySearch() that takes lists
+        private int binarySearch(int fromIndex, Composite name)
+        {
+            int low = fromIndex;
+            int mid = cells.size();
+            int high = mid - 1;
+            int result = -1;
+            while (low <= high)
+            {
+                mid = (low + high) >> 1;
+                if ((result = comparator.compare(name, cells.get(mid).name())) > 0)
+                    low = mid + 1;
+                else if (result == 0)
+                    return mid;
+                else
+                    high = mid - 1;
+            }
+            return -mid - (result < 0 ? 1 : 2);
+        }
     }
 
     private class ReverseSortedCollection extends AbstractCollection<Cell>
     {
         public int size()
         {
-            return cells.size();
+            return size;
         }
 
         public Iterator<Cell> iterator()
         {
             return new Iterator<Cell>()
             {
-                int idx = size() - 1;
+                int idx = size - 1;
                 boolean shouldCallNext = true;
 
                 public boolean hasNext()
@@ -354,15 +475,16 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
                 public Cell next()
                 {
                     shouldCallNext = false;
-                    return cells.get(idx--);
+                    return cells[idx--];
                 }
 
                 public void remove()
                 {
                     if (shouldCallNext)
                         throw new IllegalStateException();
-                    cells.remove(idx + 1);
+                    internalRemove(idx + 1);
                     shouldCallNext = true;
+                    sortedSize--;
                 }
             };
         }
@@ -372,12 +494,36 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
     {
         public int size()
         {
-            return cells.size();
+            return size;
         }
 
         public Iterator<Cell> iterator()
         {
-            return cells.iterator();
+            return new Iterator<Cell>()
+            {
+                int idx = 0;
+                boolean shouldCallNext = true;
+
+                public boolean hasNext()
+                {
+                    return idx < size;
+                }
+
+                public Cell next()
+                {
+                    shouldCallNext = false;
+                    return cells[idx++];
+                }
+
+                public void remove()
+                {
+                    if (shouldCallNext)
+                        throw new IllegalStateException();
+                    internalRemove(--idx);
+                    shouldCallNext = true;
+                    sortedSize--;
+                }
+            };
         }
     }
 }

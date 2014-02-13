@@ -24,8 +24,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
-import org.apache.cassandra.utils.concurrent.OpOrder;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -40,7 +38,7 @@ import org.apache.cassandra.db.filter.QueryFilter;
 import org.apache.cassandra.db.index.*;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.utils.memory.HeapAllocator;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class KeysSearcher extends SecondaryIndexSearcher
 {
@@ -173,7 +171,7 @@ public class KeysSearcher extends SecondaryIndexSearcher
                         ColumnFamily data = baseCfs.getColumnFamily(new QueryFilter(dk, baseCfs.name, filter.columnFilter(lastSeenKey.toByteBuffer()), filter.timestamp));
                         // While the column family we'll get in the end should contains the primary clause cell, the initialFilter may not have found it and can thus be null
                         if (data == null)
-                            data = TreeMapBackedSortedColumns.factory.create(baseCfs.metadata);
+                            data = ArrayBackedSortedColumns.factory.create(baseCfs.metadata);
 
                         // as in CFS.filter - extend the filter to ensure we include the columns
                         // from the index expressions, just in case they weren't included in the initialFilter
@@ -182,7 +180,7 @@ public class KeysSearcher extends SecondaryIndexSearcher
                         {
                             ColumnFamily cf = baseCfs.getColumnFamily(new QueryFilter(dk, baseCfs.name, extraFilter, filter.timestamp));
                             if (cf != null)
-                                data.addAll(cf, HeapAllocator.instance);
+                                data.addAll(cf);
                         }
 
                         if (((KeysIndex)index).isIndexEntryStale(indexKey.key, data, filter.timestamp))

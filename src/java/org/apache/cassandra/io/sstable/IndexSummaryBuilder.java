@@ -140,7 +140,7 @@ public class IndexSummaryBuilder
         // effective index interval == (BASE_SAMPLING_LEVEL / samplingLevel) * minIndexInterval
         // so we can just solve for minSamplingLevel here:
         // maxIndexInterval == (BASE_SAMPLING_LEVEL / minSamplingLevel) * minIndexInterval
-        int effectiveMinSamplingLevel = Math.max(1, (BASE_SAMPLING_LEVEL * minIndexInterval) / maxIndexInterval);
+        int effectiveMinSamplingLevel = Math.max(1, (int) Math.ceil((BASE_SAMPLING_LEVEL * minIndexInterval) / (double) maxIndexInterval));
 
         // Algebraic explanation for calculating the new sampling level (solve for newSamplingLevel):
         // originalNumEntries = (baseSamplingLevel / currentSamplingLevel) * currentNumEntries

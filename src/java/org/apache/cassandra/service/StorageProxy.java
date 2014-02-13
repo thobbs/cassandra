@@ -232,7 +232,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 Tracing.trace("CAS precondition {} does not match current values {}", conditions, current);
                 // We should not return null as this means success
-                return current == null ? EmptyColumns.factory.create(metadata) : current;
+                return current == null ? ArrayBackedSortedColumns.factory.create(metadata) : current;
             }
 
             // finish the paxos round w/ the desired updates
@@ -563,7 +563,7 @@ public class StorageProxy implements StorageProxyMBean
             syncWriteToBatchlog(mutations, batchlogEndpoints, batchUUID);
 
             // now actually perform the writes and wait for them to complete
-            syncWriteBatchedMutations(wrappers, localDataCenter, consistency_level);
+            syncWriteBatchedMutations(wrappers, localDataCenter);
 
             // remove the batchlog entries asynchronously
             asyncRemoveFromBatchlog(batchlogEndpoints, batchUUID);
@@ -603,7 +603,7 @@ public class StorageProxy implements StorageProxyMBean
 
     private static void asyncRemoveFromBatchlog(Collection<InetAddress> endpoints, UUID uuid)
     {
-        ColumnFamily cf = EmptyColumns.factory.create(Schema.instance.getCFMetaData(Keyspace.SYSTEM_KS, SystemKeyspace.BATCHLOG_CF));
+        ColumnFamily cf = ArrayBackedSortedColumns.factory.create(Schema.instance.getCFMetaData(Keyspace.SYSTEM_KS, SystemKeyspace.BATCHLOG_CF));
         cf.delete(new DeletionInfo(FBUtilities.timestampMicros(), (int) (System.currentTimeMillis() / 1000)));
         AbstractWriteResponseHandler handler = new WriteResponseHandler(endpoints,
                                                                         Collections.<InetAddress>emptyList(),
@@ -630,8 +630,7 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     private static void syncWriteBatchedMutations(List<WriteResponseHandlerWrapper> wrappers,
-                                                  String localDataCenter,
-                                                  ConsistencyLevel consistencyLevel)
+                                                  String localDataCenter)
     throws WriteTimeoutException, OverloadedException
     {
         for (WriteResponseHandlerWrapper wrapper : wrappers)
