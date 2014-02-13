@@ -145,28 +145,17 @@ public class SystemKeyspace
                                          DatabaseDescriptor.getPartitioner().getClass().getName()));
     }
 
+    // TODO: In 3.0, remove this and the index_interval column from system.schema_columnfamilies
     /** Migrates index_interval values to min_index_interval and sets index_interval to null */
     private static void migrateIndexInterval()
     {
-        // see if the index_interval column still has values
-        String req = String.format("SELECT index_interval FROM system.%s", SystemKeyspace.SCHEMA_COLUMNFAMILIES_CF);
-        UntypedResultSet resultSet = processInternal(req);
-        boolean needToMigrate = false;
-        for (UntypedResultSet.Row row : resultSet)
-        {
-            if (row.has("index_interval"))
-            {
-                needToMigrate = true;
-                break;
-            }
-        }
-
-        if (!needToMigrate)
-            return;
-
-        logger.info("Migrating index_interval to min_index_interval");
         for (UntypedResultSet.Row row : processInternal(String.format("SELECT * FROM system.%s", SCHEMA_COLUMNFAMILIES_CF)))
         {
+            if (!row.has("index_interval"))
+                continue;
+
+            logger.debug("Migrating index_interval to min_index_interval");
+
             CFMetaData table = CFMetaData.fromSchema(row);
             String query = String.format("SELECT writetime(type) "
                     + "FROM system.%s "
