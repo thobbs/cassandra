@@ -73,6 +73,8 @@ public final class MessagingService implements MessagingServiceMBean
     public static final int VERSION_20  = 7;
     public static final int current_version = VERSION_20;
 
+    public boolean allNodesAtLeast20 = true;
+
     /**
      * we preface every message with this number so the recipient can validate the sender is sane
      */
@@ -742,14 +744,36 @@ public final class MessagingService implements MessagingServiceMBean
     public int setVersion(InetAddress address, int version)
     {
         logger.debug("Setting version {} for {}", version, address);
+        if (version < VERSION_20)
+            allNodesAtLeast20 = false;
         Integer v = versions.put(address, version);
+
+        // if the version was increased to 2.0 or later, see if all nodes are >= 2.0 now
+        if (v != null && v < VERSION_20 && version >= VERSION_20)
+            refreshAllNodesAre20();
+
         return v == null ? version : v;
     }
 
     public void resetVersion(InetAddress endpoint)
     {
         logger.debug("Reseting version for {}", endpoint);
-        versions.remove(endpoint);
+        Integer removed = versions.remove(endpoint);
+        if (removed != null && removed <= VERSION_20)
+            refreshAllNodesAre20();
+    }
+
+    private void refreshAllNodesAre20()
+    {
+        for (Integer version: versions.values())
+        {
+            if (version < VERSION_20)
+            {
+                allNodesAtLeast20 = false;
+                return;
+            }
+        }
+        allNodesAtLeast20 = true;
     }
 
     public Integer getVersion(InetAddress address)
