@@ -750,7 +750,7 @@ public final class MessagingService implements MessagingServiceMBean
 
         // if the version was increased to 2.0 or later, see if all nodes are >= 2.0 now
         if (v != null && v < VERSION_20 && version >= VERSION_20)
-            refreshAllNodesAre20();
+            refreshAllNodesAtLeast20();
 
         return v == null ? version : v;
     }
@@ -760,10 +760,10 @@ public final class MessagingService implements MessagingServiceMBean
         logger.debug("Reseting version for {}", endpoint);
         Integer removed = versions.remove(endpoint);
         if (removed != null && removed <= VERSION_20)
-            refreshAllNodesAre20();
+            refreshAllNodesAtLeast20();
     }
 
-    private void refreshAllNodesAre20()
+    private void refreshAllNodesAtLeast20()
     {
         for (Integer version: versions.values())
         {
