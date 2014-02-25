@@ -69,6 +69,21 @@ public class MultiSliceEndToEndTest extends SchemaLoader
         assertColumnNameMatches(Arrays.asList("a", "b", "c", "d", "e", "i", "j", "k" , "l", "m" , "n"), server.get_multi_slice(req));
     }
     
+    @Test
+    public void test_with_overlap() throws TException
+    {
+        ColumnParent cp = new ColumnParent("Standard1");
+        ByteBuffer key = ByteBuffer.wrap("overlap".getBytes());
+        addTheAlphabetToRow(key, cp);
+        MultiSliceRequest req = new MultiSliceRequest();
+        req.setKey(key);
+        req.setCount(1000);
+        req.reversed = false;
+        req.setColumn_parent(cp);
+        req.setColumn_slices(Arrays.asList(columnSliceFrom("a", "e"), columnSliceFrom("d", "g")));
+        assertColumnNameMatches(Arrays.asList("a", "b", "c", "d", "e", "f", "g"), server.get_multi_slice(req));
+    }
+    
     private static void addTheAlphabetToRow(ByteBuffer key, ColumnParent parent) 
             throws InvalidRequestException, UnavailableException, TimedOutException
     {
