@@ -2001,6 +2001,19 @@ public class CassandraServer implements Cassandra.Iface
     public List<ColumnOrSuperColumn> get_multi_slice(MultiSliceRequest request)
             throws InvalidRequestException, UnavailableException, TimedOutException, TException
     {
+        if (startSessionIfRequested())
+        {
+            Map<String, String> traceParameters = ImmutableMap.of("key", ByteBufferUtil.bytesToHex(request.key),
+                                                                "column_parent", request.column_parent.toString(),
+                                                                "consistency_level", request.consistency_level.name(),
+                                                                "count", String.valueOf(request.count),
+                                                                "column_slices", request.column_slices.toString());
+            Tracing.instance.begin("get_multi_slice", traceParameters);
+        }
+        else
+        {
+            logger.debug("remove_counter");
+        }
         try 
         {
             ClientState cState = state();
@@ -2023,10 +2036,15 @@ public class CassandraServer implements Cassandra.Iface
             ThriftValidation.validateKey(metadata, request.key);
             commands.add(ReadCommand.create(keyspace, request.key, request.column_parent.getColumn_family(), System.nanoTime(), filter));
             return getSlice(commands, request.column_parent.isSetSuper_column(), consistencyLevel).entrySet().iterator().next().getValue();
-        } catch (RequestValidationException e)
+        } 
+        catch (RequestValidationException e)
         {
             throw ThriftConversion.toThrift(e);
         } 
+        finally 
+        {
+            Tracing.instance.stopSession();
+        }
     }
 
     private static void fixOptionalSliceParameters(org.apache.cassandra.thrift.ColumnSlice columnSlice) {
