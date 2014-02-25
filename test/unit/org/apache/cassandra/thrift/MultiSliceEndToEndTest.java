@@ -131,7 +131,7 @@ public class MultiSliceEndToEndTest extends SchemaLoader
     {
         if (actual.size() != expected.size())
         {
-            Assert.assertEquals( actual+" "+expected +" did not have same number of elements", actual.size() , expected.size() );
+            Assert.assertEquals(actual+" "+expected +" did not have same number of elements", actual.size() , expected.size() );
         }
         for (int i = 0 ; i< expected.size() ; i++)
         {
