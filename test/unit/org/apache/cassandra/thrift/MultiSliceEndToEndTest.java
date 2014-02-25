@@ -24,7 +24,8 @@ public class MultiSliceEndToEndTest extends SchemaLoader
     private static CassandraServer server;
     
     @BeforeClass
-    public static void setup() throws IOException, InvalidRequestException, TException{
+    public static void setup() throws IOException, InvalidRequestException, TException
+    {
         Schema.instance.clear(); // Schema are now written on disk and will be reloaded
         new EmbeddedCassandraService().start();
         ThriftSessionManager.instance.setCurrentSocket(new InetSocketAddress(9160));        
@@ -84,6 +85,36 @@ public class MultiSliceEndToEndTest extends SchemaLoader
         assertColumnNameMatches(Arrays.asList("a", "b", "c", "d", "e", "f", "g"), server.get_multi_slice(req));
     }
     
+    @Test
+    public void test_with_overlap_reversed() throws TException
+    {
+        ColumnParent cp = new ColumnParent("Standard1");
+        ByteBuffer key = ByteBuffer.wrap("overlap_reversed".getBytes());
+        addTheAlphabetToRow(key, cp);
+        MultiSliceRequest req = new MultiSliceRequest();
+        req.setKey(key); 
+        req.setCount(1000);
+        req.reversed = true;
+        req.setColumn_parent(cp);
+        req.setColumn_slices(Arrays.asList(columnSliceFrom("e", "a"), columnSliceFrom("g", "d")));
+        assertColumnNameMatches(Arrays.asList("g", "f", "e", "d", "c", "b", "a"), server.get_multi_slice(req));
+    }
+    
+    @Test
+    public void test_with_overlap_reversed_with_count() throws TException
+    {
+        ColumnParent cp = new ColumnParent("Standard1");
+        ByteBuffer key = ByteBuffer.wrap("overlap_reversed_count".getBytes());
+        addTheAlphabetToRow(key, cp);
+        MultiSliceRequest req = new MultiSliceRequest();
+        req.setKey(key); 
+        req.setCount(6);
+        req.reversed = true;
+        req.setColumn_parent(cp);
+        req.setColumn_slices(Arrays.asList(columnSliceFrom("e", "a"), columnSliceFrom("g", "d")));
+        assertColumnNameMatches(Arrays.asList("g", "e", "d", "c", "b", "a"), server.get_multi_slice(req)); 
+    }
+    
     private static void addTheAlphabetToRow(ByteBuffer key, ColumnParent parent) 
             throws InvalidRequestException, UnavailableException, TimedOutException
     {
@@ -92,7 +123,7 @@ public class MultiSliceEndToEndTest extends SchemaLoader
             c1.setName(ByteBufferUtil.bytes(String.valueOf(a)));
             c1.setValue(new byte [0]);
             c1.setTimestamp(System.nanoTime());
-            server.insert(key, parent, c1, ConsistencyLevel.ONE);
+            server.insert(key, parent, c1, ConsistencyLevel.ONE); 
          }
     }
     
