@@ -2034,7 +2034,7 @@ public class CassandraServer implements Cassandra.Iface
             }
             SliceQueryFilter filter = new SliceQueryFilter(slices, request.reversed, request.count);
             ThriftValidation.validateKey(metadata, request.key);
-            commands.add(ReadCommand.create(keyspace, request.key, request.column_parent.getColumn_family(), System.nanoTime(), filter));
+            commands.add(ReadCommand.create(keyspace, request.key, request.column_parent.getColumn_family(), System.currentTimeMillis(), filter));
             return getSlice(commands, request.column_parent.isSetSuper_column(), consistencyLevel).entrySet().iterator().next().getValue();
         } 
         catch (RequestValidationException e)
@@ -2047,15 +2047,15 @@ public class CassandraServer implements Cassandra.Iface
         }
     }
 
+    /**
+     * Set them to start-of end-of value of "" for start and finish.
+     * @param columnSlice
+     */
     private static void fixOptionalSliceParameters(org.apache.cassandra.thrift.ColumnSlice columnSlice) {
         if (!columnSlice.isSetStart())
-        {
             columnSlice.setStart(new byte[0]);
-        }
         if (!columnSlice.isSetFinish())
-        {
             columnSlice.setFinish(new byte[0]);
-        }
     }
 
     /*
