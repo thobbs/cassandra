@@ -1999,7 +1999,7 @@ public class CassandraServer implements Cassandra.Iface
 
     @Override
     public List<ColumnOrSuperColumn> get_multi_slice(MultiSliceRequest request)
-            throws InvalidRequestException, UnavailableException, TimedOutException, TException
+            throws InvalidRequestException, UnavailableException, TimedOutException
     {
         if (startSessionIfRequested())
         {
