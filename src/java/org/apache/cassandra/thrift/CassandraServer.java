@@ -2032,9 +2032,9 @@ public class CassandraServer implements Cassandra.Iface
               Composite finish = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).finish);
               int compare = metadata.comparator.compare(start, finish);
               if (!request.reversed && compare > 0) 
-                  throw new InvalidRequestException("for slice " + i + "in a forward slice start should be less than or equal to finish");
+                  throw new InvalidRequestException("for slice " + i + " in a forward slice start should be less than or equal to finish");
               if (request.reversed && compare < 0)
-                  throw new InvalidRequestException("for slice " + i + "in a reverse slice finish should be less than or equal to start");
+                  throw new InvalidRequestException("for slice " + i + " in a reverse slice finish should be less than or equal to start");
               slices[i] = new ColumnSlice(start, finish);
             }
             SliceQueryFilter filter = new SliceQueryFilter(slices, request.reversed, request.count);
