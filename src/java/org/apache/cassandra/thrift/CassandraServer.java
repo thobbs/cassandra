@@ -2004,15 +2004,15 @@ public class CassandraServer implements Cassandra.Iface
         if (startSessionIfRequested())
         {
             Map<String, String> traceParameters = ImmutableMap.of("key", ByteBufferUtil.bytesToHex(request.key),
-                                                                "column_parent", request.column_parent.toString(),
-                                                                "consistency_level", request.consistency_level.name(),
-                                                                "count", String.valueOf(request.count),
-                                                                "column_slices", request.column_slices.toString());
+                "column_parent", request.column_parent.toString(),
+                "consistency_level", request.consistency_level.name(),
+                "count", String.valueOf(request.count),
+                "column_slices", request.column_slices.toString());
             Tracing.instance.begin("get_multi_slice", traceParameters);
         }
         else
         {
-            logger.debug("remove_counter");
+            logger.debug("get_multi_slice");
         }
         try 
         {
@@ -2023,14 +2023,14 @@ public class CassandraServer implements Cassandra.Iface
             ThriftValidation.validateColumnParent(metadata, request.getColumn_parent());
             org.apache.cassandra.db.ConsistencyLevel consistencyLevel = ThriftConversion.fromThrift(request.getConsistency_level());
             consistencyLevel.validateForRead(keyspace);
-            List<ReadCommand> commands = new ArrayList<ReadCommand>(0);
+            List<ReadCommand> commands = new ArrayList<>(1);
             ColumnSlice [] slices = new ColumnSlice[request.getColumn_slices().size()];
             for (int i = 0 ; i < request.getColumn_slices().size() ; i++)
             {
               fixOptionalSliceParameters(request.getColumn_slices().get(i));
               Composite start = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).start);
               Composite finish = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).finish);
-              slices[i] = new ColumnSlice(start,finish);
+              slices[i] = new ColumnSlice(start, finish);
             }
             SliceQueryFilter filter = new SliceQueryFilter(slices, request.reversed, request.count);
             ThriftValidation.validateKey(metadata, request.key);

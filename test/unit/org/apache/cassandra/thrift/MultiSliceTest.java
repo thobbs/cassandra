@@ -19,7 +19,7 @@ import org.apache.thrift.TException;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-public class MultiSliceEndToEndTest extends SchemaLoader
+public class MultiSliceTest extends SchemaLoader
 {
     private static CassandraServer server;
     
