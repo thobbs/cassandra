@@ -2030,6 +2030,11 @@ public class CassandraServer implements Cassandra.Iface
               fixOptionalSliceParameters(request.getColumn_slices().get(i));
               Composite start = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).start);
               Composite finish = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).finish);
+              int compare = metadata.comparator.compare(start, finish);
+              if (!request.reversed && compare > 0) 
+                  throw new InvalidRequestException("for slice " + i + "in a forward slice start should be less than or equal to finish");
+              if (request.reversed && compare < 0)
+                  throw new InvalidRequestException("for slice " + i + "in a reverse slice finish should be less than or equal to start");
               slices[i] = new ColumnSlice(start, finish);
             }
             SliceQueryFilter filter = new SliceQueryFilter(slices, request.reversed, request.count);
@@ -2048,7 +2053,7 @@ public class CassandraServer implements Cassandra.Iface
     }
 
     /**
-     * Set them to start-of end-of value of "" for start and finish.
+     * Set the to start-of end-of value of "" for start and finish.
      * @param columnSlice
      */
     private static void fixOptionalSliceParameters(org.apache.cassandra.thrift.ColumnSlice columnSlice) {
