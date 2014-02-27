@@ -24,7 +24,7 @@ public class MultiSliceTest extends SchemaLoader
     private static CassandraServer server;
     
     @BeforeClass
-    public static void setup() throws IOException, InvalidRequestException, TException
+    public static void setup() throws IOException, TException 
     {
         Schema.instance.clear(); // Schema are now written on disk and will be reloaded
         new EmbeddedCassandraService().start();
