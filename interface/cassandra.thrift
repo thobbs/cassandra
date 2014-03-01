@@ -770,7 +770,7 @@ service Cassandra {
   void truncate(1:required string cfname)
        throws (1: InvalidRequestException ire, 2: UnavailableException ue, 3: TimedOutException te),
   /**
-  * Select multiple ranges of a key in a single RPC operation
+  * Select multiple slices of a key in a single RPC operation
   */
   list<ColumnOrSuperColumn> get_multi_slice(1:required MultiSliceRequest request)
        throws (1:InvalidRequestException ire, 2:UnavailableException ue, 3:TimedOutException te),

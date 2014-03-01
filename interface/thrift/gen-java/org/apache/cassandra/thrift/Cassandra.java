@@ -248,7 +248,7 @@ public class Cassandra {
     public void truncate(String cfname) throws InvalidRequestException, UnavailableException, TimedOutException, org.apache.thrift.TException;
 
     /**
-     * Select multiple ranges of a key in a single RPC operation
+     * Select multiple slices of a key in a single RPC operation
      * 
      * @param request
      */
