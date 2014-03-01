@@ -2020,6 +2020,8 @@ public class CassandraServer implements Cassandra.Iface
             String keyspace = cState.getKeyspace();
             state().hasColumnFamilyAccess(keyspace, request.getColumn_parent().column_family, Permission.SELECT);
             CFMetaData metadata = ThriftValidation.validateColumnFamily(keyspace, request.getColumn_parent().column_family);
+            if (metadata.cfType == ColumnFamilyType.Super)
+              throw new org.apache.cassandra.exceptions.InvalidRequestException("get_multi_slice does not support super columns");
             ThriftValidation.validateColumnParent(metadata, request.getColumn_parent());
             org.apache.cassandra.db.ConsistencyLevel consistencyLevel = ThriftConversion.fromThrift(request.getConsistency_level());
             consistencyLevel.validateForRead(keyspace);
