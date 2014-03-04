@@ -1,6 +1,5 @@
 package org.apache.cassandra.thrift;
 
-
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
@@ -32,6 +31,17 @@ public class MultiSliceTest extends SchemaLoader
         server = new CassandraServer();
         server.set_keyspace("Keyspace1");
     }
+
+    private static MultiSliceRequest makeMultiSliceRequest(ByteBuffer key)
+    {
+        ColumnParent cp = new ColumnParent("Standard1");
+        MultiSliceRequest req = new MultiSliceRequest();
+        req.setKey(key);
+        req.setCount(1000);
+        req.reversed = false;
+        req.setColumn_parent(cp);
+        return req;
+    }
     
     @Test
     public void test_multi_slice_optional_column_slice() throws TException
@@ -40,15 +50,10 @@ public class MultiSliceTest extends SchemaLoader
         ByteBuffer key = ByteBuffer.wrap("multi_slice".getBytes());
         List<String> expected = new ArrayList<String>();
         for (char a = 'a'; a <= 'z'; a++)
-        {
-            expected.add(a+"");
-        }
+            expected.add(a + "");
+
         addTheAlphabetToRow(key, cp);
-        MultiSliceRequest req = new MultiSliceRequest();
-        req.setKey(key);
-        req.setCount(1000);
-        req.reversed = false;
-        req.setColumn_parent(cp);
+        MultiSliceRequest req = makeMultiSliceRequest(key);
         req.setColumn_slices(new ArrayList<ColumnSlice>());
         req.getColumn_slices().add(new ColumnSlice());
         List<ColumnOrSuperColumn> list = server.get_multi_slice(req);
@@ -61,11 +66,7 @@ public class MultiSliceTest extends SchemaLoader
         ColumnParent cp = new ColumnParent("Standard1");
         ByteBuffer key = ByteBuffer.wrap("multi_slice_two_slice".getBytes());
         addTheAlphabetToRow(key, cp);
-        MultiSliceRequest req = new MultiSliceRequest();
-        req.setKey(key);
-        req.setCount(1000);
-        req.reversed = false;
-        req.setColumn_parent(cp);
+        MultiSliceRequest req = makeMultiSliceRequest(key);
         req.setColumn_slices(Arrays.asList(columnSliceFrom("a", "e"), columnSliceFrom("i", "n")));
         assertColumnNameMatches(Arrays.asList("a", "b", "c", "d", "e", "i", "j", "k" , "l", "m" , "n"), server.get_multi_slice(req));
     }
@@ -76,11 +77,7 @@ public class MultiSliceTest extends SchemaLoader
         ColumnParent cp = new ColumnParent("Standard1");
         ByteBuffer key = ByteBuffer.wrap("overlap".getBytes());
         addTheAlphabetToRow(key, cp);
-        MultiSliceRequest req = new MultiSliceRequest();
-        req.setKey(key);
-        req.setCount(1000);
-        req.reversed = false;
-        req.setColumn_parent(cp);
+        MultiSliceRequest req = makeMultiSliceRequest(key);
         req.setColumn_slices(Arrays.asList(columnSliceFrom("a", "e"), columnSliceFrom("d", "g")));
         assertColumnNameMatches(Arrays.asList("a", "b", "c", "d", "e", "f", "g"), server.get_multi_slice(req));
     }
@@ -91,11 +88,8 @@ public class MultiSliceTest extends SchemaLoader
         ColumnParent cp = new ColumnParent("Standard1");
         ByteBuffer key = ByteBuffer.wrap("overlap_reversed".getBytes());
         addTheAlphabetToRow(key, cp);
-        MultiSliceRequest req = new MultiSliceRequest();
-        req.setKey(key); 
-        req.setCount(1000);
+        MultiSliceRequest req = makeMultiSliceRequest(key);
         req.reversed = true;
-        req.setColumn_parent(cp);
         req.setColumn_slices(Arrays.asList(columnSliceFrom("e", "a"), columnSliceFrom("g", "d")));
         assertColumnNameMatches(Arrays.asList("g", "f", "e", "d", "c", "b", "a"), server.get_multi_slice(req));
     }
@@ -103,13 +97,9 @@ public class MultiSliceTest extends SchemaLoader
     @Test(expected=InvalidRequestException.class)
     public void test_that_column_slice_is_proper() throws TException
     {
-      ColumnParent cp = new ColumnParent("Standard1");
       ByteBuffer key = ByteBuffer.wrap("overlap".getBytes());
-      MultiSliceRequest req = new MultiSliceRequest();
-      req.setKey(key);
-      req.setCount(1000);
+      MultiSliceRequest req = makeMultiSliceRequest(key);
       req.reversed = true;
-      req.setColumn_parent(cp);
       req.setColumn_slices(Arrays.asList(columnSliceFrom("a", "e"), columnSliceFrom("g", "d")));
       assertColumnNameMatches(Arrays.asList("a", "b", "c", "d", "e", "f", "g"), server.get_multi_slice(req));
     }
@@ -120,11 +110,9 @@ public class MultiSliceTest extends SchemaLoader
         ColumnParent cp = new ColumnParent("Standard1");
         ByteBuffer key = ByteBuffer.wrap("overlap_reversed_count".getBytes());
         addTheAlphabetToRow(key, cp);
-        MultiSliceRequest req = new MultiSliceRequest();
-        req.setKey(key); 
+        MultiSliceRequest req = makeMultiSliceRequest(key);
         req.setCount(6);
         req.reversed = true;
-        req.setColumn_parent(cp);
         req.setColumn_slices(Arrays.asList(columnSliceFrom("e", "a"), columnSliceFrom("g", "d")));
         assertColumnNameMatches(Arrays.asList("g", "e", "d", "c", "b", "a"), server.get_multi_slice(req)); 
     }
@@ -143,10 +131,7 @@ public class MultiSliceTest extends SchemaLoader
     
     private static void assertColumnNameMatches(List<String> expected , List<ColumnOrSuperColumn> actual)
     {
-        if (actual.size() != expected.size())
-        {
-            Assert.assertEquals(actual+" "+expected +" did not have same number of elements", actual.size() , expected.size() );
-        }
+        Assert.assertEquals(actual+" "+expected +" did not have same number of elements", actual.size(), expected.size());
         for (int i = 0 ; i< expected.size() ; i++)
         {
             Assert.assertEquals(actual.get(i) +" did not equal "+ expected.get(i), 
@@ -161,5 +146,4 @@ public class MultiSliceTest extends SchemaLoader
         cs.setFinish(ByteBufferUtil.bytes(endInclusive));
         return cs;
     }
- 
 }

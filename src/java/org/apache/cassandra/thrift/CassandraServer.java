@@ -2004,10 +2004,10 @@ public class CassandraServer implements Cassandra.Iface
         if (startSessionIfRequested())
         {
             Map<String, String> traceParameters = ImmutableMap.of("key", ByteBufferUtil.bytesToHex(request.key),
-                "column_parent", request.column_parent.toString(),
-                "consistency_level", request.consistency_level.name(),
-                "count", String.valueOf(request.count),
-                "column_slices", request.column_slices.toString());
+                                                                  "column_parent", request.column_parent.toString(),
+                                                                  "consistency_level", request.consistency_level.name(),
+                                                                  "count", String.valueOf(request.count),
+                                                                  "column_slices", request.column_slices.toString());
             Tracing.instance.begin("get_multi_slice", traceParameters);
         }
         else
@@ -2021,7 +2021,7 @@ public class CassandraServer implements Cassandra.Iface
             state().hasColumnFamilyAccess(keyspace, request.getColumn_parent().column_family, Permission.SELECT);
             CFMetaData metadata = ThriftValidation.validateColumnFamily(keyspace, request.getColumn_parent().column_family);
             if (metadata.cfType == ColumnFamilyType.Super)
-              throw new org.apache.cassandra.exceptions.InvalidRequestException("get_multi_slice does not support super columns");
+                throw new org.apache.cassandra.exceptions.InvalidRequestException("get_multi_slice does not support super columns");
             ThriftValidation.validateColumnParent(metadata, request.getColumn_parent());
             org.apache.cassandra.db.ConsistencyLevel consistencyLevel = ThriftConversion.fromThrift(request.getConsistency_level());
             consistencyLevel.validateForRead(keyspace);
@@ -2029,15 +2029,15 @@ public class CassandraServer implements Cassandra.Iface
             ColumnSlice [] slices = new ColumnSlice[request.getColumn_slices().size()];
             for (int i = 0 ; i < request.getColumn_slices().size() ; i++)
             {
-              fixOptionalSliceParameters(request.getColumn_slices().get(i));
-              Composite start = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).start);
-              Composite finish = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).finish);
-              int compare = metadata.comparator.compare(start, finish);
-              if (!request.reversed && compare > 0) 
-                  throw new InvalidRequestException("for slice " + i + " in a forward slice start should be less than or equal to finish");
-              if (request.reversed && compare < 0)
-                  throw new InvalidRequestException("for slice " + i + " in a reverse slice finish should be less than or equal to start");
-              slices[i] = new ColumnSlice(start, finish);
+                fixOptionalSliceParameters(request.getColumn_slices().get(i));
+                Composite start = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).start);
+                Composite finish = metadata.comparator.fromByteBuffer(request.getColumn_slices().get(i).finish);
+                int compare = metadata.comparator.compare(start, finish);
+                if (!request.reversed && compare > 0)
+                    throw new InvalidRequestException(String.format("Column slice at index %d had start greater than finish", i));
+                else if (request.reversed && compare < 0)
+                    throw new InvalidRequestException(String.format("Reversed column slice at index %d had start less than finish", i));
+                slices[i] = new ColumnSlice(start, finish);
             }
             SliceQueryFilter filter = new SliceQueryFilter(slices, request.reversed, request.count);
             ThriftValidation.validateKey(metadata, request.key);
