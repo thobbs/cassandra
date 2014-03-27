@@ -857,6 +857,11 @@ public final class CFMetaData
         return getValueValidator(getColumnDefinition(column));
     }
 
+    public AbstractType<?> getValueValidatorForRegularColumn(ByteBuffer column)
+    {
+        return getValueValidator(getColumnDefinitionForRegularColumn(column));
+    }
+
     public AbstractType<?> getValueValidator(ColumnDefinition columnDefinition)
     {
         return columnDefinition == null
@@ -1202,6 +1207,15 @@ public final class CFMetaData
             return column_metadata.get(name);
     }
 
+    public ColumnDefinition getColumnDefinitionForRegularColumn(ByteBuffer name)
+    {
+        ColumnDefinition definition = column_metadata.get(name);
+        if (definition == null || definition.isThriftCompatible())
+            return definition;
+        else
+            return null;
+    }
+
     /**
      * Returns a ColumnDefinition given a full (internal) column name.
      */
@@ -1236,7 +1250,14 @@ public final class CFMetaData
         }
     }
 
-
+    public ColumnDefinition getColumnDefinitionFromColumnNameForRegularColumn(ByteBuffer columnName)
+    {
+        ColumnDefinition definition = getColumnDefinitionFromColumnName(columnName);
+        if (definition == null || definition.isThriftCompatible())
+            return definition;
+        else
+            return null;
+    }
 
     public ColumnDefinition getColumnDefinitionForIndex(String indexName)
     {

@@ -18,6 +18,7 @@
 package org.apache.cassandra.thrift;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.util.*;
 
 import org.apache.cassandra.serializers.MarshalException;
@@ -443,7 +444,7 @@ public class ThriftValidation
         if (!column.isSetTimestamp())
             throw new org.apache.cassandra.exceptions.InvalidRequestException("Column timestamp is required");
 
-        ColumnDefinition columnDef = metadata.getColumnDefinitionFromColumnName(column.name);
+        ColumnDefinition columnDef = metadata.getColumnDefinitionFromColumnNameForRegularColumn(column.name);
         try
         {
             AbstractType<?> validator = metadata.getValueValidator(columnDef);
@@ -568,7 +569,9 @@ public class ThriftValidation
             throw new org.apache.cassandra.exceptions.InvalidRequestException("No indexed columns present in index clause with operator EQ");
     }
 
-    // return true if index_clause contains an indexed columns with operator EQ
+    /**
+     * Returns true if index_clause contains an indexed column with an EQ operator expression
+     */
     public static boolean validateFilterClauses(CFMetaData metadata, List<IndexExpression> index_clause)
     throws org.apache.cassandra.exceptions.InvalidRequestException
     {
@@ -597,7 +600,7 @@ public class ThriftValidation
             if (expression.value.remaining() > 0xFFFF)
                 throw new org.apache.cassandra.exceptions.InvalidRequestException("Index expression values may not be larger than 64K");
 
-            AbstractType<?> valueValidator = Schema.instance.getValueValidator(metadata.ksName, metadata.cfName, expression.column_name);
+            AbstractType<?> valueValidator = metadata.getValueValidatorForRegularColumn(expression.column_name);
             try
             {
                 valueValidator.validate(expression.value);

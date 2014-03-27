@@ -306,7 +306,7 @@ public class Column implements OnDiskAtom
                                 ? ((CompositeType) metadata.comparator).extractLastComponent(name)
                                 : name;
 
-        AbstractType<?> valueValidator = metadata.getValueValidator(internalName);
+        AbstractType<?> valueValidator = metadata.getValueValidatorForRegularColumn(internalName);
         if (valueValidator != null)
             valueValidator.validate(value());
     }
