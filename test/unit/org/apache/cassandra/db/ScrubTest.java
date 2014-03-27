@@ -27,7 +27,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.utils.UUIDGen;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -272,4 +275,30 @@ public class ScrubTest extends SchemaLoader
         cfs.forceBlockingFlush();
     }
 
+    @Test
+    public void testScrubColumnValidation() throws InterruptedException, RequestExecutionException, ExecutionException
+    {
+        QueryProcessor.process("CREATE TABLE \"Keyspace1\".test_compact_static_columns (a bigint, b timeuuid, c boolean static, d text, PRIMARY KEY (a, b))", ConsistencyLevel.ONE);
+
+        Keyspace keyspace = Keyspace.open("Keyspace1");
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("test_compact_static_columns");
+
+        QueryProcessor.processInternal("INSERT INTO \"Keyspace1\".test_compact_static_columns (a, b, c, d) VALUES (123, c3db07e8-b602-11e3-bc6b-e0b9a54a6d93, true, 'foobar')");
+        cfs.forceBlockingFlush();
+        CompactionManager.instance.performScrub(cfs, false);
+    }
+
+    @Test
+    public void testColumnNameEqualToDefaultKeyAlias() throws org.apache.cassandra.exceptions.InvalidRequestException, ExecutionException, InterruptedException
+    {
+        Keyspace keyspace = Keyspace.open("Keyspace1");
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("UUIDKeys");
+
+        ColumnFamily cf = TreeMapBackedSortedColumns.factory.create("Keyspace1", "UUIDKeys");
+        cf.addColumn(column(CFMetaData.DEFAULT_KEY_ALIAS, "not a uuid", 1L));
+        RowMutation rm = new RowMutation("Keyspace1", ByteBufferUtil.bytes(UUIDGen.getTimeUUID()), cf);
+        rm.applyUnsafe();
+        cfs.forceBlockingFlush();
+        CompactionManager.instance.performScrub(cfs, false);
+    }
 }
