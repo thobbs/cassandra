@@ -216,7 +216,17 @@ public class SchemaLoader
                                            standardCFMD(ks1, "legacyleveled")
                                                                                .compactionStrategyClass(LeveledCompactionStrategy.class)
                                                                                .compactionStrategyOptions(leveledOptions),
-                                           standardCFMD(ks1, "UUIDKeys").keyValidator(UUIDType.instance)));
+                                           standardCFMD(ks1, "UUIDKeys").keyValidator(UUIDType.instance),
+                                           new CFMetaData(ks1,
+                                                          "MixedTypes",
+                                                          st,
+                                                          LongType.instance,
+                                                          null).keyValidator(UUIDType.instance).defaultValidator(BooleanType.instance),
+                                           new CFMetaData(ks1,
+                                                          "MixedTypesComposite",
+                                                          st,
+                                                          composite,
+                                                          null).keyValidator(composite).defaultValidator(BooleanType.instance)));
 
         // Keyspace 2
         schema.add(KSMetaData.testMetadata(ks2,
