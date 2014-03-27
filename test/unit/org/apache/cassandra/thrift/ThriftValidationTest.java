@@ -31,6 +31,8 @@ import org.apache.cassandra.locator.LocalStrategy;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import java.util.Arrays;
+
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertEquals;
 
@@ -106,6 +108,9 @@ public class ThriftValidationTest extends SchemaLoader
         column.setValue(ByteBufferUtil.bytes("not a uuid"));
         column.setTimestamp(1234);
         ThriftValidation.validateColumnData(metaData, column, false);
+
+        IndexExpression expression = new IndexExpression(ByteBufferUtil.bytes(CFMetaData.DEFAULT_KEY_ALIAS), IndexOperator.EQ, ByteBufferUtil.bytes("a"));
+        ThriftValidation.validateFilterClauses(metaData, Arrays.asList(expression));
     }
 
     @Test
