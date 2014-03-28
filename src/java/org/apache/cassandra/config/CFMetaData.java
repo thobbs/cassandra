@@ -852,16 +852,31 @@ public final class CFMetaData
             .toHashCode();
     }
 
+    /**
+     * Gets the validator for a column when dealing with CQL3 column names.
+     * For other cases, such as Thrift, compaction, etc, use getValueValidatorForRegularColumn(); otherwise, columns
+     * with names matching key and column aliases may get an incorrect validator.  (See CASSANDRA-6892 for details.)
+     */
     public AbstractType<?> getValueValidator(ByteBuffer column)
     {
         return getValueValidator(getColumnDefinition(column));
     }
 
+    /**
+     * Gets the validator for a column when not dealing with CQL3 column names.
+     * This should be used for Thrift, compaction, etc.
+     */
     public AbstractType<?> getValueValidatorForRegularColumn(ByteBuffer column)
     {
         return getValueValidator(getColumnDefinitionForRegularColumn(column));
     }
 
+    /**
+     * Given a ColumnDefinition, returns the validator for the column value.  When using this for Thrift, compaction,
+     * or any other non-CQL3 path, make sure the column definition was fetched through getColumnDefinitionForRegularColumn
+     * or getColumnDefinitionFromNameForRegularColumn; otherwise, columns with names matching key and column aliases
+     * may get an incorrect validator.  (See CASSANDRA-6892 for details.)
+     */
     public AbstractType<?> getValueValidator(ColumnDefinition columnDefinition)
     {
         return columnDefinition == null
@@ -1201,12 +1216,21 @@ public final class CFMetaData
      * and in particular for composite cfs, it should usually be only a
      * component of the full column name. If you have a full column name, use
      * getColumnDefinitionFromColumnName instead.
+     *
+     * This should only be used when dealing with CQL3 column names. For other cases, such as Thrift, compaction, etc,
+     * use getColumnDefinitionForRegularColumn(); otherwise, columns with names matching key and column aliases may get
+     * an incorrect definition.  (See CASSANDRA-6892 for details.)
      */
     public ColumnDefinition getColumnDefinition(ByteBuffer name)
     {
             return column_metadata.get(name);
     }
 
+    /**
+     * Returns the ColumnDefinition for a column.
+     *
+     * This should be used for Thrift, compaction, etc.  When deailing with CQL3 column names, use getColumnDefinition().
+     */
     public ColumnDefinition getColumnDefinitionForRegularColumn(ByteBuffer name)
     {
         ColumnDefinition definition = column_metadata.get(name);
@@ -1218,6 +1242,10 @@ public final class CFMetaData
 
     /**
      * Returns a ColumnDefinition given a full (internal) column name.
+     *
+     * This should only be used when dealing with CQL3 column names. For other cases, such as Thrift, compaction, etc,
+     * use getColumnDefinitionFromColumnNameForRegularColumn(); otherwise, columns with names matching key and column
+     * aliases may get an incorrect definition.  (See CASSANDRA-6892 for details.)
      */
     public ColumnDefinition getColumnDefinitionFromColumnName(ByteBuffer columnName)
     {
@@ -1250,6 +1278,12 @@ public final class CFMetaData
         }
     }
 
+    /**
+     * Returns a ColumnDefinition given a full (internal) column name.
+     *
+     * This should be used for Thrift, compaction, etc.  When deailing with CQL3 column names, use
+     * getColumnDefinitionFromColumnName().
+     */
     public ColumnDefinition getColumnDefinitionFromColumnNameForRegularColumn(ByteBuffer columnName)
     {
         ColumnDefinition definition = getColumnDefinitionFromColumnName(columnName);
