@@ -300,5 +300,7 @@ public class ScrubTest extends SchemaLoader
         rm.applyUnsafe();
         cfs.forceBlockingFlush();
         CompactionManager.instance.performScrub(cfs, false);
+
+        assertEquals(1, cfs.getSSTables().size());
     }
 }
