@@ -288,8 +288,11 @@ public class ScrubTest extends SchemaLoader
         CompactionManager.instance.performScrub(cfs, false);
     }
 
+    /**
+     * Tests CASSANDRA-6892 (key aliases being used improperly for validation)
+     */
     @Test
-    public void testColumnNameEqualToDefaultKeyAlias() throws org.apache.cassandra.exceptions.InvalidRequestException, ExecutionException, InterruptedException
+    public void testColumnNameEqualToDefaultKeyAlias() throws ExecutionException, InterruptedException
     {
         Keyspace keyspace = Keyspace.open("Keyspace1");
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore("UUIDKeys");
