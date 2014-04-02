@@ -278,24 +278,17 @@ public class CompositeType extends AbstractCompositeType
             // We could safely return true here, but there's a minor optimization: if the first component is restricted
             // to a single value, we can check that the second component falls within the min/max for that component
             // (and repeat for all components).
-            for (int i = 0; i < Math.min(start.length, finish.length); i++)
+            for (int i = 0; i < Math.min(Math.min(start.length, finish.length), minColumnNames.size()); i++)
             {
-                ByteBuffer s = i < start.length ? start[i] : ByteBufferUtil.EMPTY_BYTE_BUFFER;
-                ByteBuffer f = i < finish.length ? finish[i] : ByteBufferUtil.EMPTY_BYTE_BUFFER;
                 AbstractType<?> t = types.get(i);
 
                 // we already know the first component falls within its min/max range (otherwise we wouldn't get here)
-                if (i > 0)
-                {
-                    if (!s.equals(ByteBufferUtil.EMPTY_BYTE_BUFFER) && t.compare(s, maxColumnNames.get(i)) > 0)
-                        continue outer;  // slice start falls after sstable max for this component; move to the next slice
-                    else if (!f.equals(ByteBufferUtil.EMPTY_BYTE_BUFFER) && t.compare(f, minColumnNames.get(i)) < 0)
-                        continue outer;  // slice finish falls before sstable min for this component; move to the next slice
-                }
+                if (i > 0 && !t.intersects(minColumnNames.get(i), maxColumnNames.get(i), start[i], finish[i]))
+                    continue outer;
 
                 // if this component isn't equal in the start and finish, we don't need to check any more
-                if (i >= start.length || i >= finish.length || types.get(i).compare(s, f) != 0)
-                    return true;
+                if (t.compare(start[i], finish[i]) != 0)
+                    break;
             }
             return true;
         }
