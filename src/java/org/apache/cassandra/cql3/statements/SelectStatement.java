@@ -1279,14 +1279,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             if (parameters.isDistinct)
                 validateDistinctSelection(selection.getColumnsList(), cfDef.partitionKeys());
 
-            Term prepLimit = null;
-            if (limit != null)
-            {
-                prepLimit = limit.prepare(limitReceiver());
-                prepLimit.collectMarkerSpecification(names);
-            }
-
-            SelectStatement stmt = new SelectStatement(cfDef, names.size(), parameters, selection, prepLimit);
+            SelectStatement stmt = new SelectStatement(cfDef, names.size(), parameters, selection, prepareLimit(names));
 
             /*
              * WHERE clause. For a given entity, rules are:
@@ -1302,12 +1295,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             {
                 CFDefinition.Name name = cfDef.get(rel.getEntity());
                 if (name == null)
-                {
-                    if (containsAlias(rel.getEntity()))
-                        throw new InvalidRequestException(String.format("Aliases aren't allowed in where clause ('%s')", rel));
-                    else
-                        throw new InvalidRequestException(String.format("Undefined name %s in where clause ('%s')", rel.getEntity(), rel));
-                }
+                    handleUnrecognizedEntity(name, rel);
 
                 ColumnDefinition def = cfDef.cfm.getColumnDefinition(name.name.key);
                 stmt.restrictedNames.add(name);
@@ -1318,32 +1306,95 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                         hasQueriableClusteringColumnIndex = true;
                 }
 
-                switch (name.kind)
-                {
-                    case KEY_ALIAS:
-                        stmt.keyRestrictions[name.position] = updateRestriction(cfm, name, stmt.keyRestrictions[name.position], rel, names);
-                        break;
-                    case COLUMN_ALIAS:
-                        stmt.columnRestrictions[name.position] = updateRestriction(cfm, name, stmt.columnRestrictions[name.position], rel, names);
-                        break;
-                    case VALUE_ALIAS:
-                        throw new InvalidRequestException(String.format("Predicates on the non-primary-key column (%s) of a COMPACT table are not yet supported", name.name));
-                    case COLUMN_METADATA:
-                    case STATIC:
-                        // We only all IN on the row key and last clustering key so far, never on non-PK columns, and this even if there's an index
-                        Restriction r = updateRestriction(cfm, name, stmt.metadataRestrictions.get(name), rel, names);
-                        if (r.isIN() && !((Restriction.IN)r).canHaveOnlyOneValue())
-                            // Note: for backward compatibility reason, we conside a IN of 1 value the same as a EQ, so we let that slide.
-                            throw new InvalidRequestException(String.format("IN predicates on non-primary-key columns (%s) is not yet supported", name));
-                        stmt.metadataRestrictions.put(name, r);
-                        break;
-                }
+                updateRestrictionsForRelation(stmt, name, rel, cfm, names);
             }
 
-            /*
-             * At this point, the select statement if fully constructed, but we still have a few things to validate
-             */
+             // At this point, the select statement if fully constructed, but we still have a few things to validate
+            processPartitionKeyRestrictions(stmt, cfDef, hasQueriableIndex);
 
+            // All (or none) of the partition key columns have been specified;
+            // hence there is no need to turn these restrictions into index expressions.
+            if (!stmt.usesSecondaryIndexing)
+                stmt.restrictedNames.removeAll(cfDef.partitionKeys());
+
+            if (stmt.selectsOnlyStaticColumns && stmt.hasClusteringColumnsRestriction())
+                throw new InvalidRequestException("Cannot restrict clustering columns when selecting only static columns");
+
+            processColumnRestrictions(stmt, cfDef, hasQueriableIndex);
+
+            // Covers indexes on the first clustering column (among others).
+            if (stmt.isKeyRange && hasQueriableClusteringColumnIndex)
+                stmt.usesSecondaryIndexing = true;
+
+            if (!stmt.usesSecondaryIndexing)
+                stmt.restrictedNames.removeAll(cfDef.clusteringColumns());
+
+            // Even if usesSecondaryIndexing is false at this point, we'll still have to use one if
+            // there is restrictions not covered by the PK.
+            if (!stmt.metadataRestrictions.isEmpty())
+            {
+                if (!hasQueriableIndex)
+                    throw new InvalidRequestException("No indexed columns present in by-columns clause with Equal operator");
+                stmt.usesSecondaryIndexing = true;
+            }
+
+            if (stmt.usesSecondaryIndexing)
+                validateSecondaryIndexSelections(stmt);
+
+            if (!stmt.parameters.orderings.isEmpty())
+                processOrderingClause(stmt, cfDef);
+
+            checkNeedsFiltering(stmt);
+
+            return new ParsedStatement.Prepared(stmt, names);
+        }
+
+        /** Throws an InvalidRequestException for an unrecognized identifier in the WHERE clause */
+        private void handleUnrecognizedEntity(CFDefinition.Name name, Relation relation) throws InvalidRequestException
+        {
+            if (containsAlias(relation.getEntity()))
+                throw new InvalidRequestException(String.format("Aliases aren't allowed in where clause ('%s')", relation));
+            else
+                throw new InvalidRequestException(String.format("Undefined name %s in where clause ('%s')", relation.getEntity(), relation));
+        }
+
+        /** Returns a Term for the limit or null if no limit is set */
+        private Term prepareLimit(VariableSpecifications boundNames) throws InvalidRequestException
+        {
+            if (limit == null)
+                return null;
+
+            Term prepLimit = limit.prepare(limitReceiver());
+            prepLimit.collectMarkerSpecification(boundNames);
+            return prepLimit;
+        }
+
+        private void updateRestrictionsForRelation(SelectStatement stmt, CFDefinition.Name name, Relation relation, CFMetaData cfm, VariableSpecifications names) throws InvalidRequestException
+        {
+            switch (name.kind)
+            {
+                case KEY_ALIAS:
+                    stmt.keyRestrictions[name.position] = updateRestriction(cfm, name, stmt.keyRestrictions[name.position], relation, names);
+                    break;
+                case COLUMN_ALIAS:
+                    stmt.columnRestrictions[name.position] = updateRestriction(cfm, name, stmt.columnRestrictions[name.position], relation, names);
+                    break;
+                case VALUE_ALIAS:
+                    throw new InvalidRequestException(String.format("Predicates on the non-primary-key column (%s) of a COMPACT table are not yet supported", name.name));
+                case COLUMN_METADATA:
+                case STATIC:
+                    // We only all IN on the row key and last clustering key so far, never on non-PK columns, and this even if there's an index
+                    Restriction r = updateRestriction(cfm, name, stmt.metadataRestrictions.get(name), relation, names);
+                    if (r.isIN() && !((Restriction.IN)r).canHaveOnlyOneValue())
+                        // Note: for backward compatibility reason, we conside a IN of 1 value the same as a EQ, so we let that slide.
+                        throw new InvalidRequestException(String.format("IN predicates on non-primary-key columns (%s) is not yet supported", name));
+                    stmt.metadataRestrictions.put(name, r);
+                    break;
+            }
+        }
+
+        private void processPartitionKeyRestrictions(SelectStatement stmt, CFDefinition cfDef, boolean hasQueriableIndex) throws InvalidRequestException
+        {
             // If there is a queriable index, no special condition are required on the other restrictions.
             // But we still need to know 2 things:
             //   - If we don't have a queriable index, is the query ok
@@ -1418,22 +1469,17 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 }
                 previous = cname;
             }
+        }
 
-            // All (or none) of the partition key columns have been specified;
-            // hence there is no need to turn these restrictions into index expressions.
-            if (!stmt.usesSecondaryIndexing)
-                stmt.restrictedNames.removeAll(cfDef.partitionKeys());
-
-            if (stmt.selectsOnlyStaticColumns && stmt.hasClusteringColumnsRestriction())
-                throw new InvalidRequestException("Cannot restrict clustering columns when selecting only static columns");
-
+        private void processColumnRestrictions(SelectStatement stmt, CFDefinition cfDef, boolean hasQueriableIndex) throws InvalidRequestException
+        {
             // If a clustering key column is restricted by a non-EQ relation, all preceding
             // columns must have a EQ, and all following must have no restriction. Unless
             // the column is indexed that is.
-            canRestrictFurtherComponents = true;
-            previous = null;
+            boolean canRestrictFurtherComponents = true;
+            CFDefinition.Name previous = null;
             boolean previousIsSlice = false;
-            iter = cfDef.clusteringColumns().iterator();
+            Iterator<CFDefinition.Name> iter = cfDef.clusteringColumns().iterator();
             for (int i = 0; i < stmt.columnRestrictions.length; i++)
             {
                 CFDefinition.Name cname = iter.next();
@@ -1485,135 +1531,130 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
 
                 previous = cname;
             }
+        }
 
-            // Covers indexes on the first clustering column (among others).
-            if (stmt.isKeyRange && hasQueriableClusteringColumnIndex)
-                stmt.usesSecondaryIndexing = true;
+        private void validateSecondaryIndexSelections(SelectStatement stmt) throws InvalidRequestException
+        {
+            if (stmt.keyIsInRelation)
+                throw new InvalidRequestException("Select on indexed columns and with IN clause for the PRIMARY KEY are not supported");
+            // When the user only select static columns, the intent is that we don't query the whole partition but just
+            // the static parts. But 1) we don't have an easy way to do that with 2i and 2) since we don't support index on static columns
+            // so far, 2i means that you've restricted a non static column, so the query is somewhat non-sensical.
+            if (stmt.selectsOnlyStaticColumns)
+                throw new InvalidRequestException("Queries using 2ndary indexes don't support selecting only static columns");
+        }
 
-            if (!stmt.usesSecondaryIndexing)
-                stmt.restrictedNames.removeAll(cfDef.clusteringColumns());
-
-            // Even if usesSecondaryIndexing is false at this point, we'll still have to use one if
-            // there is restrictions not covered by the PK.
-            if (!stmt.metadataRestrictions.isEmpty())
-            {
-                if (!hasQueriableIndex)
-                    throw new InvalidRequestException("No indexed columns present in by-columns clause with Equal operator");
-                stmt.usesSecondaryIndexing = true;
-            }
-
+        private void verifyOrderingIsAllowed(SelectStatement stmt) throws InvalidRequestException
+        {
             if (stmt.usesSecondaryIndexing)
+                throw new InvalidRequestException("ORDER BY with 2ndary indexes is not supported.");
+
+            if (stmt.isKeyRange)
+                throw new InvalidRequestException("ORDER BY is only supported when the partition key is restricted by an EQ or an IN.");
+        }
+
+        private void handleUnrecognizedOrderingColumn(ColumnIdentifier column) throws InvalidRequestException
+        {
+            if (containsAlias(column))
+                throw new InvalidRequestException(String.format("Aliases are not allowed in order by clause ('%s')", column));
+            else
+                throw new InvalidRequestException(String.format("Order by on unknown column %s", column));
+        }
+
+        private void processOrderingClause(SelectStatement stmt, CFDefinition cfDef) throws InvalidRequestException
+        {
+            verifyOrderingIsAllowed(stmt);
+
+            // If we order an IN query, we'll have to do a manual sort post-query. Currently, this sorting requires that we
+            // have queried the column on which we sort (TODO: we should update it to add the column on which we sort to the one
+            // queried automatically, and then removing it from the resultSet afterwards if needed)
+            if (stmt.keyIsInRelation)
             {
-                if (stmt.keyIsInRelation)
-                    throw new InvalidRequestException("Select on indexed columns and with IN clause for the PRIMARY KEY are not supported");
-                // When the user only select static columns, the intent is that we don't query the whole partition but just
-                // the static parts. But 1) we don't have an easy way to do that with 2i and 2) since we don't support index on static columns
-                // so far, 2i means that you've restricted a non static column, so the query is somewhat non-sensical.
-                if (stmt.selectsOnlyStaticColumns)
-                    throw new InvalidRequestException("Queries using 2ndary indexes don't support selecting only static columns");
-            }
-
-            if (!stmt.parameters.orderings.isEmpty())
-            {
-                if (stmt.usesSecondaryIndexing)
-                    throw new InvalidRequestException("ORDER BY with 2ndary indexes is not supported.");
-
-                if (stmt.isKeyRange)
-                    throw new InvalidRequestException("ORDER BY is only supported when the partition key is restricted by an EQ or an IN.");
-
-                // If we order an IN query, we'll have to do a manual sort post-query. Currently, this sorting requires that we
-                // have queried the column on which we sort (TODO: we should update it to add the column on which we sort to the one
-                // queried automatically, and then removing it from the resultSet afterwards if needed)
-                if (stmt.keyIsInRelation)
+                stmt.orderingIndexes = new HashMap<CFDefinition.Name, Integer>();
+                for (ColumnIdentifier column : stmt.parameters.orderings.keySet())
                 {
-                    stmt.orderingIndexes = new HashMap<CFDefinition.Name, Integer>();
-                    for (ColumnIdentifier column : stmt.parameters.orderings.keySet())
-                    {
-                        final CFDefinition.Name name = cfDef.get(column);
-                        if (name == null)
-                        {
-                            if (containsAlias(column))
-                                throw new InvalidRequestException(String.format("Aliases are not allowed in order by clause ('%s')", column));
-                            else
-                                throw new InvalidRequestException(String.format("Order by on unknown column %s", column));
-                        }
-
-                        if (selectClause.isEmpty()) // wildcard
-                        {
-                            stmt.orderingIndexes.put(name, Iterables.indexOf(cfDef, new Predicate<CFDefinition.Name>()
-                                                                                    {
-                                                                                        public boolean apply(CFDefinition.Name n)
-                                                                                        {
-                                                                                            return name.equals(n);
-                                                                                        }
-                                                                                    }));
-                        }
-                        else
-                        {
-                            boolean hasColumn = false;
-                            for (int i = 0; i < selectClause.size(); i++)
-                            {
-                                RawSelector selector = selectClause.get(i);
-                                if (name.name.equals(selector.selectable))
-                                {
-                                    stmt.orderingIndexes.put(name, i);
-                                    hasColumn = true;
-                                    break;
-                                }
-                            }
-
-                            if (!hasColumn)
-                                throw new InvalidRequestException("ORDER BY could not be used on columns missing in select clause.");
-                        }
-                    }
-                }
-
-                Boolean[] reversedMap = new Boolean[cfDef.clusteringColumnsCount()];
-                int i = 0;
-                for (Map.Entry<ColumnIdentifier, Boolean> entry : stmt.parameters.orderings.entrySet())
-                {
-                    ColumnIdentifier column = entry.getKey();
-                    boolean reversed = entry.getValue();
-
-                    CFDefinition.Name name = cfDef.get(column);
+                    final CFDefinition.Name name = cfDef.get(column);
                     if (name == null)
+                        handleUnrecognizedOrderingColumn(column);
+
+                    if (selectClause.isEmpty()) // wildcard
                     {
-                        if (containsAlias(column))
-                            throw new InvalidRequestException(String.format("Aliases are not allowed in order by clause ('%s')", column));
-                        else
-                            throw new InvalidRequestException(String.format("Order by on unknown column %s", column));
+                        stmt.orderingIndexes.put(name, Iterables.indexOf(cfDef, new Predicate<CFDefinition.Name>()
+                        {
+                            public boolean apply(CFDefinition.Name n)
+                            {
+                                return name.equals(n);
+                            }
+                        }));
                     }
-
-                    if (name.kind != CFDefinition.Name.Kind.COLUMN_ALIAS)
-                        throw new InvalidRequestException(String.format("Order by is currently only supported on the clustered columns of the PRIMARY KEY, got %s", column));
-
-                    if (i++ != name.position)
-                        throw new InvalidRequestException(String.format("Order by currently only support the ordering of columns following their declared order in the PRIMARY KEY"));
-
-                    reversedMap[name.position] = (reversed != isReversedType(name));
-                }
-
-                // Check that all boolean in reversedMap, if set, agrees
-                Boolean isReversed = null;
-                for (Boolean b : reversedMap)
-                {
-                    // Column on which order is specified can be in any order
-                    if (b == null)
-                        continue;
-
-                    if (isReversed == null)
+                    else
                     {
-                        isReversed = b;
-                        continue;
+                        boolean hasColumn = false;
+                        for (int i = 0; i < selectClause.size(); i++)
+                        {
+                            RawSelector selector = selectClause.get(i);
+                            if (name.name.equals(selector.selectable))
+                            {
+                                stmt.orderingIndexes.put(name, i);
+                                hasColumn = true;
+                                break;
+                            }
+                        }
+
+                        if (!hasColumn)
+                            throw new InvalidRequestException("ORDER BY could not be used on columns missing in select clause.");
                     }
-                    if (isReversed != b)
-                        throw new InvalidRequestException(String.format("Unsupported order by relation"));
                 }
-                assert isReversed != null;
-                stmt.isReversed = isReversed;
+            }
+            stmt.isReversed = isReversed(stmt, cfDef);
+        }
+
+        private boolean isReversed(SelectStatement stmt, CFDefinition cfDef) throws InvalidRequestException
+        {
+            Boolean[] reversedMap = new Boolean[cfDef.clusteringColumnsCount()];
+            int i = 0;
+            for (Map.Entry<ColumnIdentifier, Boolean> entry : stmt.parameters.orderings.entrySet())
+            {
+                ColumnIdentifier column = entry.getKey();
+                boolean reversed = entry.getValue();
+
+                CFDefinition.Name name = cfDef.get(column);
+                if (name == null)
+                    handleUnrecognizedOrderingColumn(column);
+
+                if (name.kind != CFDefinition.Name.Kind.COLUMN_ALIAS)
+                    throw new InvalidRequestException(String.format("Order by is currently only supported on the clustered columns of the PRIMARY KEY, got %s", column));
+
+                if (i++ != name.position)
+                    throw new InvalidRequestException(String.format("Order by currently only support the ordering of columns following their declared order in the PRIMARY KEY"));
+
+                reversedMap[name.position] = (reversed != isReversedType(name));
             }
 
-            // Make sure this queries is allowed (note: non key range non indexed cannot involve filtering underneath)
+            // Check that all boolean in reversedMap, if set, agrees
+            Boolean isReversed = null;
+            for (Boolean b : reversedMap)
+            {
+                // Column on which order is specified can be in any order
+                if (b == null)
+                    continue;
+
+                if (isReversed == null)
+                {
+                    isReversed = b;
+                    continue;
+                }
+                if (isReversed != b)
+                    throw new InvalidRequestException(String.format("Unsupported order by relation"));
+            }
+            assert isReversed != null;
+            return isReversed;
+        }
+
+        /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
+        private void checkNeedsFiltering(SelectStatement stmt) throws InvalidRequestException
+        {
+            // non-key-range non-indexed queries cannot involve filtering underneath
             if (!parameters.allowFiltering && (stmt.isKeyRange || stmt.usesSecondaryIndexing))
             {
                 // We will potentially filter data if either:
@@ -1621,10 +1662,8 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 //  - Have no index expression and the column filter is not the identity
                 if (stmt.restrictedNames.size() > 1 || (stmt.restrictedNames.isEmpty() && !stmt.columnFilterIsIdentity()))
                     throw new InvalidRequestException("Cannot execute this query as it might involve data filtering and thus may have unpredictable performance. "
-                                                    + "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING");
+                            + "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING");
             }
-
-            return new ParsedStatement.Prepared(stmt, names);
         }
 
         private void validateDistinctSelection(Collection<CFDefinition.Name> requestedColumns, Collection<CFDefinition.Name> partitionKey)
