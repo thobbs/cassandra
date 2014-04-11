@@ -1291,11 +1291,12 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
              */
             boolean hasQueriableIndex = false;
             boolean hasQueriableClusteringColumnIndex = false;
-            for (Relation rel : whereClause)
+            for (Relation relation : whereClause)
             {
+                SingleColumnRelation rel = (SingleColumnRelation) relation;  // TODO special handling for multi-column
                 CFDefinition.Name name = cfDef.get(rel.getEntity());
                 if (name == null)
-                    handleUnrecognizedEntity(name, rel);
+                    handleUnrecognizedEntity(rel.getEntity(), rel);
 
                 ColumnDefinition def = cfDef.cfm.getColumnDefinition(name.name.key);
                 stmt.restrictedNames.add(name);
@@ -1350,12 +1351,12 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         }
 
         /** Throws an InvalidRequestException for an unrecognized identifier in the WHERE clause */
-        private void handleUnrecognizedEntity(CFDefinition.Name name, Relation relation) throws InvalidRequestException
+        private void handleUnrecognizedEntity(ColumnIdentifier entity, Relation relation) throws InvalidRequestException
         {
-            if (containsAlias(relation.getEntity()))
+            if (containsAlias(entity))
                 throw new InvalidRequestException(String.format("Aliases aren't allowed in where clause ('%s')", relation));
             else
-                throw new InvalidRequestException(String.format("Undefined name %s in where clause ('%s')", relation.getEntity(), relation));
+                throw new InvalidRequestException(String.format("Undefined name %s in where clause ('%s')", entity, relation));
         }
 
         /** Returns a Term for the limit or null if no limit is set */
@@ -1369,7 +1370,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             return prepLimit;
         }
 
-        private void updateRestrictionsForRelation(SelectStatement stmt, CFDefinition.Name name, Relation relation, CFMetaData cfm, VariableSpecifications names) throws InvalidRequestException
+        private void updateRestrictionsForRelation(SelectStatement stmt, CFDefinition.Name name, SingleColumnRelation relation, CFMetaData cfm, VariableSpecifications names) throws InvalidRequestException
         {
             switch (name.kind)
             {
@@ -1694,7 +1695,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             return new ColumnSpecification(keyspace(), columnFamily(), new ColumnIdentifier("[limit]", true), Int32Type.instance);
         }
 
-        Restriction updateRestriction(CFMetaData cfm, CFDefinition.Name name, Restriction restriction, Relation newRel, VariableSpecifications boundNames) throws InvalidRequestException
+        Restriction updateRestriction(CFMetaData cfm, CFDefinition.Name name, Restriction restriction, SingleColumnRelation newRel, VariableSpecifications boundNames) throws InvalidRequestException
         {
             ColumnSpecification receiver = name;
             if (newRel.onToken)

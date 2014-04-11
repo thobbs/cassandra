@@ -880,18 +880,18 @@ relationType returns [Relation.Type op]
     ;
 
 relation[List<Relation> clauses]
-    : name=cident type=relationType t=term { $clauses.add(new Relation(name, type, t)); }
+    : name=cident type=relationType t=term { $clauses.add(new SingleColumnRelation(name, type, t)); }
     | K_TOKEN 
         { List<ColumnIdentifier> l = new ArrayList<ColumnIdentifier>(); }
           '(' name1=cident { l.add(name1); } ( ',' namen=cident { l.add(namen); })* ')'
         type=relationType t=term
         {
             for (ColumnIdentifier id : l)
-                $clauses.add(new Relation(id, type, t, true));
+                $clauses.add(new SingleColumnRelation(id, type, t, true));
         }
     | name=cident K_IN { Term.Raw marker = null; } (QMARK { marker = newINBindVariables(null); } | ':' mid=cident { marker = newINBindVariables(mid); })
-        { $clauses.add(new Relation(name, Relation.Type.IN, marker)); }
-    | name=cident K_IN { Relation rel = Relation.createInRelation($name.id); }
+        { $clauses.add(new SingleColumnRelation(name, Relation.Type.IN, marker)); }
+    | name=cident K_IN { SingleColumnRelation rel = SingleColumnRelation.createInRelation($name.id); }
        '(' ( f1=term { rel.addInValue(f1); } (',' fN=term { rel.addInValue(fN); } )* )? ')' { $clauses.add(rel); }
     | {
          List<ColumnIdentifier> ids = new ArrayList<ColumnIdentifier>();
@@ -907,7 +907,7 @@ relation[List<Relation> clauses]
               addRecognitionError(String.format("Number of values (" + terms.size() + ") in tuple notation doesn't match the number of column names (" + ids.size() + ")"));
           else
               for (int i = 0; i < ids.size(); i++)
-                  $clauses.add(new Relation(ids.get(i), type, terms.get(i), i == 0 ? null : ids.get(i-1)));
+                  $clauses.add(new SingleColumnRelation(ids.get(i), type, terms.get(i), i == 0 ? null : ids.get(i-1)));
       }
     | '(' relation[$clauses] ')'
     ;
