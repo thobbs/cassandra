@@ -1324,40 +1324,19 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     List<CFDefinition.Name> names = new ArrayList<>(rel.getEntities().size());
                     for (ColumnIdentifier entity : rel.getEntities())
                     {
-                        CFDefinition.Name name = cfDef.get(entity);
-                        if (name == null)
-                            handleUnrecognizedEntity(entity, rel);
-
-                        names.add(name);
-                        ColumnDefinition def = cfDef.cfm.getColumnDefinition(name.name.key);
-                        stmt.restrictedNames.add(name);
-                        if (def.isIndexed() && rel.operator() == Relation.Type.EQ)
-                        {
-                            hasQueriableIndex = true;
-                            if (name.kind == CFDefinition.Name.Kind.COLUMN_ALIAS)
-                                hasQueriableClusteringColumnIndex = true;
-                        }
+                        boolean[] queriable = processRelationEntity(stmt, relation, entity, cfDef);
+                        hasQueriableIndex |= queriable[0];
+                        hasQueriableClusteringColumnIndex |= queriable[1];
                     }
-
-                    updateRestrictionsForRelation(stmt, names, rel, cfm, boundNames);
+                    updateRestrictionsForRelation(stmt, names, rel, boundNames);
                 }
                 else
                 {
                     SingleColumnRelation rel = (SingleColumnRelation) relation;
-                    CFDefinition.Name name = cfDef.get(rel.getEntity());
-                    if (name == null)
-                        handleUnrecognizedEntity(rel.getEntity(), rel);
-
-                    ColumnDefinition def = cfDef.cfm.getColumnDefinition(name.name.key);
-                    stmt.restrictedNames.add(name);
-                    if (def.isIndexed() && rel.operator() == Relation.Type.EQ)
-                    {
-                        hasQueriableIndex = true;
-                        if (name.kind == CFDefinition.Name.Kind.COLUMN_ALIAS)
-                            hasQueriableClusteringColumnIndex = true;
-                    }
-
-                    updateRestrictionsForRelation(stmt, name, rel, cfm, boundNames);
+                    boolean[] queriable = processRelationEntity(stmt, relation, rel.getEntity(), cfDef);
+                    hasQueriableIndex |= queriable[0];
+                    hasQueriableClusteringColumnIndex |= queriable[1];
+                    updateRestrictionsForRelation(stmt, cfDef.get(rel.getEntity()), rel, boundNames);
                 }
             }
 
@@ -1401,11 +1380,24 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             return new ParsedStatement.Prepared(stmt, boundNames);
         }
 
+        /** Returns a pair of (hasQueriableIndex, hasQueriableClusteringColumnIndex) */
+        private boolean[] processRelationEntity(SelectStatement stmt, Relation relation, ColumnIdentifier entity, CFDefinition cfDef) throws InvalidRequestException
+        {
+            CFDefinition.Name name = cfDef.get(entity);
+            if (name == null)
+                handleUnrecognizedEntity(entity, relation);
+
+            stmt.restrictedNames.add(name);
+            if (cfDef.cfm.getColumnDefinition(name.name.key).isIndexed() && relation.operator() == Relation.Type.EQ)
+                return new boolean[]{true, name.kind == CFDefinition.Name.Kind.COLUMN_ALIAS};
+            return new boolean[]{false, false};
+        }
+
         /** Throws an InvalidRequestException for an unrecognized identifier in the WHERE clause */
         private void handleUnrecognizedEntity(ColumnIdentifier entity, Relation relation) throws InvalidRequestException
         {
             if (containsAlias(entity))
-                throw new InvalidRequestException(String.format("Aliases aren't allowed in where clause ('%s')", relation));
+                throw new InvalidRequestException(String.format("Aliases aren't allowed in the where clause ('%s')", relation));
             else
                 throw new InvalidRequestException(String.format("Undefined name %s in where clause ('%s')", entity, relation));
         }
@@ -1421,7 +1413,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             return prepLimit;
         }
 
-        private void updateRestrictionsForRelation(SelectStatement stmt, List<CFDefinition.Name> names, MultiColumnRelation relation, CFMetaData cfm, VariableSpecifications boundNames) throws InvalidRequestException
+        private void updateRestrictionsForRelation(SelectStatement stmt, List<CFDefinition.Name> names, MultiColumnRelation relation, VariableSpecifications boundNames) throws InvalidRequestException
         {
             List<CFDefinition.Name> toUpdate = new ArrayList<>();
             List<CFDefinition.Name> toCreate = new ArrayList<>();
@@ -1548,22 +1540,22 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             }
         }
 
-        private void updateRestrictionsForRelation(SelectStatement stmt, CFDefinition.Name name, SingleColumnRelation relation, CFMetaData cfm, VariableSpecifications names) throws InvalidRequestException
+        private void updateRestrictionsForRelation(SelectStatement stmt, CFDefinition.Name name, SingleColumnRelation relation, VariableSpecifications names) throws InvalidRequestException
         {
             switch (name.kind)
             {
                 case KEY_ALIAS:
-                    stmt.keyRestrictions[name.position] = updateRestriction(cfm, name, stmt.keyRestrictions[name.position], relation, names);
+                    stmt.keyRestrictions[name.position] = updateRestriction(name, stmt.keyRestrictions[name.position], relation, names);
                     break;
                 case COLUMN_ALIAS:
-                    stmt.columnRestrictions[name.position] = updateRestriction(cfm, name, stmt.columnRestrictions[name.position], relation, names);
+                    stmt.columnRestrictions[name.position] = updateRestriction(name, stmt.columnRestrictions[name.position], relation, names);
                     break;
                 case VALUE_ALIAS:
                     throw new InvalidRequestException(String.format("Predicates on the non-primary-key column (%s) of a COMPACT table are not yet supported", name.name));
                 case COLUMN_METADATA:
                 case STATIC:
                     // We only all IN on the row key and last clustering key so far, never on non-PK columns, and this even if there's an index
-                    Restriction r = updateRestriction(cfm, name, stmt.metadataRestrictions.get(name), relation, names);
+                    Restriction r = updateRestriction(name, stmt.metadataRestrictions.get(name), relation, names);
                     if (r.isIN() && !((Restriction.IN)r).canHaveOnlyOneValue())
                         // Note: for backward compatibility reason, we conside a IN of 1 value the same as a EQ, so we let that slide.
                         throw new InvalidRequestException(String.format("IN predicates on non-primary-key columns (%s) is not yet supported", name));
@@ -1876,7 +1868,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             return new ColumnSpecification(keyspace(), columnFamily(), new ColumnIdentifier("[limit]", true), Int32Type.instance);
         }
 
-        Restriction updateRestriction(CFMetaData cfm, CFDefinition.Name name, Restriction existingRestriction, SingleColumnRelation newRel, VariableSpecifications boundNames) throws InvalidRequestException
+        Restriction updateRestriction(CFDefinition.Name name, Restriction existingRestriction, SingleColumnRelation newRel, VariableSpecifications boundNames) throws InvalidRequestException
         {
             ColumnSpecification receiver = name;
             if (newRel.onToken)

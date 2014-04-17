@@ -25,6 +25,7 @@ public abstract class Relation {
     {
         EQ, LT, LTE, GTE, GT, IN;
 
+        @Override
         public String toString()
         {
             switch (this)
