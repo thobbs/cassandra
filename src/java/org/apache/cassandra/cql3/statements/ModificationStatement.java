@@ -247,7 +247,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
 
     public void addKeyValue(CFDefinition.Name name, Term value) throws InvalidRequestException
     {
-        addKeyValues(name, new Restriction.EQ(value, false));
+        addKeyValues(name, new SingleColumnRestriction.EQ(value, false));
     }
 
     public void processWhereClause(List<Relation> whereClause, VariableSpecifications names) throws InvalidRequestException
@@ -276,7 +276,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
                     {
                         Term t = rel.getValue().prepare(name);
                         t.collectMarkerSpecification(names);
-                        restriction = new Restriction.EQ(t, false);
+                        restriction = new SingleColumnRestriction.EQ(t, false);
                     }
                     else if (name.kind == CFDefinition.Name.Kind.KEY_ALIAS && rel.operator() == Relation.Type.IN)
                     {
@@ -284,7 +284,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
                         {
                             Term t = rel.getValue().prepare(name);
                             t.collectMarkerSpecification(names);
-                            restriction = Restriction.IN.create(t);
+                            restriction = new SingleColumnRestriction.InWithMarker((Lists.Marker)t);
                         }
                         else
                         {
@@ -295,7 +295,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
                                 t.collectMarkerSpecification(names);
                                 values.add(t);
                             }
-                            restriction = Restriction.IN.create(values);
+                            restriction = new SingleColumnRestriction.InWithValues(values);
                         }
                     }
                     else
@@ -325,7 +325,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
             if (r == null)
                 throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s", name));
 
-            List<ByteBuffer> values = r.values(variables);
+            List<ByteBuffer> values = r.values(name, variables);
 
             if (keyBuilder.remainingCount() == 1)
             {
@@ -418,7 +418,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
             }
             else
             {
-                List<ByteBuffer> values = r.values(variables);
+                List<ByteBuffer> values = r.values(name, variables);
                 assert values.size() == 1; // We only allow IN for row keys so far
                 ByteBuffer val = values.get(0);
                 if (val == null)
