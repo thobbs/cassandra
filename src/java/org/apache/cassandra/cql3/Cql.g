@@ -906,8 +906,7 @@ relation[List<Relation> clauses]
           if (ids.size() != terms.size())
               addRecognitionError(String.format("Number of values (" + terms.size() + ") in tuple notation doesn't match the number of column names (" + ids.size() + ")"));
           else
-              for (int i = 0; i < ids.size(); i++)
-                  $clauses.add(new SingleColumnRelation(ids.get(i), type, terms.get(i), i == 0 ? null : ids.get(i-1)));
+              $clauses.add(new MultiColumnRelation(ids, type, terms));
       }
     | '(' relation[$clauses] ')'
     ;

@@ -94,6 +94,11 @@ public class SingleColumnRelation extends Relation
         inValues.add(t);
     }
 
+    public boolean isMultiColumn()
+    {
+        return false;
+    }
+
     @Override
     public String toString()
     {

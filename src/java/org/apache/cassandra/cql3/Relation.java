@@ -17,17 +17,40 @@
  */
 package org.apache.cassandra.cql3;
 
-public class Relation {
+public abstract class Relation {
 
     protected Type relationType;
 
     public static enum Type
     {
         EQ, LT, LTE, GTE, GT, IN;
+
+        public String toString()
+        {
+            switch (this)
+            {
+                case EQ:
+                    return "=";
+                case LT:
+                    return "<";
+                case LTE:
+                    return "<=";
+                case GT:
+                    return ">";
+                case GTE:
+                    return ">=";
+                case IN:
+                    return "IN";
+                default:
+                    return this.name();
+            }
+        }
     }
 
     public Type operator()
     {
         return relationType;
     }
+
+    public abstract boolean isMultiColumn();
 }
