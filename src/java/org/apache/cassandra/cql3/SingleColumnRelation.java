@@ -67,9 +67,9 @@ public class SingleColumnRelation extends Relation
         this(entity, type, value, null, false, previousInTuple);
     }
 
-    public static SingleColumnRelation createInRelation(ColumnIdentifier entity)
+    public static SingleColumnRelation createInRelation(ColumnIdentifier entity, List<Term.Raw> inValues)
     {
-        return new SingleColumnRelation(entity, Type.IN, null, new ArrayList<Term.Raw>(), false, null);
+        return new SingleColumnRelation(entity, Type.IN, null, inValues, false, null);
     }
 
     public ColumnIdentifier getEntity()
@@ -87,11 +87,6 @@ public class SingleColumnRelation extends Relation
     {
         assert relationType == Type.IN;
         return inValues;
-    }
-
-    public void addInValue(Term.Raw t)
-    {
-        inValues.add(t);
     }
 
     public boolean isMultiColumn()

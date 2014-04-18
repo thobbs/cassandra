@@ -881,35 +881,75 @@ relationType returns [Relation.Type op]
 
 relation[List<Relation> clauses]
     : name=cident type=relationType t=term { $clauses.add(new SingleColumnRelation(name, type, t)); }
-    | K_TOKEN 
-        { List<ColumnIdentifier> l = new ArrayList<ColumnIdentifier>(); }
-          '(' name1=cident { l.add(name1); } ( ',' namen=cident { l.add(namen); })* ')'
-        type=relationType t=term
+    | K_TOKEN l=identifierTuple type=relationType t=term
         {
             for (ColumnIdentifier id : l)
                 $clauses.add(new SingleColumnRelation(id, type, t, true));
         }
-    | name=cident K_IN { Term.Raw marker = null; } (QMARK { marker = newINBindVariables(null); } | ':' mid=cident { marker = newINBindVariables(mid); })
+    | name=cident K_IN marker=inMarker
         { $clauses.add(new SingleColumnRelation(name, Relation.Type.IN, marker)); }
-    | name=cident K_IN { SingleColumnRelation rel = SingleColumnRelation.createInRelation($name.id); }
-       '(' ( f1=term { rel.addInValue(f1); } (',' fN=term { rel.addInValue(fN); } )* )? ')' { $clauses.add(rel); }
-    | {
-         List<ColumnIdentifier> ids = new ArrayList<ColumnIdentifier>();
-         List<Term.Raw> terms = new ArrayList<Term.Raw>();
-      }
-        '(' n1=cident { ids.add(n1); } (',' ni=cident { ids.add(ni); })* ')'
-        type=relationType
-        '(' t1=term { terms.add(t1); } (',' ti=term { terms.add(ti); })* ')'
-      {
-          if (type == Relation.Type.IN)
-              addRecognitionError("Cannot use IN relation with tuple notation");
-          if (ids.size() != terms.size())
-              addRecognitionError(String.format("Number of values (" + terms.size() + ") in tuple notation doesn't match the number of column names (" + ids.size() + ")"));
-          else
-              $clauses.add(new MultiColumnRelation(ids, type, terms));
-      }
+    | name=cident K_IN inValues=termTuple
+        { $clauses.add(SingleColumnRelation.createInRelation($name.id, inValues)); }
+    | ids=identifierTuple
+      ( K_IN
+          ( marker=inMarker
+              { $clauses.add(MultiColumnRelation.createSingleMarkerInRelation(ids, Relation.Type.IN, marker)); }
+          | termTuples=termTupleList
+              {
+                  for (List<Term.Raw> tuple : termTuples)
+                  {
+                      if (ids.size() != tuple.size())
+                      {
+                          addRecognitionError(String.format(
+                              "Number of values (" + tuple.size() +
+                              ") in tuple notation doesn't match the number of column names (" + ids.size() + ")"));
+                      }
+                  }
+                  $clauses.add(MultiColumnRelation.createLiteralInRelation(ids, Relation.Type.IN, termTuples));
+              }
+          | markers=markerTuple
+              { $clauses.add(MultiColumnRelation.createMultiMarkerInRelation(ids, Relation.Type.IN, markers)); }
+          )
+      | type=relationType terms=termTuple
+          {
+              if (ids.size() != terms.size())
+              {
+                  addRecognitionError(String.format(
+                      "Number of values (" + terms.size() +
+                      ") in tuple notation doesn't match the number of column names (" + ids.size() + ")"));
+              }
+              else
+                  $clauses.add(MultiColumnRelation.createNonInRelation(ids, type, terms));
+          }
+      )
     | '(' relation[$clauses] ')'
     ;
+
+inMarker returns [AbstractMarker.INRaw marker]
+    : QMARK { $marker = newINBindVariables(null); }
+    | ':' name=cident { $marker = newINBindVariables(name); }
+    ;
+
+identifierTuple returns [List<ColumnIdentifier> ids]
+    @init { $ids = new ArrayList<ColumnIdentifier>(); }
+    : '(' n1=cident { $ids.add(n1); } (',' ni=cident { $ids.add(ni); })* ')'
+    ;
+
+termTuple returns [List<Term.Raw> terms]
+    @init { $terms = new ArrayList<Term.Raw>(); }
+    : '(' t1=term { $terms.add(t1); } (',' ti=term { $terms.add(ti); })* ')'
+    ;
+
+termTupleList returns [List<List<Term.Raw>> termTuples]
+    @init { $termTuples = new ArrayList<>(); }
+    : '(' t1=termTuple { $termTuples.add(t1); } (',' ti=termTuple { $termTuples.add(ti); })* ')'
+    ;
+
+markerTuple returns [List<AbstractMarker.INRaw> markers]
+    @init { $markers = new ArrayList<AbstractMarker.INRaw>(); }
+    : '(' m1=inMarker { $markers.add(m1); } (',' mi=inMarker { $markers.add(mi); })* ')'
+    ;
+
 
 comparatorType returns [CQL3Type t]
     : c=native_type     { $t = c; }

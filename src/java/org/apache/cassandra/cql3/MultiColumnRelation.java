@@ -24,20 +24,38 @@ public class MultiColumnRelation extends Relation
     private final List<ColumnIdentifier> entities;
     private final List<Term.Raw> values;
     private final List<List<Term.Raw>> inValues;
-    private final AbstractMarker.INRaw inMarker;
 
-    private MultiColumnRelation(List<ColumnIdentifier> entities, Type relationType, List<Term.Raw> values, List<List<Term.Raw>> inValues, AbstractMarker.INRaw inMarker)
+    private final AbstractMarker.INRaw inMarker;
+    private final List<AbstractMarker.INRaw> inMarkers;
+
+    private MultiColumnRelation(List<ColumnIdentifier> entities, Type relationType, List<Term.Raw> values, List<List<Term.Raw>> inValues, AbstractMarker.INRaw inMarker, List<AbstractMarker.INRaw> inMarkers)
     {
         this.entities = entities;
         this.relationType = relationType;
         this.values = values;
         this.inValues = inValues;
         this.inMarker = inMarker;
+        this.inMarkers = inMarkers;
     }
 
-    public MultiColumnRelation(List<ColumnIdentifier> entities, Type relationType, List<Term.Raw> values)
+    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Type relationType, List<Term.Raw> values)
     {
-        this(entities, relationType, values, null, null);
+        return new MultiColumnRelation(entities, relationType, values, null, null, null);
+    }
+
+    public static MultiColumnRelation createLiteralInRelation(List<ColumnIdentifier> entities, Type relationType, List<List<Term.Raw>> inValues)
+    {
+        return new MultiColumnRelation(entities, relationType, null, inValues, null, null);
+    }
+
+    public static MultiColumnRelation createSingleMarkerInRelation(List<ColumnIdentifier> entities, Type relationType, AbstractMarker.INRaw inMarker)
+    {
+        return new MultiColumnRelation(entities, relationType, null, null, inMarker, null);
+    }
+
+    public static MultiColumnRelation createMultiMarkerInRelation(List<ColumnIdentifier> entities, Type relationType, List<AbstractMarker.INRaw> inMarkers)
+    {
+        return new MultiColumnRelation(entities, relationType, null, null, null, inMarkers);
     }
 
     public List<ColumnIdentifier> getEntities()
