@@ -22,40 +22,41 @@ import java.util.List;
 public class MultiColumnRelation extends Relation
 {
     private final List<ColumnIdentifier> entities;
-    private final List<Term.Raw> values;
-    private final List<List<Term.Raw>> inValues;
+    private final Tuples.Raw marker;
+    private final Tuples.Literal values;
 
-    private final AbstractMarker.INRaw inMarker;
-    private final List<AbstractMarker.INRaw> inMarkers;
+    private final List<Tuples.Literal> inValues;
+    private final Tuples.INRaw inMarker;
 
-    private MultiColumnRelation(List<ColumnIdentifier> entities, Type relationType, List<Term.Raw> values, List<List<Term.Raw>> inValues, AbstractMarker.INRaw inMarker, List<AbstractMarker.INRaw> inMarkers)
+    private MultiColumnRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.Literal values, Tuples.Raw marker, List<Tuples.Literal> inValues, Tuples.INRaw inMarker)
     {
         this.entities = entities;
         this.relationType = relationType;
         this.values = values;
+        this.marker = marker;
+
         this.inValues = inValues;
         this.inMarker = inMarker;
-        this.inMarkers = inMarkers;
     }
 
-    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Type relationType, List<Term.Raw> values)
+    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.Literal literal)
     {
-        return new MultiColumnRelation(entities, relationType, values, null, null, null);
+        return new MultiColumnRelation(entities, relationType, literal, null, null, null);
     }
 
-    public static MultiColumnRelation createLiteralInRelation(List<ColumnIdentifier> entities, Type relationType, List<List<Term.Raw>> inValues)
+    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.Raw marker)
     {
-        return new MultiColumnRelation(entities, relationType, null, inValues, null, null);
+        return new MultiColumnRelation(entities, relationType, null, marker, null, null);
     }
 
-    public static MultiColumnRelation createSingleMarkerInRelation(List<ColumnIdentifier> entities, Type relationType, AbstractMarker.INRaw inMarker)
+    public static MultiColumnRelation createInRelation(List<ColumnIdentifier> entities, Type relationType, List<Tuples.Literal> inValues)
     {
-        return new MultiColumnRelation(entities, relationType, null, null, inMarker, null);
+        return new MultiColumnRelation(entities, relationType, null, null, inValues, null);
     }
 
-    public static MultiColumnRelation createMultiMarkerInRelation(List<ColumnIdentifier> entities, Type relationType, List<AbstractMarker.INRaw> inMarkers)
+    public static MultiColumnRelation createSingleMarkerInRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.INRaw inMarker)
     {
-        return new MultiColumnRelation(entities, relationType, null, null, null, inMarkers);
+        return new MultiColumnRelation(entities, relationType, null, null, null, inMarker);
     }
 
     public List<ColumnIdentifier> getEntities()
@@ -63,17 +64,22 @@ public class MultiColumnRelation extends Relation
         return entities;
     }
 
-    public List<Term.Raw> getValues()
+    public Tuples.Literal getValues()
     {
         return values;
     }
 
-    public List<List<Term.Raw>> getInValues()
+    public Tuples.Raw getMarker()
+    {
+        return marker;
+    }
+
+    public List<Tuples.Literal> getInValues()
     {
         return inValues;
     }
 
-    public AbstractMarker.INRaw getInMarker()
+    public Tuples.INRaw getInMarker()
     {
         return inMarker;
     }
@@ -88,9 +94,23 @@ public class MultiColumnRelation extends Relation
     {
         if (relationType == Type.IN)
         {
-            // TODO
-            return "(...) IN (...)";
-            // return String.format("%s IN %s", entity, inValues);
+            StringBuilder sb = new StringBuilder("(");
+            for (int i=0; i < entities.size(); i++)
+            {
+                sb.append(entities.get(i));
+                if (i != entities.size() - 1)
+                    sb.append(", ");
+            }
+
+            sb.append(") IN (");
+            for (int i = 0; i < inValues.size(); i++)
+            {
+                sb.append(inValues.get(i));
+                if (i != inValues.size() - 1)
+                    sb.append(", ");
+            }
+            sb.append(")");
+            return sb.toString();
         }
         else
         {
@@ -104,16 +124,8 @@ public class MultiColumnRelation extends Relation
 
             sb.append(") ");
             sb.append(relationType);
-            sb.append(" (");
-
-            for (int i=0; i < values.size(); i++)
-            {
-                sb.append(values.get(i));
-                if (i != values.size() - 1)
-                    sb.append(", ");
-            }
-
-            sb.append(")");
+            sb.append(" ");
+            sb.append(values);
             return sb.toString();
         }
     }

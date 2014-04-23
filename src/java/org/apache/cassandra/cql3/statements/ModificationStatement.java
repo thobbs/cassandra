@@ -325,7 +325,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
             if (r == null)
                 throw new InvalidRequestException(String.format("Missing mandatory PRIMARY KEY part %s", name));
 
-            List<ByteBuffer> values = r.values(name, variables);
+            List<ByteBuffer> values = r.values(variables);
 
             if (keyBuilder.remainingCount() == 1)
             {
@@ -418,7 +418,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
             }
             else
             {
-                List<ByteBuffer> values = r.values(name, variables);
+                List<ByteBuffer> values = r.values(variables);
                 assert values.size() == 1; // We only allow IN for row keys so far
                 ByteBuffer val = values.get(0);
                 if (val == null)

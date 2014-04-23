@@ -38,11 +38,11 @@ public interface Restriction
     public boolean isMultiColumn();
 
     // Only supported for EQ and IN, but it's convenient to have here
-    public List<ByteBuffer> values(CFDefinition.Name name, List<ByteBuffer> variables) throws InvalidRequestException;
+    public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException;
 
     public static interface EQ extends Restriction
     {
-        public List<ByteBuffer> values(CFDefinition.Name name, List<ByteBuffer> variables) throws InvalidRequestException;
+        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException;
     }
 
     public static interface IN extends Restriction
@@ -52,26 +52,20 @@ public interface Restriction
 
     public static interface Slice extends Restriction
     {
-
-        public List<ByteBuffer> values(CFDefinition.Name name, List<ByteBuffer> variables) throws InvalidRequestException;
-
+        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException;
 
         /** Returns true if the start or end bound (depending on the argument) is set, false otherwise */
-        public boolean hasBound(CFDefinition.Name name, Bound b);
+        public boolean hasBound(Bound b);
 
-        public ByteBuffer bound(CFDefinition.Name name, Bound b, List<ByteBuffer> variables) throws InvalidRequestException;
+        public ByteBuffer bound(Bound b, List<ByteBuffer> variables) throws InvalidRequestException;
 
         /** Returns true if the start or end bound (depending on the argument) is inclusive, false otherwise */
-        public boolean isInclusive(CFDefinition.Name name, Bound b);
+        public boolean isInclusive(Bound b);
 
-        public Relation.Type getRelation(CFDefinition.Name name, Bound eocBound, Bound inclusiveBound);
+        public Relation.Type getRelation(Bound eocBound, Bound inclusiveBound);
 
-        public IndexOperator getIndexOperator(CFDefinition.Name name, Bound b);
+        public IndexOperator getIndexOperator(Bound b);
 
-        public void setBound(CFDefinition.Name name, Relation.Type type, Term t) throws InvalidRequestException;
-
-        public void setFinalColumn(CFDefinition.Name name);
-
-        public CFDefinition.Name getFinalColumn();
+        public void setBound(Relation.Type type, Term t) throws InvalidRequestException;
     }
 }

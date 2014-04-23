@@ -33,11 +33,6 @@ public abstract class SingleColumnRestriction implements Restriction
         return false;
     }
 
-    public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
-    {
-        return values(null, variables);
-    }
-
     public static class EQ extends SingleColumnRestriction implements Restriction.EQ
     {
         private final Term value;
@@ -49,7 +44,7 @@ public abstract class SingleColumnRestriction implements Restriction
             this.onToken = onToken;
         }
 
-        public List<ByteBuffer> values(CFDefinition.Name name, List<ByteBuffer> variables) throws InvalidRequestException
+        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
         {
             return Collections.singletonList(value.bindAndGet(variables));
         }
@@ -90,9 +85,9 @@ public abstract class SingleColumnRestriction implements Restriction
             this.values = values;
         }
 
-        public List<ByteBuffer> values(CFDefinition.Name name, List<ByteBuffer> variables) throws InvalidRequestException
+        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
         {
-            List<ByteBuffer> buffers = new ArrayList<ByteBuffer>(values.size());
+            List<ByteBuffer> buffers = new ArrayList<>(values.size());
             for (Term value : values)
                 buffers.add(value.bindAndGet(variables));
             return buffers;
@@ -139,7 +134,7 @@ public abstract class SingleColumnRestriction implements Restriction
             this.marker = marker;
         }
 
-        public List<ByteBuffer> values(CFDefinition.Name name, List<ByteBuffer> variables) throws InvalidRequestException
+        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
         {
             Lists.Value lval = marker.bind(variables);
             if (lval == null)
@@ -184,7 +179,6 @@ public abstract class SingleColumnRestriction implements Restriction
         private final Term[] bounds;
         private final boolean[] boundInclusive;
         private final boolean onToken;
-        private CFDefinition.Name finalColumnName;
 
         public Slice(boolean onToken)
         {
@@ -208,7 +202,7 @@ public abstract class SingleColumnRestriction implements Restriction
             return false;
         }
 
-        public List<ByteBuffer> values(CFDefinition.Name name, List<ByteBuffer> variables) throws InvalidRequestException
+        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
         {
             throw new UnsupportedOperationException();
         }
@@ -218,49 +212,24 @@ public abstract class SingleColumnRestriction implements Restriction
             return onToken;
         }
 
-        public void setFinalColumn(CFDefinition.Name name)
-        {
-            finalColumnName = name;
-        }
-
-        public CFDefinition.Name getFinalColumn()
-        {
-            return finalColumnName;
-        }
-
-        public boolean hasBound(Bound b)
-        {
-            return hasBound(null, b);
-        }
-
         /** Returns true if the start or end bound (depending on the argument) is set, false otherwise */
-        public boolean hasBound(CFDefinition.Name name, Bound b)
+        public boolean hasBound(Bound b)
         {
             return bounds[b.idx] != null;
         }
 
         public ByteBuffer bound(Bound b, List<ByteBuffer> variables) throws InvalidRequestException
         {
-            return bound(null, b, variables);
-        }
-
-        public ByteBuffer bound(CFDefinition.Name name, Bound b, List<ByteBuffer> variables) throws InvalidRequestException
-        {
             return bounds[b.idx].bindAndGet(variables);
         }
 
-        public boolean isInclusive(Bound b)
-        {
-            return isInclusive(null, b);
-        }
-
         /** Returns true if the start or end bound (depending on the argument) is inclusive, false otherwise */
-        public boolean isInclusive(CFDefinition.Name name, Bound b)
+        public boolean isInclusive(Bound b)
         {
             return bounds[b.idx] == null || boundInclusive[b.idx];
         }
 
-        public Relation.Type getRelation(CFDefinition.Name name, Bound eocBound, Bound inclusiveBound)
+        public Relation.Type getRelation(Bound eocBound, Bound inclusiveBound)
         {
             switch (eocBound)
             {
@@ -272,7 +241,7 @@ public abstract class SingleColumnRestriction implements Restriction
             throw new AssertionError();
         }
 
-        public IndexOperator getIndexOperator(CFDefinition.Name name, Bound b)
+        public IndexOperator getIndexOperator(Bound b)
         {
             switch (b)
             {
@@ -284,7 +253,7 @@ public abstract class SingleColumnRestriction implements Restriction
             throw new AssertionError();
         }
 
-        public void setBound(CFDefinition.Name name, Relation.Type type, Term t) throws InvalidRequestException
+        public void setBound(Relation.Type type, Term t) throws InvalidRequestException
         {
             Bound b;
             boolean inclusive;
@@ -311,7 +280,8 @@ public abstract class SingleColumnRestriction implements Restriction
             }
 
             if (bounds[b.idx] != null)
-                throw new InvalidRequestException(String.format("Invalid restrictions found on %s", name));
+                throw new InvalidRequestException(String.format(
+                        "More than one restriction was found for the %s bound", b.name().toLowerCase()));
 
             bounds[b.idx] = t;
             boundInclusive[b.idx] = inclusive;

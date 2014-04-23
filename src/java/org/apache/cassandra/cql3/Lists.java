@@ -150,7 +150,7 @@ public abstract class Lists
         }
     }
 
-    /*
+    /**
      * Basically similar to a Value, but with some non-pure function (that need
      * to be evaluated at execution time) in it.
      *
@@ -200,6 +200,9 @@ public abstract class Lists
         }
     }
 
+    /**
+     * A marker for List values and IN relations
+     */
     public static class Marker extends AbstractMarker
     {
         protected Marker(int bindIndex, ColumnSpecification receiver)
