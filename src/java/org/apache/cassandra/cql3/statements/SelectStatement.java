@@ -1503,7 +1503,9 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             {
                 case EQ:
                 {
-                    Restriction restriction = new MultiColumnRestriction.EQ(relation.getValue().prepare(names), onToken);
+                    Term t = relation.getValue().prepare(names);
+                    t.collectMarkerSpecification(boundNames);
+                    Restriction restriction = new MultiColumnRestriction.EQ(t, onToken);
                     for (CFDefinition.Name name : toCreate)
                         stmt.columnRestrictions[name.position] = restriction;
                     break;
@@ -1528,7 +1530,9 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     else
                     {
                         Tuples.INRaw rawMarker = relation.getInMarker();
-                        restriction = new MultiColumnRestriction.InWithMarker(rawMarker.prepare(names));
+                        AbstractMarker t = rawMarker.prepare(names);
+                        t.collectMarkerSpecification(boundNames);
+                        restriction = new MultiColumnRestriction.InWithMarker(t);
                     }
                     for (CFDefinition.Name name : toCreate)
                         stmt.columnRestrictions[name.position] = restriction;
@@ -1541,6 +1545,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 case GTE:
                 {
                     Term t = relation.getValue().prepare(names);
+                    t.collectMarkerSpecification(boundNames);
                     for (CFDefinition.Name name : names)
                     {
                         MultiColumnRestriction.Slice restriction;

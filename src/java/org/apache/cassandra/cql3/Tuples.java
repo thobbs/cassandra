@@ -57,7 +57,6 @@ public class Tuples
             List<Term> values = new ArrayList<>(elements.size());
             boolean allTerminal = true;
             Iterator<? extends ColumnSpecification> specIterator = receivers.iterator();
-            List<AbstractType<?>> types = new ArrayList<>(receivers.size());
             for (Term.Raw rt : elements)
             {
                 ColumnSpecification spec = specIterator.next();
@@ -67,10 +66,8 @@ public class Tuples
                     allTerminal = false;
 
                 values.add(t);
-                types.add(spec.type);
             }
-            CompositeType type = CompositeType.getInstance(types);
-            DelayedValue value = new DelayedValue(values, type);
+            DelayedValue value = new DelayedValue(values);
             return allTerminal ? value.bind(Collections.<ByteBuffer>emptyList()) : value;
         }
 
@@ -106,17 +103,15 @@ public class Tuples
     public static class Value extends Term.InTerminal
     {
         public final ByteBuffer[] elements;
-        public final CompositeType type;
 
-        public Value(ByteBuffer[] elements, CompositeType type)
+        public Value(ByteBuffer[] elements)
         {
             this.elements = elements;
-            this.type = type;
         }
 
         public static Value fromSerialized(ByteBuffer bytes, CompositeType type)
         {
-            return new Value(type.split(bytes), type);
+            return new Value(type.split(bytes));
         }
 
         public ByteBuffer get()
@@ -136,12 +131,10 @@ public class Tuples
     public static class DelayedValue extends Term.NonTerminal
     {
         public final List<Term> elements;
-        public final CompositeType type;
 
-        public DelayedValue(List<Term> elements, CompositeType type)
+        public DelayedValue(List<Term> elements)
         {
             this.elements = elements;
-            this.type = type;
         }
 
         public boolean containsBindMarker()
@@ -166,7 +159,21 @@ public class Tuples
             {
                 buffers[i] = elements.get(i).bindAndGet(values);
             }
-            return new Value(buffers, type);
+            return new Value(buffers);
+        }
+
+        @Override
+        public String toString()
+        {
+            StringBuilder sb = new StringBuilder("(");
+            for (int i = 0; i < elements.size(); i++)
+            {
+                sb.append(elements.get(i));
+                if (i < elements.size() - 1)
+                    sb.append(", ");
+            }
+            sb.append(')');
+            return sb.toString();
         }
     }
 

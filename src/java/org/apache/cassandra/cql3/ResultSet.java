@@ -272,8 +272,6 @@ public class ResultSet
 
             Iterator<ColumnSpecification> iter = names.iterator();
             ColumnSpecification first = iter.next();
-            if (first == null)
-                return true;
             while (iter.hasNext())
             {
                 ColumnSpecification name = iter.next();
