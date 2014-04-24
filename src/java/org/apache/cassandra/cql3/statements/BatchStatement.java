@@ -305,9 +305,14 @@ public class BatchStatement implements CQLStatement, MeasurableForPreparedCache
 
     public ResultMessage executeInternal(QueryState queryState) throws RequestValidationException, RequestExecutionException
     {
+        return executeInternal(queryState, QueryOptions.DEFAULT);
+    }
+
+    public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    {
         assert !hasConditions;
 
-        for (IMutation mutation : getMutations(new PreparedBatchVariables(Collections.<ByteBuffer>emptyList()), true, null, queryState.getTimestamp()))
+        for (IMutation mutation : getMutations(new PreparedBatchVariables(options.getValues()), true, null, queryState.getTimestamp()))
             mutation.apply();
         return null;
     }

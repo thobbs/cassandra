@@ -17,8 +17,8 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import org.apache.cassandra.cql3.AbstractMarker;
 import org.apache.cassandra.cql3.Term;
-import org.apache.cassandra.cql3.Lists;
 
 import java.util.List;
 
@@ -52,7 +52,7 @@ public interface MultiColumnRestriction extends Restriction
 
     public static class InWithMarker extends SingleColumnRestriction.InWithMarker
     {
-        public InWithMarker(Lists.Marker marker)
+        public InWithMarker(AbstractMarker marker)
         {
             super(marker);
         }

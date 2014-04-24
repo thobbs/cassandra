@@ -907,16 +907,15 @@ relation[List<Relation> clauses]
     | ids=tupleOfIdentifiers
       ( K_IN
           ( '(' ')'
-              { $clauses.add(MultiColumnRelation.createInRelation(ids, Relation.Type.IN, new ArrayList<Tuples.Literal>())); }
+              { $clauses.add(MultiColumnRelation.createInRelation(ids, new ArrayList<Tuples.Literal>())); }
           | tupleInMarker=inMarkerForTuple /* (a, b, c) IN ? */
-              { $clauses.add(MultiColumnRelation.createSingleMarkerInRelation(ids, Relation.Type.IN, tupleInMarker)); }
+              { $clauses.add(MultiColumnRelation.createSingleMarkerInRelation(ids, tupleInMarker)); }
           | literals=tupleOfTupleLiterals /* (a, b, c) IN ((1, 2, 3), (4, 5, 6), ...) */
               {
-                  $clauses.add(MultiColumnRelation.createInRelation(ids, Relation.Type.IN, literals));
+                  $clauses.add(MultiColumnRelation.createInRelation(ids, literals));
               }
-          /* | markers=tupleOfMarkersForTuples // (a, b, c) IN (?, ?, ...)
-              { $clauses.add(MultiColumnRelation.createInRelation(ids, Relation.Type.IN, markers)); }
-          */
+          | markers=tupleOfMarkersForTuples /* (a, b, c) IN (?, ?, ...) */
+              { $clauses.add(MultiColumnRelation.createInRelation(ids, markers)); }
           )
       | type=relationType literal=tupleLiteral /* (a, b, c) > (1, 2, 3) or (a, b, c) > (?, ?, ?) */
           {

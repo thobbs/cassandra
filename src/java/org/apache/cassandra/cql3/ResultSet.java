@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.buffer.ChannelBuffers;
 
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -273,6 +272,8 @@ public class ResultSet
 
             Iterator<ColumnSpecification> iter = names.iterator();
             ColumnSpecification first = iter.next();
+            if (first == null)
+                return true;
             while (iter.hasNext())
             {
                 ColumnSpecification name = iter.next();

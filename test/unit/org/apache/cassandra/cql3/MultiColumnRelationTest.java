@@ -19,16 +19,26 @@ package org.apache.cassandra.cql3;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CollectionType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.MD5Digest;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import java.util.Iterator;
-import java.util.List;
+import java.nio.ByteBuffer;
+import java.util.*;
 
 import static org.apache.cassandra.cql3.QueryProcessor.process;
 import static org.apache.cassandra.cql3.QueryProcessor.processInternal;
@@ -81,6 +91,23 @@ public class MultiColumnRelationTest
                 throw exc.getCause();
             throw exc;
         }
+    }
+
+    private MD5Digest prepare(String query) throws RequestValidationException
+    {
+        ResultMessage.Prepared prepared = QueryProcessor.prepare(String.format(query, keyspace), clientState, false);
+        return prepared.statementId;
+    }
+
+    private UntypedResultSet executePrepared(MD5Digest statementId, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    {
+        CQLStatement statement = QueryProcessor.staticGetPrepared(statementId);
+        ResultMessage message = statement.executeInternal(QueryState.forInternalCalls(), options);
+
+        if (message instanceof ResultMessage.Rows)
+            return new UntypedResultSet(((ResultMessage.Rows)message).result);
+        else
+            return null;
     }
 
     @Test(expected=SyntaxException.class)
@@ -175,6 +202,18 @@ public class MultiColumnRelationTest
     public void testClusteringColumnsOutOfOrderInEquality() throws Throwable
     {
         execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (d, c, b) = (3, 2, 1)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testBadType() throws Throwable
+    {
+        execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) = (1, 2, 'foobar')");
+    }
+
+    @Test(expected=SyntaxException.class)
+    public void testSingleColumnTupleRelation() throws Throwable
+    {
+        execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND b = (1, 2, 3)");
     }
 
     @Test
@@ -481,6 +520,466 @@ public class MultiColumnRelationTest
         checkRow(3, results, 1, 0, 0, 0);
         checkRow(4, results, 1, 0, 1, 0);
         checkRow(5, results, 1, 0, 1, 1);
+    }
+
+    // prepare statement tests
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPreparePartitionAndClusteringColumnEquality() throws Throwable
+    {
+        prepare("SELECT * FROM %s.single_clustering WHERE (a, b) = (?, ?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareDifferentTupleLengths() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE (b, c) > (?, ?, ?)");
+    }
+
+    @Test
+    public void testPrepareEmptyIN() throws Throwable
+    {
+        MD5Digest id = prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ()");
+        UntypedResultSet results = executePrepared(id, makeIntOptions());
+        assertTrue(results.isEmpty());
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPreparePartitionKeyInequality() throws Throwable
+    {
+        prepare("SELECT * FROM %s.single_partition WHERE (a) > (?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPreparePartitionKeyEquality() throws Throwable
+    {
+        prepare("SELECT * FROM %s.single_partition WHERE (a) = (?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareRestrictNonPrimaryKey() throws Throwable
+    {
+        prepare("SELECT * FROM %s.single_partition WHERE (b) = (?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareMixEqualityAndInequality() throws Throwable
+    {
+        prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) = (?) AND (b) > (?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareMixMultipleInequalitiesOnSameBound() throws Throwable
+    {
+        prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) > (?) AND (b) > (?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareClusteringColumnsOutOfOrderInInequality() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (d, c, b) > (?, ?, ?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareSkipClusteringColumnInEquality() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (c, d) = (?, ?)");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareSkipClusteringColumnInInequality() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (c, d) > (?, ?)");
+    }
+
+    @Test
+    public void testPreparedClusteringColumnEquality() throws Throwable
+    {
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 0, 0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 1, 0)");
+        MD5Digest id = prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) = (?)");
+        UntypedResultSet results = executePrepared(id, makeIntOptions(0));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 0);
+    }
+
+    @Test
+    public void testPreparedClusteringColumnEqualitySingleMarker() throws Throwable
+    {
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 0, 0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 1, 0)");
+        MD5Digest id = prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) = ?");
+        UntypedResultSet results = executePrepared(id, options(composite(0)));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 0);
+    }
+
+    @Test
+    public void testPreparedSingleClusteringColumnInequality() throws Throwable
+    {
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 0, 0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 1, 0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 2, 0)");
+
+        MD5Digest id = prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) > (?)");
+        UntypedResultSet results = executePrepared(id, makeIntOptions(0));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 0);
+        checkRow(1, results, 0, 2, 0);
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) >= (?)"), makeIntOptions(1));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 0);
+        checkRow(1, results, 0, 2, 0);
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) < (?)"), makeIntOptions(2));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 0);
+        checkRow(1, results, 0, 1, 0);
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) <= (?)"), makeIntOptions(1));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 0);
+        checkRow(1, results, 0, 1, 0);
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) > (?) AND (b) < (?)"), makeIntOptions(0, 2));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0);
+    }
+
+    @Test
+    public void testPreparedSingleClusteringColumnInequalitySingleMarker() throws Throwable
+    {
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 0, 0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 1, 0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 2, 0)");
+
+        MD5Digest id = prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) > ?");
+        UntypedResultSet results = executePrepared(id, options(composite(0)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 0);
+        checkRow(1, results, 0, 2, 0);
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) >= ?"), options(composite(1)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 0);
+        checkRow(1, results, 0, 2, 0);
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) < ?"), options(composite(2)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 0);
+        checkRow(1, results, 0, 1, 0);
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) <= ?"), options(composite(1)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 0);
+        checkRow(1, results, 0, 1, 0);
+
+
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) > ? AND (b) < ?"),
+                options(composite(0), composite(2)));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0);
+    }
+
+    @Test
+    public void testPrepareMultipleClusteringColumnInequality() throws Throwable
+    {
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 1)");
+
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 1, 1)");
+
+        UntypedResultSet results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) > (?)"), makeIntOptions(0));
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(2, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c) > (?, ?)"), makeIntOptions(1, 0));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 1, 0);
+        checkRow(1, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare
+                ("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (?, ?, ?)"), makeIntOptions(1, 1, 0));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (?, ?, ?) AND (b) < (?)"),
+                makeIntOptions(0, 1, 0, 1));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 1, 1);
+
+        results = executePrepared(prepare
+                ("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (?, ?, ?) AND (b, c) < (?, ?)"),
+                makeIntOptions(0, 1, 1, 1, 1));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (?, ?, ?) AND (b, c, d) < (?, ?, ?)"),
+                makeIntOptions(0, 1, 1, 1, 1, 0));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+
+        // reversed
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) > (?) ORDER BY b DESC, c DESC, d DESC"),
+                makeIntOptions(0));
+        assertEquals(3, results.size());
+        checkRow(2, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (?, ?, ?) AND (b, c) < (?, ?) ORDER BY b DESC, c DESC, d DESC"),
+                makeIntOptions(0, 1, 1, 1, 1));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+    }
+    @Test
+    public void testPrepareMultipleClusteringColumnInequalitySingleMarker() throws Throwable
+    {
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 1)");
+
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 1, 1)");
+
+        UntypedResultSet results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) > ?"), options(composite(0)));
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(2, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c) > ?"), options(composite(1, 0)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 1, 0);
+        checkRow(1, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare
+                ("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ?"), options(composite(1, 1, 0)));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b) < ?"),
+                options(composite(0, 1, 0), composite(1)));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 1, 1);
+
+        results = executePrepared(prepare
+                ("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b, c) < ?"),
+                options(composite(0, 1, 1), composite(1, 1)));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b, c, d) < ?"),
+                options(composite(0, 1, 1), composite(1, 1, 0)));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+
+        // reversed
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) > ? ORDER BY b DESC, c DESC, d DESC"),
+                options(composite(0)));
+        assertEquals(3, results.size());
+        checkRow(2, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b, c) < ? ORDER BY b DESC, c DESC, d DESC"),
+                options(composite(0, 1, 1), composite(1, 1)));
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+    }
+
+    @Test
+    public void testPrepareLiteralIn() throws Throwable
+    {
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 1)");
+
+        UntypedResultSet results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ((?, ?, ?), (?, ?, ?))"),
+                makeIntOptions(0, 1, 0, 0, 1, 1));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ((?, ?, ?), (?, ?, ?))"),
+                makeIntOptions(0, 1, 1, 0, 1, 0));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+
+        results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b, c) IN ((?, ?))"),
+                makeIntOptions(0, 1));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+        results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b) IN ((?))"),
+                makeIntOptions(0));
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 0);
+        checkRow(2, results, 0, 0, 1, 1);
+    }
+
+    @Test
+    public void testPrepareInOneMarkerPerTuple() throws Throwable
+    {
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 1)");
+
+        UntypedResultSet results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN (?, ?)"),
+                options(composite(0, 1, 0), composite(0, 1, 1)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN (?, ?)"),
+                options(composite(0, 1, 1), composite(0, 1, 0)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+
+        results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b, c) IN (?)"),
+                options(composite(0, 1)));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+        results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b) IN (?)"),
+                options(composite(0)));
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 0);
+        checkRow(2, results, 0, 0, 1, 1);
+    }
+
+    @Test
+    public void testPrepareInOneMarker() throws Throwable
+    {
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 1, 1)");
+
+        UntypedResultSet results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ?"),
+                options(list(composite(0, 1, 0), composite(0, 1, 1))));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ?"),
+                options(list(composite(0, 1, 1), composite(0, 1, 0))));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+        results = executePrepared(prepare(
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ?"),
+                options(list()));
+        assertTrue(results.isEmpty());
+
+        results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b, c) IN ?"),
+                options(list(composite(0, 1))));
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+
+        results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b) IN ?"),
+                options(list(composite(0))));
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 0);
+        checkRow(2, results, 0, 0, 1, 1);
+
+        results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b) IN ?"),
+                options(list()));
+        assertTrue(results.isEmpty());
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareLiteralInWithShortTuple() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ((?, ?))");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareLiteralInWithLongTuple() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ((?, ?, ?, ?, ?))");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareLiteralInWithPartitionKey() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE (a, b, c, d) IN ((?, ?, ?, ?))");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testPrepareLiteralInSkipsClusteringColumn() throws Throwable
+    {
+        prepare("SELECT * FROM %s.multiple_clustering WHERE (c, d) IN ((?, ?))");
+    }
+
+    private static QueryOptions makeIntOptions(Integer... values)
+    {
+        List<ByteBuffer> buffers = new ArrayList<>(values.length);
+        for (int value : values)
+            buffers.add(ByteBufferUtil.bytes(value));
+        return new QueryOptions(ConsistencyLevel.ONE, buffers);
+    }
+
+    private static ByteBuffer composite(Integer... values)
+    {
+        AbstractType<?>[] types = new AbstractType[values.length];
+        for (int i = 0; i < values.length; i++)
+            types[i] = Int32Type.instance;
+
+        CompositeType type = CompositeType.getInstance(types);
+        CompositeType.Builder builder = type.builder();
+        for (int value : values)
+            builder.add(ByteBufferUtil.bytes(value));
+
+        return builder.build();
+    }
+
+    private static ByteBuffer list(ByteBuffer... values)
+    {
+        return CollectionType.pack(Arrays.asList(values), values.length);
+    }
+
+    private static QueryOptions options(ByteBuffer... buffers)
+    {
+        return new QueryOptions(ConsistencyLevel.ONE, Arrays.asList(buffers));
     }
 
     private static void checkRow(int rowIndex, UntypedResultSet results, Integer... expectedValues)

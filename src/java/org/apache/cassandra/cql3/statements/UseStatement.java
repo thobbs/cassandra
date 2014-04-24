@@ -61,6 +61,11 @@ public class UseStatement extends ParsedStatement implements CQLStatement
 
     public ResultMessage executeInternal(QueryState state)
     {
+        return executeInternal(state, QueryOptions.DEFAULT);
+    }
+
+    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    {
         // Internal queries are exclusively on the system keyspace and 'use' is thus useless
         throw new UnsupportedOperationException();
     }

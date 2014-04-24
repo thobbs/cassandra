@@ -127,19 +127,19 @@ public abstract class SingleColumnRestriction implements Restriction
 
     public static class InWithMarker extends SingleColumnRestriction implements Restriction.IN
     {
-        private final Lists.Marker marker;
+        private final AbstractMarker marker;
 
-        public InWithMarker(Lists.Marker marker)
+        public InWithMarker(AbstractMarker marker)
         {
             this.marker = marker;
         }
 
         public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
         {
-            Lists.Value lval = marker.bind(variables);
+            Term.InTerminal lval = (Term.InTerminal)marker.bind(variables);
             if (lval == null)
                 throw new InvalidRequestException("Invalid null value for IN restriction");
-            return lval.elements;
+            return lval.getElements();
         }
 
         public boolean canHaveOnlyOneValue()

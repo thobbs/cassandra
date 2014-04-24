@@ -27,14 +27,14 @@ public interface CQLStatement
     /**
      * Returns the number of bound terms in this statement.
      */
-    public int getBoundTerms();
+    public abstract int getBoundTerms();
 
     /**
      * Perform any access verification necessary for the statement.
      *
      * @param state the current client state
      */
-    public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException;
+    public abstract void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException;
 
     /**
      * Perform additional validation required by the statment.
@@ -42,7 +42,7 @@ public interface CQLStatement
      *
      * @param state the current client state
      */
-    public void validate(ClientState state) throws RequestValidationException;
+    public abstract void validate(ClientState state) throws RequestValidationException;
 
     /**
      * Execute the statement and return the resulting result or null if there is no result.
@@ -50,7 +50,7 @@ public interface CQLStatement
      * @param state the current query state
      * @param options options for this query (consistency, variables, pageSize, ...)
      */
-    public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
+    public abstract ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
 
     /**
      * Variante of execute used for internal query against the system tables, and thus only query the local node.
@@ -58,4 +58,6 @@ public interface CQLStatement
      * @param state the current query state
      */
     public ResultMessage executeInternal(QueryState state) throws RequestValidationException, RequestExecutionException;
+
+    public abstract ResultMessage executeInternal(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
 }

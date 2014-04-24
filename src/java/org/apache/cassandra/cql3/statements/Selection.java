@@ -328,6 +328,7 @@ public abstract class Selection
              * get much duplicate in practice, it's more efficient not to bother.
              */
             super(columnsList, metadata, false, false);
+
             this.isWildcard = isWildcard;
         }
 

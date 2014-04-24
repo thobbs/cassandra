@@ -675,10 +675,16 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
 
     public ResultMessage executeInternal(QueryState queryState) throws RequestValidationException, RequestExecutionException
     {
+        return executeInternal(queryState, QueryOptions.DEFAULT);
+    }
+
+    public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    {
         if (hasConditions())
             throw new UnsupportedOperationException();
 
-        for (IMutation mutation : getMutations(Collections.<ByteBuffer>emptyList(), true, null, queryState.getTimestamp()))
+        List<ByteBuffer> variables = options.getValues();
+        for (IMutation mutation : getMutations(variables, true, null, queryState.getTimestamp()))
             mutation.apply();
         return null;
     }

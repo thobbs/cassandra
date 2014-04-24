@@ -292,9 +292,14 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         return rows;
     }
 
-    public ResultMessage.Rows executeInternal(QueryState state) throws RequestExecutionException, RequestValidationException
+    public ResultMessage executeInternal(QueryState queryState) throws RequestValidationException, RequestExecutionException
     {
-        List<ByteBuffer> variables = Collections.emptyList();
+        return executeInternal(queryState, QueryOptions.DEFAULT);
+    }
+
+    public ResultMessage.Rows executeInternal(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
+    {
+        List<ByteBuffer> variables = options.getValues();
         int limit = getLimit(variables);
         int limitForQuery = updateLimitForQuery(limit);
         long now = System.currentTimeMillis();
@@ -443,12 +448,6 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             int toGroup = cfDef.isCompact ? -1 : cfDef.clusteringColumnsCount();
             List<ByteBuffer> startBounds = getRequestedBound(Bound.START, variables);
             List<ByteBuffer> endBounds = getRequestedBound(Bound.END, variables);
-            logger.info("#### startBounds for slice:");
-            for (ByteBuffer bound : startBounds)
-                logger.info("    {}", ByteBufferUtil.bytesToHex(bound));
-            logger.info("#### endBounds for slice:");
-            for (ByteBuffer bound : endBounds)
-                logger.info("    {}", ByteBufferUtil.bytesToHex(bound));
             assert startBounds.size() == endBounds.size();
 
             // Handles fetching static columns. Note that for 2i, the filter is just used to restrict
@@ -835,7 +834,6 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             {
                 if (r.isSlice())
                 {
-                    logger.info("######## building bound for multi-column slice");
                     ByteBuffer val = getSliceValue(r, b, variables);
                     Relation.Type relType = ((Restriction.Slice)r).getRelation(eocBound, b);
                     switch (relType)
@@ -855,7 +853,6 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 }
                 else if (r.isIN())
                 {
-                    logger.info("######## building bound for multi-column IN");
                     List<ByteBuffer> values = r.values(variables);
 
                     // The IN query might not have listed the values in comparator order, so we need to re-sort
@@ -875,7 +872,6 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 }
                 else
                 {
-                    logger.info("######## building bound for multi-column EQ");
                     ByteBuffer val = r.values(variables).get(0);
                     if (b == Bound.END)
                         val.put(val.limit() - 1, (byte)1);
@@ -1459,13 +1455,9 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             List<CFDefinition.Name> toCreate = new ArrayList<>();
             Set<CFDefinition.Name> seen = new HashSet<>();
 
-            logger.error("#### processing relation {}", relation);
-
             int previousPosition = -1;
             for (CFDefinition.Name name : names)
             {
-                logger.error("#### examining name {}", name);
-
                 // ensure multi-column restriction only applies to clustering columns
                 if (name.kind != CFDefinition.Name.Kind.COLUMN_ALIAS)
                     throw new InvalidRequestException(String.format("Multi-column relations can only be applied to clustering columns: %s", name));
@@ -1501,7 +1493,6 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 }
                 else
                 {
-                    logger.error("#### creating restriction on {}", name);
                     toCreate.add(name);
                 }
             }
@@ -1512,39 +1503,36 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             {
                 case EQ:
                 {
-                    Restriction restriction = new MultiColumnRestriction.EQ(relation.getValues().prepare(names), onToken);
+                    Restriction restriction = new MultiColumnRestriction.EQ(relation.getValue().prepare(names), onToken);
                     for (CFDefinition.Name name : toCreate)
-                    {
-                        if (name.kind == CFDefinition.Name.Kind.KEY_ALIAS)
-                            stmt.keyRestrictions[name.position] = restriction;
-                        else
-                            stmt.columnRestrictions[name.position] = restriction;
-                    }
+                        stmt.columnRestrictions[name.position] = restriction;
                     break;
                 }
                 case IN:
                 {
-                    List<Tuples.Literal> inValues = relation.getInValues();
+                    Restriction restriction;
+                    List<? extends Term.MultiColumnRaw> inValues = relation.getInValues();
                     if (inValues != null)
                     {
                         // we have something like "(a, b, c) IN ((1, 2, 3), (4, 5, 6), ...) or
                         // "(a, b, c) IN (?, ?, ?)
                         List<Term> terms = new ArrayList<>(inValues.size());
-                        for (Tuples.Literal tuple : inValues)
+                        for (Term.MultiColumnRaw tuple : inValues)
                         {
                             Term t = tuple.prepare(names);
                             t.collectMarkerSpecification(boundNames);
                             terms.add(t);
                         }
-                        Restriction restriction = new MultiColumnRestriction.InWithValues(terms);
-
-                        // TODO potentially disallow partition keys
-                        for (CFDefinition.Name name : toCreate)
-                            if (name.kind == CFDefinition.Name.Kind.KEY_ALIAS)
-                                stmt.keyRestrictions[name.position] = restriction;
-                            else
-                                stmt.columnRestrictions[name.position] = restriction;
+                         restriction = new MultiColumnRestriction.InWithValues(terms);
                     }
+                    else
+                    {
+                        Tuples.INRaw rawMarker = relation.getInMarker();
+                        restriction = new MultiColumnRestriction.InWithMarker(rawMarker.prepare(names));
+                    }
+                    for (CFDefinition.Name name : toCreate)
+                        stmt.columnRestrictions[name.position] = restriction;
+
                     break;
                 }
                 case LT:
@@ -1552,7 +1540,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 case GT:
                 case GTE:
                 {
-                    Term t = relation.getValues().prepare(names);
+                    Term t = relation.getValue().prepare(names);
                     for (CFDefinition.Name name : names)
                     {
                         MultiColumnRestriction.Slice restriction;

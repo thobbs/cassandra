@@ -49,6 +49,11 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
 
     public ResultMessage executeInternal(QueryState state)
     {
+        return executeInternal(state, QueryOptions.DEFAULT);
+    }
+
+    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    {
         // executeInternal is for local query only, thus altering permission doesn't make sense and is not supported
         throw new UnsupportedOperationException();
     }

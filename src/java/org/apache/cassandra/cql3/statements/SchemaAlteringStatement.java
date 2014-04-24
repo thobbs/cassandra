@@ -75,6 +75,11 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
 
     public ResultMessage executeInternal(QueryState state)
     {
+        return executeInternal(state, QueryOptions.DEFAULT);
+    }
+
+    public ResultMessage executeInternal(QueryState state, QueryOptions options)
+    {
         // executeInternal is for local query only, thus altering schema is not supported
         throw new UnsupportedOperationException();
     }

@@ -19,44 +19,69 @@ package org.apache.cassandra.cql3;
 
 import java.util.List;
 
+/**
+ * A relation using the tuple notation, which typically affects multiple columns.
+ * Examples:
+ *  - SELECT ... WHERE (a, b, c) > (1, 'a', 10)
+ *  - SELECT ... WHERE (a, b, c) IN ((1, 2, 3), (4, 5, 6))
+ *  - SELECT ... WHERE (a, b) < ?
+ *  - SELECT ... WHERE (a, b) IN ?
+ */
 public class MultiColumnRelation extends Relation
 {
     private final List<ColumnIdentifier> entities;
-    private final Tuples.Raw marker;
-    private final Tuples.Literal values;
 
-    private final List<Tuples.Literal> inValues;
+    /** A Tuples.Literal or Tuples.Raw marker */
+    private final Term.MultiColumnRaw valuesOrMarker;
+
+    /** A list of Tuples.Literal or Tuples.Raw markers */
+    private final List<? extends Term.MultiColumnRaw> inValues;
+
     private final Tuples.INRaw inMarker;
 
-    private MultiColumnRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.Literal values, Tuples.Raw marker, List<Tuples.Literal> inValues, Tuples.INRaw inMarker)
+    private MultiColumnRelation(List<ColumnIdentifier> entities, Type relationType, Term.MultiColumnRaw valuesOrMarker, List<? extends Term.MultiColumnRaw> inValues, Tuples.INRaw inMarker)
     {
         this.entities = entities;
         this.relationType = relationType;
-        this.values = values;
-        this.marker = marker;
+        this.valuesOrMarker = valuesOrMarker;
 
         this.inValues = inValues;
         this.inMarker = inMarker;
     }
 
-    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.Literal literal)
+    /**
+     * Creates a multi-column EQ, LT, LTE, GT, or GTE relation.
+     * For example: "SELECT ... WHERE (a, b) > (0, 1)"
+     * @param entities the columns on the LHS of the relation
+     * @param relationType the relation operator
+     * @param valuesOrMarker a Tuples.Literal instance or a Tuples.Raw marker
+     */
+    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Type relationType, Term.MultiColumnRaw valuesOrMarker)
     {
-        return new MultiColumnRelation(entities, relationType, literal, null, null, null);
+        assert relationType != Relation.Type.IN;
+        return new MultiColumnRelation(entities, relationType, valuesOrMarker, null, null);
     }
 
-    public static MultiColumnRelation createNonInRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.Raw marker)
+    /**
+     * Creates a multi-column IN relation with a list of IN values or markers.
+     * For example: "SELECT ... WHERE (a, b) IN ((0, 1), (2, 3))"
+     * @param entities the columns on the LHS of the relation
+     * @param inValues a list of Tuples.Literal instances or a Tuples.Raw markers
+     */
+    public static MultiColumnRelation createInRelation(List<ColumnIdentifier> entities, List<? extends Term.MultiColumnRaw> inValues)
     {
-        return new MultiColumnRelation(entities, relationType, null, marker, null, null);
+        return new MultiColumnRelation(entities, Relation.Type.IN, null, inValues, null);
     }
 
-    public static MultiColumnRelation createInRelation(List<ColumnIdentifier> entities, Type relationType, List<Tuples.Literal> inValues)
+    /**
+     * Creates a multi-column IN relation with a marker for the IN values.
+     * For example: "SELECT ... WHERE (a, b) IN ?"
+     * @param entities the columns on the LHS of the relation
+     * @param inMarker a single IN marker
+     */
+    public static MultiColumnRelation createSingleMarkerInRelation(List<ColumnIdentifier> entities, Tuples.INRaw inMarker)
     {
-        return new MultiColumnRelation(entities, relationType, null, null, inValues, null);
-    }
-
-    public static MultiColumnRelation createSingleMarkerInRelation(List<ColumnIdentifier> entities, Type relationType, Tuples.INRaw inMarker)
-    {
-        return new MultiColumnRelation(entities, relationType, null, null, null, inMarker);
+        return new MultiColumnRelation(entities, Relation.Type.IN, null, null, inMarker);
     }
 
     public List<ColumnIdentifier> getEntities()
@@ -64,21 +89,28 @@ public class MultiColumnRelation extends Relation
         return entities;
     }
 
-    public Tuples.Literal getValues()
+    /**
+     * For non-IN relations, returns the Tuples.Literal or Tuples.Raw marker for a single tuple.
+     */
+    public Term.MultiColumnRaw getValue()
     {
-        return values;
+        assert relationType != Relation.Type.IN;
+        return valuesOrMarker;
     }
 
-    public Tuples.Raw getMarker()
+    /**
+     * For IN relations, returns the list of Tuples.Literal instances or Tuples.Raw markers.
+     * If a single IN marker was used, this will return null;
+     */
+    public List<? extends Term.MultiColumnRaw> getInValues()
     {
-        return marker;
-    }
 
-    public List<Tuples.Literal> getInValues()
-    {
         return inValues;
     }
 
+    /**
+     * For IN relations, returns the single marker for the IN values if there is one, otherwise null.
+     */
     public Tuples.INRaw getInMarker()
     {
         return inMarker;
@@ -102,14 +134,22 @@ public class MultiColumnRelation extends Relation
                     sb.append(", ");
             }
 
-            sb.append(") IN (");
-            for (int i = 0; i < inValues.size(); i++)
+            sb.append(") IN ");
+            if (inMarker != null)
             {
-                sb.append(inValues.get(i));
-                if (i != inValues.size() - 1)
-                    sb.append(", ");
+                sb.append('?');
             }
-            sb.append(")");
+            else
+            {
+                sb.append('(');
+                for (int i = 0; i < inValues.size(); i++)
+                {
+                    sb.append(inValues.get(i));
+                    if (i != inValues.size() - 1)
+                        sb.append(", ");
+                }
+                sb.append(")");
+            }
             return sb.toString();
         }
         else
@@ -125,7 +165,7 @@ public class MultiColumnRelation extends Relation
             sb.append(") ");
             sb.append(relationType);
             sb.append(" ");
-            sb.append(values);
+            sb.append(valuesOrMarker);
             return sb.toString();
         }
     }

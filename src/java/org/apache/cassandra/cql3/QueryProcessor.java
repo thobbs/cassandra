@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
@@ -101,6 +102,12 @@ public class QueryProcessor implements QueryHandler
 
     private QueryProcessor()
     {
+    }
+
+    @VisibleForTesting
+    public static CQLStatement staticGetPrepared(MD5Digest id)
+    {
+        return preparedStatements.get(id);
     }
 
     public CQLStatement getPrepared(MD5Digest id)

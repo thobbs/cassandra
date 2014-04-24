@@ -117,7 +117,7 @@ public abstract class Lists
         }
     }
 
-    public static class Value extends Term.Terminal
+    public static class Value extends Term.InTerminal
     {
         public final List<ByteBuffer> elements;
 
@@ -147,6 +147,11 @@ public abstract class Lists
         public ByteBuffer get()
         {
             return CollectionType.pack(elements, elements.size());
+        }
+
+        public List<ByteBuffer> getElements()
+        {
+            return elements;
         }
     }
 

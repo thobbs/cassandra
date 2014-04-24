@@ -27,10 +27,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 
 /**
  * Static helper methods and classes for tuples.
@@ -39,7 +36,11 @@ public class Tuples
 {
     private static final Logger logger = LoggerFactory.getLogger(Tuples.class);
 
-    public static class Literal implements Term.Raw
+    /**
+     * A raw, literal tuple.  When prepared, this will become a Tuples.Value or Tuples.DelayedValue, depending
+     * on whether the tuple holds NonTerminals.
+     */
+    public static class Literal implements Term.MultiColumnRaw
     {
         private final List<Term.Raw> elements;
 
@@ -50,7 +51,6 @@ public class Tuples
 
         public Term prepare(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
-            logger.info("#### preparing Tuples.Literal {} for {} receivers", this, receivers.size());
             if (elements.size() != receivers.size())
                 throw new InvalidRequestException(String.format("Expected %d elements in value tuple, but got %d: %s", receivers.size(), elements.size(), this));
 
@@ -62,9 +62,6 @@ public class Tuples
             {
                 ColumnSpecification spec = specIterator.next();
                 Term t = rt.prepare(spec);
-
-                if (t.containsBindMarker())
-                    throw new InvalidRequestException(String.format("Invalid tuple literal for %s: bind variables are not supported inside tuple literals", spec));
 
                 if (t instanceof Term.NonTerminal)
                     allTerminal = false;
@@ -84,6 +81,7 @@ public class Tuples
 
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
+            // tuples shouldn't be assignable to anything right now
             return false;
         }
 
@@ -103,9 +101,9 @@ public class Tuples
     }
 
     /**
-     * A tuple of constant values (e.g (123, 'abc')).
+     * A tuple of terminal values (e.g (123, 'abc')).
      */
-    public static class Value extends Term.Terminal
+    public static class Value extends Term.InTerminal
     {
         public final ByteBuffer[] elements;
         public final CompositeType type;
@@ -123,11 +121,18 @@ public class Tuples
 
         public ByteBuffer get()
         {
-            logger.info("#### in Tuples.Value.get(), elements is {}, will return {}", elements, ByteBufferUtil.bytesToHex(CompositeType.build(elements)));
             return CompositeType.build(elements);
+        }
+
+        public List<ByteBuffer> getElements()
+        {
+            return Arrays.asList(elements);
         }
     }
 
+    /**
+     * Similar to Value, but contains at least one NonTerminal, such as a non-pure functions or bind marker.
+     */
     public static class DelayedValue extends Term.NonTerminal
     {
         public final List<Term> elements;
@@ -137,17 +142,21 @@ public class Tuples
         {
             this.elements = elements;
             this.type = type;
-            logger.info("#### Tuples.DelayedValue elements and type is {}: {}", elements, type);
         }
 
         public boolean containsBindMarker()
         {
-            // False since we don't support them in collection
+            for (Term term : elements)
+                if (term.containsBindMarker())
+                    return true;
+
             return false;
         }
 
         public void collectMarkerSpecification(VariableSpecifications boundNames)
         {
+            for (Term term : elements)
+                term.collectMarkerSpecification(boundNames);
         }
 
         public Value bind(List<ByteBuffer> values) throws InvalidRequestException
@@ -156,7 +165,6 @@ public class Tuples
             for (int i=0; i < elements.size(); i++)
             {
                 buffers[i] = elements.get(i).bindAndGet(values);
-                logger.info("#### in bind, element {} bound to {}", i, ByteBufferUtil.bytesToHex(buffers[i]));
             }
             return new Value(buffers, type);
         }
@@ -168,7 +176,7 @@ public class Tuples
      *
      * Because multiple types can be used, a CompositeType is used to represent the values.
      */
-    public static class Raw extends AbstractMarker.Raw
+    public static class Raw extends AbstractMarker.Raw implements Term.MultiColumnRaw
     {
         public Raw(int bindIndex)
         {
@@ -179,13 +187,15 @@ public class Tuples
         {
             List<AbstractType<?>> types = new ArrayList<>(receivers.size());
             StringBuilder inName = new StringBuilder("(");
-            for (ColumnSpecification receiver : receivers)
+            for (int i = 0; i < receivers.size(); i++)
             {
+                ColumnSpecification receiver = receivers.get(i);
                 inName.append(receiver.name);
-                inName.append(",");
+                if (i < receivers.size() - 1)
+                    inName.append(", ");
                 types.add(receiver.type);
             }
-            inName.setCharAt(inName.length() - 1, ')');
+            inName.append(')');
 
             ColumnIdentifier identifier = new ColumnIdentifier(inName.toString(), true);
             CompositeType type = CompositeType.getInstance(types);
@@ -204,6 +214,9 @@ public class Tuples
         }
     }
 
+    /**
+     * A raw marker for an IN list of tuples, like "SELECT ... WHERE (a, b, c) IN ?"
+     */
     public static class INRaw extends AbstractMarker.Raw
     {
         public INRaw(int bindIndex)
@@ -211,7 +224,7 @@ public class Tuples
             super(bindIndex);
         }
 
-        private static ColumnSpecification makeInReceiver(List<ColumnSpecification> receivers) throws InvalidRequestException
+        private static ColumnSpecification makeInReceiver(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
             List<AbstractType<?>> types = new ArrayList<>(receivers.size());
             StringBuilder inName = new StringBuilder("in(");
@@ -231,9 +244,9 @@ public class Tuples
             return new ColumnSpecification(receivers.get(0).ksName, receivers.get(0).cfName, identifier, ListType.getInstance(type));
         }
 
-        public AbstractMarker prepare(List<ColumnSpecification> receivers) throws InvalidRequestException
+        public AbstractMarker prepare(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
-            return new Tuples.Marker(bindIndex, makeInReceiver(receivers));
+            return new Lists.Marker(bindIndex, makeInReceiver(receivers));
         }
 
         @Override
@@ -243,12 +256,14 @@ public class Tuples
         }
     }
 
+    /**
+     * Represents a marker for a single tuple, like "SELECT ... WHERE (a, b, c) > ?"
+     */
     public static class Marker extends AbstractMarker
     {
         public Marker(int bindIndex, ColumnSpecification receiver)
         {
             super(bindIndex, receiver);
-            assert receiver.type instanceof ListType;
         }
 
         public Value bind(List<ByteBuffer> values) throws InvalidRequestException
