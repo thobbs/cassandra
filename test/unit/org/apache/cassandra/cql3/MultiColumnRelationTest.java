@@ -128,10 +128,23 @@ public class MultiColumnRelationTest
         execute("SELECT * FROM %s.multiple_clustering WHERE (b, c) > (1, 2, 3)");
     }
 
+    @Test(expected=InvalidRequestException.class)
+    public void testNullInTuple() throws Throwable
+    {
+        execute("SELECT * FROM %s.multiple_clustering WHERE (b, c) > (1, null)");
+    }
+
     @Test
     public void testEmptyIN() throws Throwable
     {
         UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ()");
+        assertTrue(results.isEmpty());
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testNullInINValues() throws Throwable
+    {
+        UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ((1, 2, null))");
         assertTrue(results.isEmpty());
     }
 
@@ -437,7 +450,7 @@ public class MultiColumnRelationTest
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
 
-        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        // same query, but reversed order for the IN values
         results = execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ((0, 1, 1), (0, 1, 0))");
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
@@ -497,7 +510,7 @@ public class MultiColumnRelationTest
         checkRow(2, results, 1, 0, 1, 0);
         checkRow(3, results, 1, 0, 1, 1);
 
-        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        // same query, but reversed order for the IN values
         results = execute("SELECT * FROM %s.multiple_clustering WHERE a IN (1, 0) AND (b, c, d) IN ((0, 1, 1), (0, 1, 0))");
         assertEquals(4, results.size());
         checkRow(0, results, 1, 0, 1, 0);
@@ -821,7 +834,7 @@ public class MultiColumnRelationTest
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
 
-        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        // same query, but reversed order for the IN values
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ((?, ?, ?), (?, ?, ?))"),
                 makeIntOptions(0, 1, 1, 0, 1, 0));
@@ -858,7 +871,7 @@ public class MultiColumnRelationTest
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
 
-        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        // same query, but reversed order for the IN values
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN (?, ?)"),
                 options(composite(0, 1, 1), composite(0, 1, 0)));
@@ -895,7 +908,7 @@ public class MultiColumnRelationTest
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
 
-        // same query, but reversed order for the IN values.  TODO do we need to respect the IN ordering in the results?
+        // same query, but reversed order for the IN values
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ?"),
                 options(list(composite(0, 1, 1), composite(0, 1, 0))));

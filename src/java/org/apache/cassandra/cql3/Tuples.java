@@ -157,6 +157,10 @@ public class Tuples
             ByteBuffer[] buffers = new ByteBuffer[elements.size()];
             for (int i=0; i < elements.size(); i++)
             {
+                ByteBuffer bytes = elements.get(i).bindAndGet(values);
+                if (bytes == null)
+                    throw new InvalidRequestException("Tuples may not contain null values");
+
                 buffers[i] = elements.get(i).bindAndGet(values);
             }
             return new Value(buffers);
