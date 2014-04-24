@@ -22,7 +22,6 @@ import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -85,15 +84,7 @@ public class Tuples
         @Override
         public String toString()
         {
-            StringBuilder sb = new StringBuilder("(");
-            for (int i = 0; i < elements.size(); i++)
-            {
-                sb.append(elements.get(i).toString());
-                if (i != elements.size() - 1)
-                    sb.append(", ");
-            }
-            sb.append(')');
-            return sb.toString();
+            return tupleToString(elements);
         }
     }
 
@@ -169,15 +160,7 @@ public class Tuples
         @Override
         public String toString()
         {
-            StringBuilder sb = new StringBuilder("(");
-            for (int i = 0; i < elements.size(); i++)
-            {
-                sb.append(elements.get(i));
-                if (i < elements.size() - 1)
-                    sb.append(", ");
-            }
-            sb.append(')');
-            return sb.toString();
+            return tupleToString(elements);
         }
     }
 
@@ -285,5 +268,19 @@ public class Tuples
 
             return value == null ? null : Value.fromSerialized(value, (CompositeType)receiver.type);
         }
+    }
+
+    public static String tupleToString(List<?> items)
+    {
+
+        StringBuilder sb = new StringBuilder("(");
+        for (int i = 0; i < items.size(); i++)
+        {
+            sb.append(items.get(i));
+            if (i < items.size() - 1)
+                sb.append(", ");
+        }
+        sb.append(')');
+        return sb.toString();
     }
 }

@@ -126,43 +126,15 @@ public class MultiColumnRelation extends Relation
     {
         if (relationType == Type.IN)
         {
-            StringBuilder sb = new StringBuilder("(");
-            for (int i=0; i < entities.size(); i++)
-            {
-                sb.append(entities.get(i));
-                if (i != entities.size() - 1)
-                    sb.append(", ");
-            }
-
-            sb.append(") IN ");
-            if (inMarker != null)
-            {
-                sb.append('?');
-            }
-            else
-            {
-                sb.append('(');
-                for (int i = 0; i < inValues.size(); i++)
-                {
-                    sb.append(inValues.get(i));
-                    if (i != inValues.size() - 1)
-                        sb.append(", ");
-                }
-                sb.append(")");
-            }
+            StringBuilder sb = new StringBuilder(Tuples.tupleToString(entities));
+            sb.append(" IN ");
+            sb.append(inMarker != null ? '?' : Tuples.tupleToString(inValues));
             return sb.toString();
         }
         else
         {
-            StringBuilder sb = new StringBuilder("(");
-            for (int i=0; i < entities.size(); i++)
-            {
-                sb.append(entities.get(i));
-                if (i != entities.size() - 1)
-                    sb.append(", ");
-            }
-
-            sb.append(") ");
+            StringBuilder sb = new StringBuilder(Tuples.tupleToString(entities));
+            sb.append(" ");
             sb.append(relationType);
             sb.append(" ");
             sb.append(valuesOrMarker);
