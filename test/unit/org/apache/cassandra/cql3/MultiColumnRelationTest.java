@@ -101,7 +101,7 @@ public class MultiColumnRelationTest
 
     private UntypedResultSet executePrepared(MD5Digest statementId, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        CQLStatement statement = QueryProcessor.staticGetPrepared(statementId);
+        CQLStatement statement = QueryProcessor.instance.getPrepared(statementId);
         ResultMessage message = statement.executeInternal(QueryState.forInternalCalls(), options);
 
         if (message instanceof ResultMessage.Rows)

@@ -104,12 +104,6 @@ public class QueryProcessor implements QueryHandler
     {
     }
 
-    @VisibleForTesting
-    public static CQLStatement staticGetPrepared(MD5Digest id)
-    {
-        return preparedStatements.get(id);
-    }
-
     public CQLStatement getPrepared(MD5Digest id)
     {
         return preparedStatements.get(id);
