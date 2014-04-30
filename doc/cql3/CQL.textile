@@ -614,7 +614,11 @@ The @BATCH@ statement group multiple modification statements (insertions/updates
 # It saves network round-trips between the client and the server (and sometimes between the server coordinator and the replicas) when batching multiple updates.
 # All updates in a @BATCH@ belonging to a given partition key are performed in isolation.
 # By default, all operations in the batch are performed atomically.  See the notes on "@UNLOGGED@":#unloggedBatch for more details.
-Note however that the @BATCH@ statement only allows @UPDATE@, @INSERT@ and @DELETE@ statements and is _not_ a full analogue for SQL transactions.
+
+Note that:
+* @BATCH@ statements may only contain @UPDATE@, @INSERT@ and @DELETE@ statements.
+* Batches are _not_ a full analogue for SQL transactions.
+* There is no guaranteed order for the application of operations (even for the same partition key). To achieve a particular operation ordering, you must use per-operation timestamps.
 
 h4(#unloggedBatch). @UNLOGGED@
 
