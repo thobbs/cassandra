@@ -40,10 +40,7 @@ public interface Restriction
     // Only supported for EQ and IN, but it's convenient to have here
     public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException;
 
-    public static interface EQ extends Restriction
-    {
-        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException;
-    }
+    public static interface EQ extends Restriction {}
 
     public static interface IN extends Restriction
     {
