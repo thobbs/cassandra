@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.cql3;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,17 +31,13 @@ public class SingleColumnRelation extends Relation
     private final List<Term.Raw> inValues;
     public final boolean onToken;
 
-    // Will be null unless for tuple notations (#4851)
-    public final ColumnIdentifier previousInTuple;
-
-    private SingleColumnRelation(ColumnIdentifier entity, Type type, Term.Raw value, List<Term.Raw> inValues, boolean onToken, ColumnIdentifier previousInTuple)
+    private SingleColumnRelation(ColumnIdentifier entity, Type type, Term.Raw value, List<Term.Raw> inValues, boolean onToken)
     {
         this.entity = entity;
         this.relationType = type;
         this.value = value;
         this.inValues = inValues;
         this.onToken = onToken;
-        this.previousInTuple = previousInTuple;
     }
 
     /**
@@ -54,22 +49,17 @@ public class SingleColumnRelation extends Relation
      */
     public SingleColumnRelation(ColumnIdentifier entity, Type type, Term.Raw value)
     {
-        this(entity, type, value, null, false, null);
+        this(entity, type, value, null, false);
     }
 
     public SingleColumnRelation(ColumnIdentifier entity, Type type, Term.Raw value, boolean onToken)
     {
-        this(entity, type, value, null, onToken, null);
-    }
-
-    public SingleColumnRelation(ColumnIdentifier entity, Type type, Term.Raw value, ColumnIdentifier previousInTuple)
-    {
-        this(entity, type, value, null, false, previousInTuple);
+        this(entity, type, value, null, onToken);
     }
 
     public static SingleColumnRelation createInRelation(ColumnIdentifier entity, List<Term.Raw> inValues)
     {
-        return new SingleColumnRelation(entity, Type.IN, null, inValues, false, null);
+        return new SingleColumnRelation(entity, Type.IN, null, inValues, false);
     }
 
     public ColumnIdentifier getEntity()

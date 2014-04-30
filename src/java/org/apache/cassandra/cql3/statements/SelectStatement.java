@@ -1602,10 +1602,6 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                                                    StorageService.getPartitioner().getTokenValidator());
             }
 
-            // We can only use the tuple notation of #4851 on clustering columns for now
-            if (newRel.previousInTuple != null && name.kind != CFDefinition.Name.Kind.COLUMN_ALIAS)
-                throw new InvalidRequestException(String.format("Tuple notation can only be used on clustering columns but found on %s", name));
-
             switch (newRel.operator())
             {
                 case EQ:
