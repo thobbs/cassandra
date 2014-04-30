@@ -45,11 +45,6 @@ public abstract class AuthenticationStatement extends ParsedStatement implements
 
     public abstract ResultMessage execute(ClientState state) throws RequestExecutionException, RequestValidationException;
 
-    public ResultMessage executeInternal(QueryState queryState) throws RequestValidationException, RequestExecutionException
-    {
-        return executeInternal(queryState, QueryOptions.DEFAULT);
-    }
-
     public ResultMessage executeInternal(QueryState state, QueryOptions options)
     {
         // executeInternal is for local query only, thus altering users doesn't make sense and is not supported

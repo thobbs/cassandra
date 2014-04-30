@@ -673,11 +673,6 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
         return builder.build();
     }
 
-    public ResultMessage executeInternal(QueryState queryState) throws RequestValidationException, RequestExecutionException
-    {
-        return executeInternal(queryState, QueryOptions.DEFAULT);
-    }
-
     public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         if (hasConditions())

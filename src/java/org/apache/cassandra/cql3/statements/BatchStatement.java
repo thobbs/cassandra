@@ -303,11 +303,6 @@ public class BatchStatement implements CQLStatement, MeasurableForPreparedCache
         return new ResultMessage.Rows(ModificationStatement.buildCasResultSet(ksName, key, cfName, result, columnsWithConditions, true));
     }
 
-    public ResultMessage executeInternal(QueryState queryState) throws RequestValidationException, RequestExecutionException
-    {
-        return executeInternal(queryState, QueryOptions.DEFAULT);
-    }
-
     public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
         assert !hasConditions;
