@@ -1440,8 +1440,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
 
         private void updateRestrictionsForRelation(SelectStatement stmt, List<CFDefinition.Name> names, MultiColumnRelation relation, VariableSpecifications boundNames) throws InvalidRequestException
         {
-            List<CFDefinition.Name> toUpdate = new ArrayList<>();
-            List<CFDefinition.Name> toCreate = new ArrayList<>();
+            List<CFDefinition.Name> restrictedColumns = new ArrayList<>();
             Set<CFDefinition.Name> seen = new HashSet<>();
 
             int previousPosition = -1;
@@ -1476,14 +1475,8 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                         throw new InvalidRequestException(String.format("Column \"%s\" cannot be restricted by more than one relation if it is in an %s relation", name, relation.operator()));
                     else if (!existing.isSlice())
                         throw new InvalidRequestException(String.format("Column \"%s\" cannot be restricted by an equality relation and an inequality relation", name));
-
-                    // we're updating a slice with a new GT/GTE/LT/LTE relation
-                    toUpdate.add(name);
                 }
-                else
-                {
-                    toCreate.add(name);
-                }
+                restrictedColumns.add(name);
             }
 
             boolean onToken = false;
@@ -1495,7 +1488,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     Term t = relation.getValue().prepare(names);
                     t.collectMarkerSpecification(boundNames);
                     Restriction restriction = new MultiColumnRestriction.EQ(t, onToken);
-                    for (CFDefinition.Name name : toCreate)
+                    for (CFDefinition.Name name : restrictedColumns)
                         stmt.columnRestrictions[name.position] = restriction;
                     break;
                 }
@@ -1523,7 +1516,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                         t.collectMarkerSpecification(boundNames);
                         restriction = new MultiColumnRestriction.InWithMarker(t);
                     }
-                    for (CFDefinition.Name name : toCreate)
+                    for (CFDefinition.Name name : restrictedColumns)
                         stmt.columnRestrictions[name.position] = restriction;
 
                     break;
@@ -1537,10 +1530,8 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     t.collectMarkerSpecification(boundNames);
                     for (CFDefinition.Name name : names)
                     {
-                        MultiColumnRestriction.Slice restriction;
-                        if (toUpdate.contains(name))
-                            restriction = (MultiColumnRestriction.Slice)getExistingRestriction(stmt, name);
-                        else
+                        MultiColumnRestriction.Slice restriction = (MultiColumnRestriction.Slice)getExistingRestriction(stmt, name);
+                        if (restriction == null)
                             restriction = new MultiColumnRestriction.Slice(onToken);
                         restriction.setBound(relation.operator(), t);
                         stmt.columnRestrictions[name.position] = restriction;
