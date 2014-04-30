@@ -1466,7 +1466,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     if (previousPosition == -1)
                         throw new InvalidRequestException(String.format(
                                 "Clustering columns may not be skipped in multi-column relations. " +
-                                        "They should appear in the PRIMARY KEY order. Got %s", relation));
+                                "They should appear in the PRIMARY KEY order. Got %s", relation));
                     else
                         throw new InvalidRequestException(String.format(
                                 "Clustering columns must appear in the PRIMARY KEY order in multi-column relations: %s", relation));
@@ -1602,9 +1602,9 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     throw new InvalidRequestException(String.format("The token() function is only supported on the partition key, found on %s", name));
 
                 receiver = new ColumnSpecification(name.ksName,
-                        name.cfName,
-                        new ColumnIdentifier("partition key token", true),
-                        StorageService.getPartitioner().getTokenValidator());
+                                                   name.cfName,
+                                                   new ColumnIdentifier("partition key token", true),
+                                                   StorageService.getPartitioner().getTokenValidator());
             }
 
             // We can only use the tuple notation of #4851 on clustering columns for now
@@ -1931,8 +1931,9 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 //  - Have more than one IndexExpression
                 //  - Have no index expression and the column filter is not the identity
                 if (stmt.restrictedNames.size() > 1 || (stmt.restrictedNames.isEmpty() && !stmt.columnFilterIsIdentity()))
-                    throw new InvalidRequestException("Cannot execute this query as it might involve data filtering and thus may have unpredictable performance. "
-                            + "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING");
+                    throw new InvalidRequestException("Cannot execute this query as it might involve data filtering and " +
+                                                      "thus may have unpredictable performance. If you want to execute " +
+                                                      "this query despite the performance unpredictability, use ALLOW FILTERING");
             }
         }
 
