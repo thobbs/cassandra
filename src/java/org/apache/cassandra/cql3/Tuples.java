@@ -55,12 +55,9 @@ public class Tuples
 
             List<Term> values = new ArrayList<>(elements.size());
             boolean allTerminal = true;
-            Iterator<? extends ColumnSpecification> specIterator = receivers.iterator();
-            for (Term.Raw rt : elements)
+            for (int i = 0; i < elements.size(); i++)
             {
-                ColumnSpecification spec = specIterator.next();
-                Term t = rt.prepare(spec);
-
+                Term t = elements.get(i).prepare(receivers.get(i));
                 if (t instanceof Term.NonTerminal)
                     allTerminal = false;
 
@@ -177,7 +174,7 @@ public class Tuples
             super(bindIndex);
         }
 
-        private static ColumnSpecification makeInReceiver(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
+        private static ColumnSpecification makeReceiver(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
             List<AbstractType<?>> types = new ArrayList<>(receivers.size());
             StringBuilder inName = new StringBuilder("(");
@@ -186,7 +183,7 @@ public class Tuples
                 ColumnSpecification receiver = receivers.get(i);
                 inName.append(receiver.name);
                 if (i < receivers.size() - 1)
-                    inName.append(", ");
+                    inName.append(",");
                 types.add(receiver.type);
             }
             inName.append(')');
@@ -198,7 +195,7 @@ public class Tuples
 
         public AbstractMarker prepare(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
-            return new Tuples.Marker(bindIndex, makeInReceiver(receivers));
+            return new Tuples.Marker(bindIndex, makeReceiver(receivers));
         }
 
         @Override
@@ -222,16 +219,18 @@ public class Tuples
         {
             List<AbstractType<?>> types = new ArrayList<>(receivers.size());
             StringBuilder inName = new StringBuilder("in(");
-            for (ColumnSpecification receiver : receivers)
+            for (int i = 0; i < receivers.size(); i++)
             {
+                ColumnSpecification receiver = receivers.get(i);
                 inName.append(receiver.name);
-                inName.append(",");
+                if (i < receivers.size() - 1)
+                    inName.append(",");
 
                 if (receiver.type instanceof CollectionType)
                     throw new InvalidRequestException("Collection columns do not support IN relations");
                 types.add(receiver.type);
             }
-            inName.setCharAt(inName.length() - 1, ')');
+            inName.append(')');
 
             ColumnIdentifier identifier = new ColumnIdentifier(inName.toString(), true);
             CompositeType type = CompositeType.getInstance(types);
