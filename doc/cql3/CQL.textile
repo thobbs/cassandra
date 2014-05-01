@@ -618,7 +618,7 @@ The @BATCH@ statement group multiple modification statements (insertions/updates
 Note that:
 * @BATCH@ statements may only contain @UPDATE@, @INSERT@ and @DELETE@ statements.
 * Batches are _not_ a full analogue for SQL transactions.
-* If a timestamp is not specified for each operation, then all operations will be applied with the same timestamp. Due to Cassandra's conflict resolution procedure in the case of timestamp ties, operations may be applied in an order that is different from the order they are listed in the @BATCH@ statement. To force a particular operation ordering, you must specify per-operation timestamps.
+* If a timestamp is not specified for each operation, then all operations will be applied with the same timestamp. Due to Cassandra's conflict resolution procedure in the case of "timestamp ties":http://wiki.apache.org/cassandra/FAQ#clocktie, operations may be applied in an order that is different from the order they are listed in the @BATCH@ statement. To force a particular operation ordering, you must specify per-operation timestamps.
 
 h4(#unloggedBatch). @UNLOGGED@
 
