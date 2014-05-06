@@ -24,7 +24,7 @@ import java.util.List;
 
 public interface MultiColumnRestriction extends Restriction
 {
-    public static class EQ extends SingleColumnRestriction.EQ
+    public static class EQ extends SingleColumnRestriction.EQ implements MultiColumnRestriction
     {
         public EQ(Term value, boolean onToken)
         {
@@ -37,7 +37,7 @@ public interface MultiColumnRestriction extends Restriction
         }
     }
 
-    public static class InWithValues extends SingleColumnRestriction.InWithValues
+    public static class InWithValues extends SingleColumnRestriction.InWithValues implements MultiColumnRestriction
     {
         public InWithValues(List<Term> values)
         {
@@ -50,7 +50,7 @@ public interface MultiColumnRestriction extends Restriction
         }
     }
 
-    public static class InWithMarker extends SingleColumnRestriction.InWithMarker
+    public static class InWithMarker extends SingleColumnRestriction.InWithMarker implements MultiColumnRestriction
     {
         public InWithMarker(AbstractMarker marker)
         {
@@ -63,7 +63,7 @@ public interface MultiColumnRestriction extends Restriction
         }
     }
 
-    public static class Slice extends SingleColumnRestriction.Slice
+    public static class Slice extends SingleColumnRestriction.Slice implements MultiColumnRestriction
     {
         public Slice(boolean onToken)
         {
