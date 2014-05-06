@@ -60,6 +60,7 @@ public class MultiColumnRelationTest
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.compound_partition (a int, b int, c int, PRIMARY KEY ((a, b)))");
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.single_clustering (a int, b int, c int, PRIMARY KEY (a, b))");
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.multiple_clustering (a int, b int, c int, d int, PRIMARY KEY (a, b, c, d))");
+        executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.multiple_clustering_reversed (a int, b int, c int, d int, PRIMARY KEY (a, b, c, d)) WITH CLUSTERING ORDER BY (b DESC, c ASC, d DESC)");
         clientState = ClientState.forInternalCalls();
     }
 
@@ -434,6 +435,185 @@ public class MultiColumnRelationTest
         checkRow(0, results, 0, 1, 0, 0);
 
         results = execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c, d) < (1, 1, 0) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+    }
+
+    @Test
+    public void testMultipleClusteringColumnInequalityReversedComponents() throws Throwable
+    {
+        // b and d are reversed in the clustering order
+        execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 1, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 1, 1, 1)");
+        execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 1, 1, 0)");
+
+        execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 0, 1, 1)");
+        execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 0, 1, 0)");
+
+
+        UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) > (0)");
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 1);
+        checkRow(2, results, 0, 1, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) >= (0)");
+        assertEquals(6, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 1);
+        checkRow(2, results, 0, 1, 1, 0);
+        checkRow(3, results, 0, 0, 0, 0);
+        checkRow(4, results, 0, 0, 1, 1);
+        checkRow(5, results, 0, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) > (1, 0)");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 1, 1);
+        checkRow(1, results, 0, 1, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) >= (1, 0)");
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 1);
+        checkRow(2, results, 0, 1, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (1, 1, 0)");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) >= (1, 1, 0)");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 1, 1);
+        checkRow(1, results, 0, 1, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) < (1)");
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+        checkRow(2, results, 0, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) <= (1)");
+        assertEquals(6, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 1);
+        checkRow(2, results, 0, 1, 1, 0);
+        checkRow(3, results, 0, 0, 0, 0);
+        checkRow(4, results, 0, 0, 1, 1);
+        checkRow(5, results, 0, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) < (0, 1)");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) <= (0, 1)");
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+        checkRow(2, results, 0, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) < (0, 1, 1)");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) <= (0, 1, 1)");
+        checkRow(0, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 1);
+        checkRow(2, results, 0, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 0) AND (b) < (1)");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c) < (1, 1)");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c, d) < (1, 1, 0)");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+
+        // reversed
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) > (0) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(3, results.size());
+        checkRow(2, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) >= (0) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(6, results.size());
+        checkRow(5, results, 0, 0, 0, 0);
+        checkRow(4, results, 0, 0, 1, 0);
+        checkRow(3, results, 0, 0, 1, 1);
+        checkRow(2, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) > (1, 0) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(2, results.size());
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) >= (1, 0) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(3, results.size());
+        checkRow(2, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (1, 1, 0) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) >= (1, 1, 0) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(2, results.size());
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) < (1) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(3, results.size());
+        checkRow(2, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 0);
+        checkRow(0, results, 0, 0, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) <= (1) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(6, results.size());
+        checkRow(5, results, 0, 0, 0, 0);
+        checkRow(4, results, 0, 0, 1, 0);
+        checkRow(3, results, 0, 0, 1, 1);
+        checkRow(2, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(0, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) < (0, 1) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 0, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) <= (0, 1) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(3, results.size());
+        checkRow(2, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 0);
+        checkRow(0, results, 0, 0, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) < (0, 1, 1) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(2, results.size());
+        checkRow(1, results, 0, 0, 0, 0);
+        checkRow(0, results, 0, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) <= (0, 1, 1) ORDER BY b DESC, c DESC, d DESC");
+        checkRow(2, results, 0, 0, 0, 0);
+        checkRow(1, results, 0, 0, 1, 0);
+        checkRow(0, results, 0, 0, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 0) AND (b) < (1) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c) < (1, 1) ORDER BY b DESC, c DESC, d DESC");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c, d) < (1, 1, 0) ORDER BY b DESC, c DESC, d DESC");
         assertEquals(1, results.size());
         checkRow(0, results, 0, 1, 0, 0);
     }
@@ -1001,6 +1181,11 @@ public class MultiColumnRelationTest
         UntypedResultSet.Row row = rows.get(rowIndex);
         Iterator<ColumnSpecification> columns = row.getColumns().iterator();
         for (Integer expected : expectedValues)
-            assertEquals((long)expected, row.getInt(columns.next().name.toString()));
+        {
+            String columnName = columns.next().name.toString();
+            int actual = row.getInt(columnName);
+            assertEquals(String.format("Expected value %d for column %s in row %d, but got %s", actual, columnName, rowIndex, expected),
+                         (long)expected, actual);
+        }
     }
 }
