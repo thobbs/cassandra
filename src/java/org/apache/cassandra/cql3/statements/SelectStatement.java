@@ -801,15 +801,20 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                                         ColumnNameBuilder builder,
                                         List<ByteBuffer> variables) throws InvalidRequestException
     {
-        Restriction firstRestriction = restrictions[names.iterator().next().position];
-        if (firstRestriction.isMultiColumn())
+
+        // check the first restriction to see if we're dealing with a multi-column restriction
+        if (!names.isEmpty())
         {
-            if (firstRestriction.isSlice())
-                return buildMultiColumnSliceBound(bound, names, (MultiColumnRestriction.Slice) firstRestriction, isReversed, builder, variables);
-            else if (firstRestriction.isIN())
-                return buildMultiColumnInBound(bound, names, (MultiColumnRestriction.IN) firstRestriction, isReversed, builder, variables);
-            else
-                return buildMultiColumnEQBound(bound, (MultiColumnRestriction.EQ) firstRestriction, isReversed, builder, variables);
+            Restriction firstRestriction = restrictions[names.iterator().next().position];
+            if (firstRestriction != null && firstRestriction.isMultiColumn())
+            {
+                if (firstRestriction.isSlice())
+                    return buildMultiColumnSliceBound(bound, names, (MultiColumnRestriction.Slice) firstRestriction, isReversed, builder, variables);
+                else if (firstRestriction.isIN())
+                    return buildMultiColumnInBound(bound, names, (MultiColumnRestriction.IN) firstRestriction, isReversed, builder, variables);
+                else
+                    return buildMultiColumnEQBound(bound, (MultiColumnRestriction.EQ) firstRestriction, isReversed, builder, variables);
+            }
         }
 
         // The end-of-component of composite doesn't depend on whether the
