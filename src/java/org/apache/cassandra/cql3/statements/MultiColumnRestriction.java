@@ -19,7 +19,11 @@ package org.apache.cassandra.cql3.statements;
 
 import org.apache.cassandra.cql3.AbstractMarker;
 import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Tuples;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 
 public interface MultiColumnRestriction extends Restriction
@@ -35,9 +39,24 @@ public interface MultiColumnRestriction extends Restriction
         {
             return true;
         }
+
+        public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
+        {
+            Tuples.Value t = (Tuples.Value)value.bind(variables);
+            return t.getElements();
+        }
     }
 
-    public static class InWithValues extends SingleColumnRestriction.InWithValues implements MultiColumnRestriction
+    public interface IN extends MultiColumnRestriction
+    {
+        public List<List<ByteBuffer>> splitValues(List<ByteBuffer> variables) throws InvalidRequestException;
+    }
+
+    /**
+     * An IN restriction that has a set of terms for in values.
+     * For example: "SELECT ... WHERE (a, b, c) IN ((1, 2, 3), (4, 5, 6))" or "WHERE (a, b, c) IN (?, ?)"
+     */
+    public static class InWithValues extends SingleColumnRestriction.InWithValues implements MultiColumnRestriction.IN
     {
         public InWithValues(List<Term> values)
         {
@@ -48,9 +67,24 @@ public interface MultiColumnRestriction extends Restriction
         {
             return true;
         }
+
+        public List<List<ByteBuffer>> splitValues(List<ByteBuffer> variables) throws InvalidRequestException
+        {
+            List<List<ByteBuffer>> buffers = new ArrayList<>(values.size());
+            for (Term value : values)
+            {
+                Term.MultiItemTerminal term = (Term.MultiItemTerminal)value.bind(variables);
+                buffers.add(term.getElements());
+            }
+            return buffers;
+        }
     }
 
-    public static class InWithMarker extends SingleColumnRestriction.InWithMarker implements MultiColumnRestriction
+    /**
+     * An IN restriction that uses a single marker for a set of IN values that are tuples.
+     * For example: "SELECT ... WHERE (a, b, c) IN ?"
+     */
+    public static class InWithMarker extends SingleColumnRestriction.InWithMarker implements MultiColumnRestriction.IN
     {
         public InWithMarker(AbstractMarker marker)
         {
@@ -60,6 +94,14 @@ public interface MultiColumnRestriction extends Restriction
         public boolean isMultiColumn()
         {
             return true;
+        }
+
+        public List<List<ByteBuffer>> splitValues(List<ByteBuffer> variables) throws InvalidRequestException
+        {
+            Tuples.InValue inValue = ((Tuples.InMarker) marker).bind(variables);
+            if (inValue == null)
+                throw new InvalidRequestException("Invalid null value for IN restriction");
+            return inValue.getSplitValues();
         }
     }
 
@@ -73,6 +115,21 @@ public interface MultiColumnRestriction extends Restriction
         public boolean isMultiColumn()
         {
             return true;
+        }
+
+        public ByteBuffer bound(Bound b, List<ByteBuffer> variables) throws InvalidRequestException
+        {
+            throw new UnsupportedOperationException("Multicolumn slice restrictions do not support bound()");
+        }
+
+        /**
+         * Similar to bounds(), but returns one ByteBuffer per-component in the bound instead of a single
+         * ByteBuffer to represent the entire bound.
+         */
+        public List<ByteBuffer> componentBounds(Bound b, List<ByteBuffer> variables) throws InvalidRequestException
+        {
+            Tuples.Value value = (Tuples.Value)bounds[b.idx].bind(variables);
+            return value.getElements();
         }
     }
 }

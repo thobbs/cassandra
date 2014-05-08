@@ -36,6 +36,8 @@ import org.apache.cassandra.utils.MD5Digest;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -45,9 +47,11 @@ import static org.apache.cassandra.cql3.QueryProcessor.processInternal;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertEquals;
 import static com.google.common.collect.Lists.newArrayList;
+import static org.junit.Assert.fail;
 
 public class MultiColumnRelationTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(MultiColumnRelationTest.class);
     static ClientState clientState;
     static String keyspace = "multi_column_relation_test";
 
@@ -198,12 +202,42 @@ public class MultiColumnRelationTest
     }
 
     @Test
-    public void testClusteringColumnEquality() throws Throwable
+    public void testSingleClusteringColumnEquality() throws Throwable
     {
         execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 0, 0)");
-        UntypedResultSet results = execute("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) = (0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 1, 0)");
+        execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 2, 0)");
+        UntypedResultSet results = execute("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) = (1)");
         assertEquals(1, results.size());
-        checkRow(0, results, 0, 0, 0);
+        checkRow(0, results, 0, 1, 0);
+
+        results = execute("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) = (3)");
+        assertEquals(0, results.size());
+    }
+
+    @Test
+    public void testMultipleClusteringColumnEquality() throws Throwable
+    {
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 1, 0)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 1, 1)");
+        execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 2, 0, 0)");
+        UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) = (1)");
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 1, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0);
+        checkRow(2, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c) = (1, 1)");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 1, 0);
+        checkRow(1, results, 0, 1, 1, 1);
+
+        results = execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) = (1, 1, 1)");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1);
+        execute("DELETE FROM %s.multiple_clustering WHERE a=0 AND b=2 and c=0 and d=0");
     }
 
     @Test(expected=InvalidRequestException.class)
@@ -228,6 +262,27 @@ public class MultiColumnRelationTest
     public void testSingleColumnTupleRelation() throws Throwable
     {
         execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND b = (1, 2, 3)");
+    }
+
+    @Test
+    public void testMixSingleAndTupleInequalities() throws Throwable
+    {
+        String[] queries = new String[]{
+            "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (0, 1, 0) AND b < 1",
+            "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > (0, 1, 0) AND c < 1",
+            "SELECT * FROM %s.multiple_clustering WHERE a=0 AND b > 1 AND (b, c, d) < (1, 1, 0)",
+            "SELECT * FROM %s.multiple_clustering WHERE a=0 AND c > 1 AND (b, c, d) < (1, 1, 0)",
+        };
+
+        for (String query : queries)
+        {
+            try
+            {
+                execute(query);
+                fail(String.format("Expected query \"%s\" to throw an InvalidRequestException", query));
+            }
+            catch (InvalidRequestException e) {}
+        }
     }
 
     @Test
@@ -467,26 +522,6 @@ public class MultiColumnRelationTest
         checkRow(4, results, 0, 0, 1, 1);
         checkRow(5, results, 0, 0, 1, 0);
 
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) > (1, 0)");
-        assertEquals(2, results.size());
-        checkRow(0, results, 0, 1, 1, 1);
-        checkRow(1, results, 0, 1, 1, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) >= (1, 0)");
-        assertEquals(3, results.size());
-        checkRow(0, results, 0, 1, 0, 0);
-        checkRow(1, results, 0, 1, 1, 1);
-        checkRow(2, results, 0, 1, 1, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (1, 1, 0)");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) >= (1, 1, 0)");
-        assertEquals(2, results.size());
-        checkRow(0, results, 0, 1, 1, 1);
-        checkRow(1, results, 0, 1, 1, 0);
-
         results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) < (1)");
         assertEquals(3, results.size());
         checkRow(0, results, 0, 0, 0, 0);
@@ -502,120 +537,9 @@ public class MultiColumnRelationTest
         checkRow(4, results, 0, 0, 1, 1);
         checkRow(5, results, 0, 0, 1, 0);
 
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) < (0, 1)");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 0, 0, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) <= (0, 1)");
-        assertEquals(3, results.size());
-        checkRow(0, results, 0, 0, 0, 0);
-        checkRow(1, results, 0, 0, 1, 1);
-        checkRow(2, results, 0, 0, 1, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) < (0, 1, 1)");
-        assertEquals(2, results.size());
-        checkRow(0, results, 0, 0, 0, 0);
-        checkRow(1, results, 0, 0, 1, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) <= (0, 1, 1)");
-        checkRow(0, results, 0, 0, 0, 0);
-        checkRow(1, results, 0, 0, 1, 1);
-        checkRow(2, results, 0, 0, 1, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 0) AND (b) < (1)");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 0, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c) < (1, 1)");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 1, 0, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c, d) < (1, 1, 0)");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 1, 0, 0);
-
-        // reversed
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) > (0) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(3, results.size());
-        checkRow(2, results, 0, 1, 0, 0);
-        checkRow(1, results, 0, 1, 1, 0);
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) >= (0) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(6, results.size());
-        checkRow(5, results, 0, 0, 0, 0);
-        checkRow(4, results, 0, 0, 1, 0);
-        checkRow(3, results, 0, 0, 1, 1);
-        checkRow(2, results, 0, 1, 0, 0);
-        checkRow(1, results, 0, 1, 1, 0);
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) > (1, 0) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(2, results.size());
-        checkRow(1, results, 0, 1, 1, 0);
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) >= (1, 0) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(3, results.size());
-        checkRow(2, results, 0, 1, 0, 0);
-        checkRow(1, results, 0, 1, 1, 0);
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (1, 1, 0) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) >= (1, 1, 0) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(2, results.size());
-        checkRow(1, results, 0, 1, 1, 0);
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) < (1) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(3, results.size());
-        checkRow(2, results, 0, 0, 0, 0);
-        checkRow(1, results, 0, 0, 1, 0);
-        checkRow(0, results, 0, 0, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b) <= (1) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(6, results.size());
-        checkRow(5, results, 0, 0, 0, 0);
-        checkRow(4, results, 0, 0, 1, 0);
-        checkRow(3, results, 0, 0, 1, 1);
-        checkRow(2, results, 0, 1, 0, 0);
-        checkRow(1, results, 0, 1, 1, 0);
-        checkRow(0, results, 0, 1, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) < (0, 1) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 0, 0, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) <= (0, 1) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(3, results.size());
-        checkRow(2, results, 0, 0, 0, 0);
-        checkRow(1, results, 0, 0, 1, 0);
-        checkRow(0, results, 0, 0, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) < (0, 1, 1) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(2, results.size());
-        checkRow(1, results, 0, 0, 0, 0);
-        checkRow(0, results, 0, 0, 1, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) <= (0, 1, 1) ORDER BY b DESC, c DESC, d DESC");
-        checkRow(2, results, 0, 0, 0, 0);
-        checkRow(1, results, 0, 0, 1, 0);
-        checkRow(0, results, 0, 0, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 0) AND (b) < (1) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 0, 1, 1);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c) < (1, 1) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 1, 0, 0);
-
-        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) > (0, 1, 1) AND (b, c, d) < (1, 1, 0) ORDER BY b DESC, c DESC, d DESC");
-        assertEquals(1, results.size());
-        checkRow(0, results, 0, 1, 0, 0);
+        // preserve pre-6875 behavior (even though the query result is technically incorrect)
+        results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c) > (1, 0)");
+        assertEquals(0, results.size());
     }
 
     @Test
@@ -1185,7 +1109,7 @@ public class MultiColumnRelationTest
             String columnName = columns.next().name.toString();
             int actual = row.getInt(columnName);
             assertEquals(String.format("Expected value %d for column %s in row %d, but got %s", actual, columnName, rowIndex, expected),
-                         (long)expected, actual);
+                         (long) expected, actual);
         }
     }
 }

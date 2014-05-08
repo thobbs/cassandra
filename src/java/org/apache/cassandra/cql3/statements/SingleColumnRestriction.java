@@ -35,7 +35,7 @@ public abstract class SingleColumnRestriction implements Restriction
 
     public static class EQ extends SingleColumnRestriction implements Restriction.EQ
     {
-        private final Term value;
+        protected final Term value;
         private final boolean onToken;
 
         public EQ(Term value, boolean onToken)
@@ -78,7 +78,7 @@ public abstract class SingleColumnRestriction implements Restriction
 
     public static class InWithValues extends SingleColumnRestriction implements Restriction.IN
     {
-        private final List<Term> values;
+        protected final List<Term> values;
 
         public InWithValues(List<Term> values)
         {
@@ -127,7 +127,7 @@ public abstract class SingleColumnRestriction implements Restriction
 
     public static class InWithMarker extends SingleColumnRestriction implements Restriction.IN
     {
-        private final AbstractMarker marker;
+        protected final AbstractMarker marker;
 
         public InWithMarker(AbstractMarker marker)
         {
@@ -136,7 +136,7 @@ public abstract class SingleColumnRestriction implements Restriction
 
         public List<ByteBuffer> values(List<ByteBuffer> variables) throws InvalidRequestException
         {
-            Term.InTerminal lval = (Term.InTerminal)marker.bind(variables);
+            Term.MultiItemTerminal lval = (Term.MultiItemTerminal)marker.bind(variables);
             if (lval == null)
                 throw new InvalidRequestException("Invalid null value for IN restriction");
             return lval.getElements();
@@ -176,9 +176,9 @@ public abstract class SingleColumnRestriction implements Restriction
 
     public static class Slice extends SingleColumnRestriction implements Restriction.Slice
     {
-        private final Term[] bounds;
-        private final boolean[] boundInclusive;
-        private final boolean onToken;
+        protected final Term[] bounds;
+        protected final boolean[] boundInclusive;
+        protected final boolean onToken;
 
         public Slice(boolean onToken)
         {

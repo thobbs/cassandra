@@ -22,6 +22,8 @@ import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,7 +90,7 @@ public class Tuples
     /**
      * A tuple of terminal values (e.g (123, 'abc')).
      */
-    public static class Value extends Term.InTerminal
+    public static class Value extends Term.MultiItemTerminal
     {
         public final ByteBuffer[] elements;
 
@@ -104,7 +106,7 @@ public class Tuples
 
         public ByteBuffer get()
         {
-            return CompositeType.build(elements);
+            throw new UnsupportedOperationException();
         }
 
         public List<ByteBuffer> getElements()
@@ -158,6 +160,53 @@ public class Tuples
         public String toString()
         {
             return tupleToString(elements);
+        }
+    }
+
+    /**
+     * A terminal value for a list of IN values that are tuples. For example: "SELECT ... WHERE (a, b, c) IN ?"
+     * This is similar to Lists.Value, but allows us to keep components of the composites in the list separate.
+     */
+    public static class InValue extends Term.Terminal
+    {
+        List<List<ByteBuffer>> elements;
+
+        public InValue(List<List<ByteBuffer>> items)
+        {
+            this.elements = items;
+        }
+
+        public static InValue fromSerialized(ByteBuffer value, ListType type) throws InvalidRequestException
+        {
+            try
+            {
+                // Collections have this small hack that validate cannot be called on a serialized object,
+                // but compose does the validation (so we're fine).
+                List<?> l = (List<?>)type.compose(value);
+
+                assert type.elements instanceof CompositeType;
+                CompositeType compositeType = (CompositeType) type.elements;
+
+                // type.split(bytes)
+                List<List<ByteBuffer>> elements = new ArrayList<>(l.size());
+                for (Object element : l)
+                    elements.add(Arrays.asList(compositeType.split(type.elements.decompose(element))));
+                return new InValue(elements);
+            }
+            catch (MarshalException e)
+            {
+                throw new InvalidRequestException(e.getMessage());
+            }
+        }
+
+        public ByteBuffer get()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public List<List<ByteBuffer>> getSplitValues()
+        {
+            return elements;
         }
     }
 
@@ -239,7 +288,7 @@ public class Tuples
 
         public AbstractMarker prepare(List<? extends ColumnSpecification> receivers) throws InvalidRequestException
         {
-            return new Lists.Marker(bindIndex, makeInReceiver(receivers));
+            return new InMarker(bindIndex, makeInReceiver(receivers));
         }
 
         @Override
@@ -266,6 +315,24 @@ public class Tuples
                 return null;
 
             return value == null ? null : Value.fromSerialized(value, (CompositeType)receiver.type);
+        }
+    }
+
+    /**
+     * Represents a marker for a set of IN values that are tuples, like "SELECT ... WHERE (a, b, c) IN ?"
+     */
+    public static class InMarker extends AbstractMarker
+    {
+        protected InMarker(int bindIndex, ColumnSpecification receiver)
+        {
+            super(bindIndex, receiver);
+            assert receiver.type instanceof ListType;
+        }
+
+        public InValue bind(List<ByteBuffer> values) throws InvalidRequestException
+        {
+            ByteBuffer value = values.get(bindIndex);
+            return value == null ? null : InValue.fromSerialized(value, (ListType)receiver.type);
         }
     }
 

@@ -801,6 +801,17 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                                         ColumnNameBuilder builder,
                                         List<ByteBuffer> variables) throws InvalidRequestException
     {
+        Restriction firstRestriction = restrictions[names.iterator().next().position];
+        if (firstRestriction.isMultiColumn())
+        {
+            if (firstRestriction.isSlice())
+                return buildMultiColumnSliceBound(bound, names, (MultiColumnRestriction.Slice) firstRestriction, isReversed, builder, variables);
+            else if (firstRestriction.isIN())
+                return buildMultiColumnInBound(bound, names, (MultiColumnRestriction.IN) firstRestriction, isReversed, builder, variables);
+            else
+                return buildMultiColumnEQBound(bound, (MultiColumnRestriction.EQ) firstRestriction, isReversed, builder, variables);
+        }
+
         // The end-of-component of composite doesn't depend on whether the
         // component type is reversed or not (i.e. the ReversedType is applied
         // to the component comparator but not to the end-of-component itself),
@@ -824,56 +835,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                                                  ? builder.buildAsEndOfRange()
                                                  : builder.build());
             }
-
-            if (r.isMultiColumn())
-            {
-                if (r.isSlice())
-                {
-                    ByteBuffer val = getSliceValue(r, b, variables);
-                    Relation.Type relType = ((Restriction.Slice)r).getRelation(eocBound, b);
-                    switch (relType)
-                    {
-                        case LT:
-                            val.put(val.limit() - 1, (byte) -1);
-                            break;
-                        case GT:
-                        case LTE:
-                            val.put(val.limit() - 1, (byte) 1);
-                            break;
-                        default:
-                            val.put(val.limit() - 1, (byte) 0);
-                            break;
-                    }
-                    return Collections.singletonList(val);
-                }
-                else if (r.isIN())
-                {
-                    List<ByteBuffer> values = r.values(variables);
-
-                    // The IN query might not have listed the values in comparator order, so we need to re-sort
-                    // the bounds lists to make sure the slices works correctly (also, to avoid duplicates).
-                    TreeSet<ByteBuffer> s = new TreeSet<>(isReversed ? cfDef.cfm.comparator.reverseComparator : cfDef.cfm.comparator);
-
-                    for (ByteBuffer val : values)
-                    {
-                        if (b == Bound.END)
-                        {
-                            val = ByteBufferUtil.clone(val);
-                            val.put(val.limit() - 1, (byte)1);
-                        }
-                        s.add(val);
-                    }
-                    return new ArrayList<>(s);
-                }
-                else
-                {
-                    ByteBuffer val = r.values(variables).get(0);
-                    if (b == Bound.END)
-                        val.put(val.limit() - 1, (byte)1);
-                    return Collections.singletonList(val);
-                }
-            }
-            else if (r.isSlice())
+            if (r.isSlice())
             {
                 builder.add(getSliceValue(r, b, variables));
                 Relation.Type relType = ((Restriction.Slice)r).getRelation(eocBound, b);
@@ -913,6 +875,80 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         // case using the eoc would be bad, since for the random partitioner we have no guarantee that
         // builder.buildAsEndOfRange() will sort after builder.build() (see #5240).
         return Collections.singletonList((bound == Bound.END && builder.remainingCount() > 0) ? builder.buildAsEndOfRange() : builder.build());
+    }
+
+    private List<ByteBuffer> buildMultiColumnSliceBound(Bound bound,
+                                                        Collection<CFDefinition.Name> names,
+                                                        MultiColumnRestriction.Slice slice,
+                                                        boolean isReversed,
+                                                        ColumnNameBuilder builder,
+                                                        List<ByteBuffer> variables) throws InvalidRequestException
+    {
+        Bound eocBound = isReversed ? Bound.reverse(bound) : bound;
+
+        Iterator<CFDefinition.Name> iter = names.iterator();
+        CFDefinition.Name firstName = iter.next();
+        // A hack to preserve pre-6875 behavior for tuple-notation slices where the comparator mixes ASCENDING
+        // and DESCENDING orders.  This stores the bound for the first component; we will re-use it for all following
+        // components, even if they don't match the first component's reversal/non-reversal.  Note that this does *not*
+        // guarantee correct query results, it just preserves the previous behavior.
+        Bound firstComponentBound = isReversed == isReversedType(firstName) ? bound : Bound.reverse(bound);
+
+        if (!slice.hasBound(firstComponentBound))
+            return Collections.singletonList(builder.componentCount() > 0 && eocBound == Bound.END
+                    ? builder.buildAsEndOfRange()
+                    : builder.build());
+
+        List<ByteBuffer> vals = slice.componentBounds(firstComponentBound, variables);
+        builder.add(vals.get(firstName.position));
+
+        while(iter.hasNext())
+        {
+            CFDefinition.Name name = iter.next();
+            if (name.position >= vals.size())
+                break;
+
+            builder.add(vals.get(name.position));
+        }
+        Relation.Type relType = slice.getRelation(eocBound, firstComponentBound);
+        return Collections.singletonList(builder.buildForRelation(relType));
+    }
+
+    private List<ByteBuffer> buildMultiColumnInBound(Bound bound,
+                                                     Collection<CFDefinition.Name> names,
+                                                     MultiColumnRestriction.IN restriction,
+                                                     boolean isReversed,
+                                                     ColumnNameBuilder builder,
+                                                     List<ByteBuffer> variables) throws InvalidRequestException
+    {
+        List<List<ByteBuffer>> splitInValues = restriction.splitValues(variables);
+
+        // The IN query might not have listed the values in comparator order, so we need to re-sort
+        // the bounds lists to make sure the slices works correctly (also, to avoid duplicates).
+        TreeSet<ByteBuffer> inValues = new TreeSet<>(isReversed ? cfDef.cfm.comparator.reverseComparator : cfDef.cfm.comparator);
+        Iterator<CFDefinition.Name> iter = names.iterator();
+        for (List<ByteBuffer> components : splitInValues)
+        {
+            ColumnNameBuilder nameBuilder = builder.copy();
+            for (ByteBuffer component : components)
+                nameBuilder.add(component);
+
+            Bound b = isReversed == isReversedType(iter.next()) ? bound : Bound.reverse(bound);
+            inValues.add((bound == Bound.END && nameBuilder.remainingCount() > 0) ? nameBuilder.buildAsEndOfRange() : nameBuilder.build());
+        }
+        return new ArrayList<>(inValues);
+    }
+
+    private List<ByteBuffer> buildMultiColumnEQBound(Bound bound, MultiColumnRestriction.EQ restriction, boolean isReversed, ColumnNameBuilder builder, List<ByteBuffer> variables) throws InvalidRequestException
+    {
+        Bound eocBound = isReversed ? Bound.reverse(bound) : bound;
+        for (ByteBuffer component : restriction.values(variables))
+            builder.add(component);
+
+        ByteBuffer result = builder.componentCount() > 0 && eocBound == Bound.END
+                ? builder.buildAsEndOfRange()
+                : builder.build();
+        return Collections.singletonList(result);
     }
 
     private static boolean isNullRestriction(Restriction r, Bound b)
@@ -1530,9 +1566,11 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     t.collectMarkerSpecification(boundNames);
                     for (CFDefinition.Name name : names)
                     {
-                        MultiColumnRestriction.Slice restriction = (MultiColumnRestriction.Slice)getExistingRestriction(stmt, name);
+                        Restriction.Slice restriction = (Restriction.Slice)getExistingRestriction(stmt, name);
                         if (restriction == null)
                             restriction = new MultiColumnRestriction.Slice(onToken);
+                        else if (!restriction.isMultiColumn())
+                            throw new InvalidRequestException(String.format("Column \"%s\" cannot have both tuple-notation inequalities and single-column inequalities", name, relation));
                         restriction.setBound(relation.operator(), t);
                         stmt.columnRestrictions[name.position] = restriction;
                     }
@@ -1636,7 +1674,9 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     if (existingRestriction == null)
                         existingRestriction = new SingleColumnRestriction.Slice(newRel.onToken);
                     else if (!existingRestriction.isSlice())
-                        throw new InvalidRequestException(String.format("%s cannot be restricted by both an equal and an inequal relation", name));
+                        throw new InvalidRequestException(String.format("Column \"%s\" cannot be restricted by both an equality and an inequality relation", name));
+                    else if (existingRestriction.isMultiColumn())
+                        throw new InvalidRequestException(String.format("Column \"%s\" cannot be restricted by both a tuple notation inequality and a single column inequality (%s)", name, newRel));
                     Term t = newRel.getValue().prepare(receiver);
                     t.collectMarkerSpecification(boundNames);
                     ((SingleColumnRestriction.Slice)existingRestriction).setBound(newRel.operator(), t);

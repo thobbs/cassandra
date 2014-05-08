@@ -133,7 +133,7 @@ public interface Term
         }
     }
 
-    public abstract class InTerminal extends Terminal
+    public abstract class MultiItemTerminal extends Terminal
     {
         public abstract List<ByteBuffer> getElements();
     }

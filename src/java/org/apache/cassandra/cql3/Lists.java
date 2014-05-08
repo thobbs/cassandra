@@ -117,7 +117,7 @@ public abstract class Lists
         }
     }
 
-    public static class Value extends Term.InTerminal
+    public static class Value extends Term.MultiItemTerminal
     {
         public final List<ByteBuffer> elements;
 
@@ -220,7 +220,6 @@ public abstract class Lists
         {
             ByteBuffer value = values.get(bindIndex);
             return value == null ? null : Value.fromSerialized(value, (ListType)receiver.type);
-
         }
     }
 
