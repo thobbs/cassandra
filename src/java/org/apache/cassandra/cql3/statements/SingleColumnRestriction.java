@@ -291,10 +291,10 @@ public abstract class SingleColumnRestriction implements Restriction
         public String toString()
         {
             return String.format("SLICE(%s %s, %s %s)%s", boundInclusive[0] ? ">=" : ">",
-                    bounds[0],
-                    boundInclusive[1] ? "<=" : "<",
-                    bounds[1],
-                    onToken ? "*" : "");
+                                 bounds[0],
+                                 boundInclusive[1] ? "<=" : "<",
+                                 bounds[1],
+                                 onToken ? "*" : "");
         }
     }
 }

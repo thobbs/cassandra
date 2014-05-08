@@ -861,6 +861,7 @@ public class MultiColumnRelationTest
         assertEquals(1, results.size());
         checkRow(0, results, 0, 1, 0, 0);
     }
+
     @Test
     public void testPrepareMultipleClusteringColumnInequalitySingleMarker() throws Throwable
     {
@@ -945,7 +946,6 @@ public class MultiColumnRelationTest
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
-
 
         results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b, c) IN ((?, ?))"),
                 makeIntOptions(0, 1));
