@@ -71,8 +71,9 @@ public class SSTableSplitter {
         }
 
         @Override
-        protected void replaceCompactedSSTables(Collection<SSTableReader> compacted, Collection<SSTableReader> replacements)
+        protected Collection<SSTableReader> replaceCompactedSSTables(Collection<SSTableReader> compacted, Collection<SSTableReader> replacements)
         {
+            return Collections.emptyList();
         }
 
         @Override

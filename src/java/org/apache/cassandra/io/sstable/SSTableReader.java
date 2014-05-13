@@ -378,7 +378,7 @@ public class SSTableReader extends SSTable implements Closeable
      */
     public void close() throws IOException
     {
-        logger.debug("Closing SSTableReader for %s", descriptor);
+        logger.debug("Closing SSTableReader for {}", descriptor);
         if (readMeterSyncFuture != null)
             readMeterSyncFuture.cancel(false);
 
