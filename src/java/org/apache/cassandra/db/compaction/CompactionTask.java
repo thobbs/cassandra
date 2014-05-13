@@ -239,7 +239,7 @@ public class CompactionTask extends AbstractCompactionTask
             }
         }
 
-        replaceCompactedSSTables(toCompact, sstables);
+        sstables = replaceCompactedSSTables(toCompact, sstables);
         // TODO: this doesn't belong here, it should be part of the reader to load when the tracker is wired up
         for (SSTableReader sstable : sstables)
             sstable.preheat(cachedKeyMap.get(sstable.descriptor));
@@ -272,9 +272,19 @@ public class CompactionTask extends AbstractCompactionTask
         }
 
         SystemKeyspace.updateCompactionHistory(cfs.keyspace.getName(), cfs.name, System.currentTimeMillis(), startsize, endsize, mergedRows);
-        logger.info(String.format("Compacted %d sstables to [%s].  %,d bytes to %,d (~%d%% of original) in %,dms = %fMB/s.  %,d total partitions merged to %,d.  Partition merge counts were {%s}",
-                                  toCompact.size(), builder.toString(), startsize, endsize, (int) (ratio * 100), dTime, mbps, totalSourceRows, totalkeysWritten, mergeSummary.toString()));
-        logger.debug(String.format("CF Total Bytes Compacted: %,d", CompactionTask.addToTotalBytesCompacted(endsize)));
+        if (sstables.isEmpty())
+        {
+            StringBuilder stringBuilder = new StringBuilder("");
+            for (SSTableReader reader : toCompact)
+                stringBuilder.append(reader.descriptor.baseFilename()).append(",");
+            logger.info("Table was dropped while compacting [%s]", stringBuilder.toString());
+        }
+        else
+        {
+            logger.info(String.format("Compacted %d sstables to [%s].  %,d bytes to %,d (~%d%% of original) in %,dms = %fMB/s.  %,d total partitions merged to %,d.  Partition merge counts were {%s}",
+                                      toCompact.size(), builder.toString(), startsize, endsize, (int) (ratio * 100), dTime, mbps, totalSourceRows, totalkeysWritten, mergeSummary.toString()));
+            logger.debug(String.format("CF Total Bytes Compacted: %,d", CompactionTask.addToTotalBytesCompacted(endsize)));
+        }
     }
 
     private SSTableWriter createCompactionWriter(File sstableDirectory, long keysPerSSTable)
@@ -291,9 +301,9 @@ public class CompactionTask extends AbstractCompactionTask
         return 0;
     }
 
-    protected void replaceCompactedSSTables(Collection<SSTableReader> compacted, Collection<SSTableReader> replacements)
+    protected Collection<SSTableReader> replaceCompactedSSTables(Collection<SSTableReader> compacted, Collection<SSTableReader> replacements)
     {
-        cfs.replaceCompactedSSTables(compacted, replacements, compactionType);
+        return cfs.replaceCompactedSSTables(compacted, replacements, compactionType);
     }
 
     protected CompactionController getCompactionController(Set<SSTableReader> toCompact)

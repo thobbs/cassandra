@@ -247,10 +247,12 @@ public class DataTracker
         notifySSTablesChanged(sstables, Collections.<SSTableReader>emptyList(), compactionType);
     }
 
-    public void replaceCompactedSSTables(Collection<SSTableReader> sstables, Collection<SSTableReader> replacements, OperationType compactionType)
+    public Collection<SSTableReader> replaceCompactedSSTables(Collection<SSTableReader> sstables, Collection<SSTableReader> replacements, OperationType compactionType)
     {
-        replace(sstables, replacements);
-        notifySSTablesChanged(sstables, replacements, compactionType);
+        // if the table was dropped, we may discard the replacement sstables
+        Collection<SSTableReader> actualReplacements = replace(sstables, replacements);
+        notifySSTablesChanged(sstables, actualReplacements, compactionType);
+        return actualReplacements;
     }
 
     public void addInitialSSTables(Collection<SSTableReader> sstables)
@@ -328,7 +330,7 @@ public class DataTracker
                           SSTableIntervalTree.empty()));
     }
 
-    private void replace(Collection<SSTableReader> oldSSTables, Iterable<SSTableReader> replacements)
+    private Collection<SSTableReader> replace(Collection<SSTableReader> oldSSTables, Collection<SSTableReader> replacements)
     {
         if (!cfstore.isValid())
         {
@@ -345,6 +347,7 @@ public class DataTracker
         while (!view.compareAndSet(currentView, newView));
 
         postReplace(oldSSTables, replacements, false);
+        return replacements;
     }
 
     private void postReplace(Collection<SSTableReader> oldSSTables, Iterable<SSTableReader> replacements, boolean tolerateCompacted)
