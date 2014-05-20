@@ -152,7 +152,7 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
     public void validate(ClientState state) throws InvalidRequestException
     {
         if (hasConditions() && attrs.isTimestampSet())
-            throw new InvalidRequestException("Custom timestamps are not allowed when conditions are used");
+            throw new InvalidRequestException("Cannot provide custom timestamp for conditional update");
 
         if (isCounter())
         {
@@ -653,7 +653,9 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
         }
         else
         {
-            List<CFDefinition.Name> names = new ArrayList<CFDefinition.Name>();
+            // We can have multiple conditions on the same columns (for collections) so use a set
+            // to avoid duplicate, but preserve the order just to it follows the order of IF in the query in general
+            Set<CFDefinition.Name> names = new LinkedHashSet<CFDefinition.Name>();
             // Adding the partition key for batches to disambiguate if the conditions span multipe rows (we don't add them outside
             // of batches for compatibility sakes).
             if (isBatch)
@@ -769,9 +771,6 @@ public abstract class ModificationStatement implements CQLStatement, MeasurableF
             {
                 if (stmt.isCounter())
                     throw new InvalidRequestException("Conditional updates are not supported on counter tables");
-
-                if (attrs.timestamp != null)
-                    throw new InvalidRequestException("Cannot provide custom timestamp for conditional update");
 
                 if (ifNotExists)
                 {

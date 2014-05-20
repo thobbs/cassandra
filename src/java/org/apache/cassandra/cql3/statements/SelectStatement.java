@@ -132,9 +132,9 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         }
 
         // Otherwise, check the selected columns
-        selectsStaticColumns = !Iterables.isEmpty(Iterables.filter(selection.getColumnsList(), isStaticFilter));
+        selectsStaticColumns = !Iterables.isEmpty(Iterables.filter(selection.getColumns(), isStaticFilter));
         selectsOnlyStaticColumns = true;
-        for (CFDefinition.Name name : selection.getColumnsList())
+        for (CFDefinition.Name name : selection.getColumns())
         {
             if (name.kind != CFDefinition.Name.Kind.KEY_ALIAS && name.kind != CFDefinition.Name.Kind.STATIC)
             {
@@ -785,7 +785,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         if (!cfDef.hasCollections)
             return false;
 
-        for (CFDefinition.Name name : selection.getColumnsList())
+        for (CFDefinition.Name name : selection.getColumns())
         {
             if (name.type instanceof CollectionType)
                 return true;
@@ -1077,8 +1077,8 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             if (!cf.hasOnlyTombstones(now))
             {
                 result.newRow();
-                // selection.getColumnsList() will contain only the partition key components - all of them.
-                for (CFDefinition.Name name : selection.getColumnsList())
+                // selection.getColumns() will contain only the partition key components - all of them.
+                for (CFDefinition.Name name : selection.getColumns())
                     result.add(keyComponents[name.position]);
             }
         }
@@ -1107,7 +1107,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
 
                 result.newRow();
                 // Respect selection order
-                for (CFDefinition.Name name : selection.getColumnsList())
+                for (CFDefinition.Name name : selection.getColumns())
                 {
                     switch (name.kind)
                     {
@@ -1148,35 +1148,25 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 builder.add(c);
             }
 
-            Map<CFDefinition.Name, ByteBuffer> staticValues = Collections.emptyMap();
+            ColumnGroupMap staticGroup = null;
             // Gather up static values first
             if (!builder.isEmpty() && builder.firstGroup().isStatic)
             {
-                staticValues = new HashMap<>();
-                ColumnGroupMap group = builder.firstGroup();
-                for (CFDefinition.Name name : Iterables.filter(selection.getColumnsList(), isStaticFilter))
-                    staticValues.put(name, getValue(name, group));
+                staticGroup = builder.firstGroup();
                 builder.discardFirst();
 
                 // If there was static columns but there is no actual row, then provided the select was a full
                 // partition selection (i.e. not a 2ndary index search and there was no condition on clustering columns)
                 // then we want to include the static columns in the result set.
-                if (!staticValues.isEmpty() && builder.isEmpty() && !usesSecondaryIndexing && hasNoClusteringColumnsRestriction())
+                if (builder.isEmpty() && !usesSecondaryIndexing && hasNoClusteringColumnsRestriction() && hasValueForQuery(staticGroup))
                 {
-                    result.newRow();
-                    for (CFDefinition.Name name : selection.getColumnsList())
-                    {
-                        if (name.kind == CFDefinition.Name.Kind.KEY_ALIAS)
-                            result.add(keyComponents[name.position]);
-                        else
-                            result.add(name.kind == CFDefinition.Name.Kind.STATIC ? staticValues.get(name) : null);
-                    }
+                    handleGroup(result, keyComponents, ColumnGroupMap.EMPTY, staticGroup);
                     return;
                 }
             }
 
             for (ColumnGroupMap group : builder.groups())
-                handleGroup(selection, result, keyComponents, group, staticValues);
+                handleGroup(result, keyComponents, group, staticGroup);
         }
         else
         {
@@ -1185,7 +1175,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
 
             // Static case: One cqlRow for all columns
             result.newRow();
-            for (CFDefinition.Name name : selection.getColumnsList())
+            for (CFDefinition.Name name : selection.getColumns())
             {
                 if (name.kind == CFDefinition.Name.Kind.KEY_ALIAS)
                     result.add(keyComponents[name.position]);
@@ -1193,6 +1183,14 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     result.add(cf.getColumn(name.name.key));
             }
         }
+    }
+
+    private boolean hasValueForQuery(ColumnGroupMap staticGroup)
+    {
+        for (CFDefinition.Name name : Iterables.filter(selection.getColumns(), isStaticFilter))
+            if (staticGroup.hasValueFor(name.name.key))
+                return true;
+        return false;
     }
 
     private boolean hasNoClusteringColumnsRestriction()
@@ -1245,15 +1243,14 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         Collections.sort(cqlRows.rows, new CompositeComparator(types, positions));
     }
 
-    private void handleGroup(Selection selection,
-                             Selection.ResultSetBuilder result,
+    private void handleGroup(Selection.ResultSetBuilder result,
                              ByteBuffer[] keyComponents,
                              ColumnGroupMap columns,
-                             Map<CFDefinition.Name, ByteBuffer> staticValues) throws InvalidRequestException
+                             ColumnGroupMap staticGroup) throws InvalidRequestException
     {
         // Respect requested order
         result.newRow();
-        for (CFDefinition.Name name : selection.getColumnsList())
+        for (CFDefinition.Name name : selection.getColumns())
         {
             switch (name.kind)
             {
@@ -1267,48 +1264,32 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     // This should not happen for SPARSE
                     throw new AssertionError();
                 case COLUMN_METADATA:
-                    if (name.type.isCollection())
-                    {
-                        result.add(getCollectionValue(name, columns));
-                    }
-                    else
-                    {
-                        result.add(columns.getSimple(name.name.key));
-                    }
+                    addValue(result, name, columns);
                     break;
                 case STATIC:
-                    result.add(staticValues.get(name));
+                    addValue(result, name, staticGroup);
                     break;
             }
         }
     }
 
-    private static ByteBuffer getValue(CFDefinition.Name name, ColumnGroupMap columns)
+    private static void addValue(Selection.ResultSetBuilder result, CFDefinition.Name name, ColumnGroupMap group)
     {
+        if (group == null)
+        {
+            result.add((ByteBuffer)null);
+            return;
+        }
+
         if (name.type.isCollection())
-            return getCollectionValue(name, columns);
-        else if (name.type.isCommutative())
-            return getCounterValue(name, columns);
-
-        return getSimpleValue(name, columns);
-    }
-
-    private static ByteBuffer getCollectionValue(CFDefinition.Name name, ColumnGroupMap columns)
-    {
-        List<Pair<ByteBuffer, Column>> collection = columns.getCollection(name.name.key);
-        return collection == null ? null : ((CollectionType)name.type).serialize(collection);
-    }
-
-    private static ByteBuffer getSimpleValue(CFDefinition.Name name, ColumnGroupMap columns)
-    {
-        Column c = columns.getSimple(name.name.key);
-        return c == null ? null : c.value();
-    }
-
-    private static ByteBuffer getCounterValue(CFDefinition.Name name, ColumnGroupMap columns)
-    {
-        Column c = columns.getSimple(name.name.key);
-        return c == null ? null : CounterColumnType.instance.decompose(CounterContext.instance().total(c.value()));
+        {
+            List<Pair<ByteBuffer, Column>> collection = group.getCollection(name.name.key);
+            result.add(collection == null ? null : ((CollectionType)name.type).serialize(collection));
+        }
+        else
+        {
+            result.add(group.getSimple(name.name.key));
+        }
     }
 
     private static boolean isReversedType(CFDefinition.Name name)
@@ -1367,7 +1348,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                                 : Selection.fromSelectors(cfDef, selectClause);
 
             if (parameters.isDistinct)
-                validateDistinctSelection(selection.getColumnsList(), cfDef.partitionKeys());
+                validateDistinctSelection(selection.getColumns(), cfDef.partitionKeys());
 
             SelectStatement stmt = new SelectStatement(cfDef, boundNames.size(), parameters, selection, prepareLimit(boundNames));
 
