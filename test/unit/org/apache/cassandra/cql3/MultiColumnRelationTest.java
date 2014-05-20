@@ -19,10 +19,7 @@ package org.apache.cassandra.cql3;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -726,7 +723,7 @@ public class MultiColumnRelationTest
         execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 0, 0)");
         execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 1, 0)");
         MD5Digest id = prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) = ?");
-        UntypedResultSet results = executePrepared(id, options(composite(0)));
+        UntypedResultSet results = executePrepared(id, options(tuple(0)));
         assertEquals(1, results.size());
         checkRow(0, results, 0, 0, 0);
     }
@@ -772,29 +769,29 @@ public class MultiColumnRelationTest
         execute("INSERT INTO %s.single_clustering (a, b, c) VALUES (0, 2, 0)");
 
         MD5Digest id = prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) > ?");
-        UntypedResultSet results = executePrepared(id, options(composite(0)));
+        UntypedResultSet results = executePrepared(id, options(tuple(0)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 1, 0);
         checkRow(1, results, 0, 2, 0);
 
-        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) >= ?"), options(composite(1)));
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) >= ?"), options(tuple(1)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 1, 0);
         checkRow(1, results, 0, 2, 0);
 
-        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) < ?"), options(composite(2)));
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) < ?"), options(tuple(2)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 0);
         checkRow(1, results, 0, 1, 0);
 
-        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) <= ?"), options(composite(1)));
+        results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) <= ?"), options(tuple(1)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 0);
         checkRow(1, results, 0, 1, 0);
 
 
         results = executePrepared(prepare("SELECT * FROM %s.single_clustering WHERE a=0 AND (b) > ? AND (b) < ?"),
-                options(composite(0), composite(2)));
+                options(tuple(0), tuple(2)));
         assertEquals(1, results.size());
         checkRow(0, results, 0, 1, 0);
     }
@@ -874,45 +871,45 @@ public class MultiColumnRelationTest
         execute("INSERT INTO %s.multiple_clustering (a, b, c, d) VALUES (0, 1, 1, 1)");
 
         UntypedResultSet results = executePrepared(prepare(
-                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) > ?"), options(composite(0)));
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) > ?"), options(tuple(0)));
         assertEquals(3, results.size());
         checkRow(0, results, 0, 1, 0, 0);
         checkRow(1, results, 0, 1, 1, 0);
         checkRow(2, results, 0, 1, 1, 1);
 
         results = executePrepared(prepare(
-                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c) > ?"), options(composite(1, 0)));
+                "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c) > ?"), options(tuple(1, 0)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 1, 1, 0);
         checkRow(1, results, 0, 1, 1, 1);
 
         results = executePrepared(prepare
-                ("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ?"), options(composite(1, 1, 0)));
+                ("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ?"), options(tuple(1, 1, 0)));
         assertEquals(1, results.size());
         checkRow(0, results, 0, 1, 1, 1);
 
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b) < ?"),
-                options(composite(0, 1, 0), composite(1)));
+                options(tuple(0, 1, 0), tuple(1)));
         assertEquals(1, results.size());
         checkRow(0, results, 0, 0, 1, 1);
 
         results = executePrepared(prepare
                 ("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b, c) < ?"),
-                options(composite(0, 1, 1), composite(1, 1)));
+                options(tuple(0, 1, 1), tuple(1, 1)));
         assertEquals(1, results.size());
         checkRow(0, results, 0, 1, 0, 0);
 
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b, c, d) < ?"),
-                options(composite(0, 1, 1), composite(1, 1, 0)));
+                options(tuple(0, 1, 1), tuple(1, 1, 0)));
         assertEquals(1, results.size());
         checkRow(0, results, 0, 1, 0, 0);
 
         // reversed
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b) > ? ORDER BY b DESC, c DESC, d DESC"),
-                options(composite(0)));
+                options(tuple(0)));
         assertEquals(3, results.size());
         checkRow(2, results, 0, 1, 0, 0);
         checkRow(1, results, 0, 1, 1, 0);
@@ -920,7 +917,7 @@ public class MultiColumnRelationTest
 
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) > ? AND (b, c) < ? ORDER BY b DESC, c DESC, d DESC"),
-                options(composite(0, 1, 1), composite(1, 1)));
+                options(tuple(0, 1, 1), tuple(1, 1)));
         assertEquals(1, results.size());
         checkRow(0, results, 0, 1, 0, 0);
     }
@@ -970,7 +967,7 @@ public class MultiColumnRelationTest
 
         UntypedResultSet results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN (?, ?)"),
-                options(composite(0, 1, 0), composite(0, 1, 1)));
+                options(tuple(0, 1, 0), tuple(0, 1, 1)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
@@ -978,20 +975,20 @@ public class MultiColumnRelationTest
         // same query, but reversed order for the IN values
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN (?, ?)"),
-                options(composite(0, 1, 1), composite(0, 1, 0)));
+                options(tuple(0, 1, 1), tuple(0, 1, 0)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
 
 
         results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b, c) IN (?)"),
-                options(composite(0, 1)));
+                options(tuple(0, 1)));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
 
         results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b) IN (?)"),
-                options(composite(0)));
+                options(tuple(0)));
         assertEquals(3, results.size());
         checkRow(0, results, 0, 0, 0, 0);
         checkRow(1, results, 0, 0, 1, 0);
@@ -1007,7 +1004,7 @@ public class MultiColumnRelationTest
 
         UntypedResultSet results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ?"),
-                options(list(composite(0, 1, 0), composite(0, 1, 1))));
+                options(list(tuple(0, 1, 0), tuple(0, 1, 1))));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
@@ -1015,7 +1012,7 @@ public class MultiColumnRelationTest
         // same query, but reversed order for the IN values
         results = executePrepared(prepare(
                 "SELECT * FROM %s.multiple_clustering WHERE a=0 AND (b, c, d) IN ?"),
-                options(list(composite(0, 1, 1), composite(0, 1, 0))));
+                options(list(tuple(0, 1, 1), tuple(0, 1, 0))));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
@@ -1026,13 +1023,13 @@ public class MultiColumnRelationTest
         assertTrue(results.isEmpty());
 
         results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b, c) IN ?"),
-                options(list(composite(0, 1))));
+                options(list(tuple(0, 1))));
         assertEquals(2, results.size());
         checkRow(0, results, 0, 0, 1, 0);
         checkRow(1, results, 0, 0, 1, 1);
 
         results = executePrepared(prepare("SELECT * FROM %s.multiple_clustering WHERE a=0 and (b) IN ?"),
-                options(list(composite(0))));
+                options(list(tuple(0))));
         assertEquals(3, results.size());
         checkRow(0, results, 0, 0, 0, 0);
         checkRow(1, results, 0, 0, 1, 0);
@@ -1075,18 +1072,18 @@ public class MultiColumnRelationTest
         return new QueryOptions(ConsistencyLevel.ONE, buffers);
     }
 
-    private static ByteBuffer composite(Integer... values)
+    private static ByteBuffer tuple(Integer... values)
     {
-        AbstractType<?>[] types = new AbstractType[values.length];
+        List<AbstractType<?>> types = new ArrayList<>(values.length);
+        ByteBuffer[] buffers = new ByteBuffer[values.length];
         for (int i = 0; i < values.length; i++)
-            types[i] = Int32Type.instance;
+        {
+            types.add(Int32Type.instance);
+            buffers[i] = ByteBufferUtil.bytes(values[i]);
+        }
 
-        CompositeType type = CompositeType.getInstance(types);
-        CompositeType.Builder builder = type.builder();
-        for (int value : values)
-            builder.add(ByteBufferUtil.bytes(value));
-
-        return builder.build();
+        TupleType type = new TupleType(types);
+        return type.buildValue(buffers);
     }
 
     private static ByteBuffer list(ByteBuffer... values)

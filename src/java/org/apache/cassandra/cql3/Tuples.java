@@ -19,8 +19,8 @@ package org.apache.cassandra.cql3;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
 import org.slf4j.Logger;
@@ -98,7 +98,7 @@ public class Tuples
             this.elements = elements;
         }
 
-        public static Value fromSerialized(ByteBuffer bytes, CompositeType type)
+        public static Value fromSerialized(ByteBuffer bytes, TupleType type)
         {
             return new Value(type.split(bytes));
         }
@@ -164,7 +164,7 @@ public class Tuples
 
     /**
      * A terminal value for a list of IN values that are tuples. For example: "SELECT ... WHERE (a, b, c) IN ?"
-     * This is similar to Lists.Value, but allows us to keep components of the composites in the list separate.
+     * This is similar to Lists.Value, but allows us to keep components of the tuples in the list separate.
      */
     public static class InValue extends Term.Terminal
     {
@@ -183,13 +183,13 @@ public class Tuples
                 // but compose does the validation (so we're fine).
                 List<?> l = (List<?>)type.compose(value);
 
-                assert type.elements instanceof CompositeType;
-                CompositeType compositeType = (CompositeType) type.elements;
+                assert type.elements instanceof TupleType;
+                TupleType tupleType = (TupleType) type.elements;
 
                 // type.split(bytes)
                 List<List<ByteBuffer>> elements = new ArrayList<>(l.size());
                 for (Object element : l)
-                    elements.add(Arrays.asList(compositeType.split(type.elements.decompose(element))));
+                    elements.add(Arrays.asList(tupleType.split(type.elements.decompose(element))));
                 return new InValue(elements);
             }
             catch (MarshalException e)
@@ -211,9 +211,7 @@ public class Tuples
 
     /**
      * A raw placeholder for a tuple of values for different multiple columns, each of which may have a different type.
-     * For example, "SELECT ... WHERE (col1, col2) > ?'.
-     *
-     * Because multiple types can be used, a CompositeType is used to represent the values.
+     * For example, "SELECT ... WHERE (col1, col2) > ?".
      */
     public static class Raw extends AbstractMarker.Raw implements Term.MultiColumnRaw
     {
@@ -237,7 +235,7 @@ public class Tuples
             inName.append(')');
 
             ColumnIdentifier identifier = new ColumnIdentifier(inName.toString(), true);
-            CompositeType type = CompositeType.getInstance(types);
+            TupleType type = new TupleType(types);
             return new ColumnSpecification(receivers.get(0).ksName, receivers.get(0).cfName, identifier, type);
         }
 
@@ -281,7 +279,7 @@ public class Tuples
             inName.append(')');
 
             ColumnIdentifier identifier = new ColumnIdentifier(inName.toString(), true);
-            CompositeType type = CompositeType.getInstance(types);
+            TupleType type = new TupleType(types);
             return new ColumnSpecification(receivers.get(0).ksName, receivers.get(0).cfName, identifier, ListType.getInstance(type));
         }
 
@@ -313,7 +311,7 @@ public class Tuples
             if (value == null)
                 return null;
 
-            return value == null ? null : Value.fromSerialized(value, (CompositeType)receiver.type);
+            return value == null ? null : Value.fromSerialized(value, (TupleType)receiver.type);
         }
     }
 
