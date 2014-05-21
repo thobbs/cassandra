@@ -805,7 +805,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         // check the first restriction to see if we're dealing with a multi-column restriction
         if (!names.isEmpty())
         {
-            Restriction firstRestriction = restrictions[names.iterator().next().position];
+            Restriction firstRestriction = restrictions[0];
             if (firstRestriction != null && firstRestriction.isMultiColumn())
             {
                 if (firstRestriction.isSlice())
