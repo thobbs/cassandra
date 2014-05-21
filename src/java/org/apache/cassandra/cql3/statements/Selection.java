@@ -287,7 +287,8 @@ public abstract class Selection
 
         private ResultSetBuilder(long now)
         {
-            this.resultSet = new ResultSet(getResultMetadata(), new ArrayList<List<ByteBuffer>>());
+            // create a Metadata instance to insure the paging state and flags are clean
+            this.resultSet = new ResultSet(new ResultSet.Metadata(getResultMetadata().names), new ArrayList<List<ByteBuffer>>());
             this.timestamps = collectTimestamps ? new long[columns.size()] : null;
             this.ttls = collectTTLs ? new int[columns.size()] : null;
             this.now = now;

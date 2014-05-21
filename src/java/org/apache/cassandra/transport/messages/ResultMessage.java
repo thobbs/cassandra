@@ -276,7 +276,11 @@ public abstract class ResultMessage extends Message.Response
         };
 
         public final MD5Digest statementId;
+
+        /** Describes the variables to be bound in the prepared statement */
         public final ResultSet.Metadata metadata;
+
+        /** Describes the results of executing this prepared statement */
         public final ResultSet.Metadata resultMetadata;
 
         // statement id for CQL-over-thrift compatibility. The binary protocol ignore that.

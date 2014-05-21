@@ -230,6 +230,11 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             ResultMessage.Rows msg = processResults(page, options, limit, now);
             if (!pager.isExhausted())
                 msg.result.metadata.setHasMorePages(pager.state());
+            else
+            {
+                msg.result.metadata.setHasMorePages(null);
+                assert msg.result.metadata.pagingState == null : String.format("Pager is exhausted, but paging state is non-null: %s", msg.result.metadata.pagingState);
+            }
             return msg;
         }
     }
