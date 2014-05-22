@@ -26,6 +26,7 @@ import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -40,8 +41,8 @@ import org.slf4j.LoggerFactory;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.process;
-import static org.apache.cassandra.cql3.QueryProcessor.processInternal;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertEquals;
 import static com.google.common.collect.Lists.newArrayList;
@@ -87,7 +88,7 @@ public class MultiColumnRelationTest
     {
         try
         {
-            return processInternal(String.format(query, keyspace));
+            return executeOnceInternal(String.format(query, keyspace));
         } catch (RuntimeException exc)
         {
             if (exc.getCause() != null)
@@ -104,11 +105,11 @@ public class MultiColumnRelationTest
 
     private UntypedResultSet executePrepared(MD5Digest statementId, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        ParsedStatement.Prepared statement = QueryProcessor.instance.getPrepared(statementId);
-        ResultMessage message = statement.executeInternal(QueryState.forInternalCalls(), options);
+        ParsedStatement.Prepared prepared = QueryProcessor.instance.getPrepared(statementId);
+        ResultMessage message = prepared.statement.executeInternal(QueryState.forInternalCalls(), options);
 
         if (message instanceof ResultMessage.Rows)
-            return new UntypedResultSet(((ResultMessage.Rows)message).result);
+            return UntypedResultSet.create(((ResultMessage.Rows)message).result);
         else
             return null;
     }
@@ -1070,7 +1071,7 @@ public class MultiColumnRelationTest
         List<ByteBuffer> buffers = new ArrayList<>(values.length);
         for (int value : values)
             buffers.add(ByteBufferUtil.bytes(value));
-        return new QueryOptions(ConsistencyLevel.ONE, buffers);
+        return QueryOptions.forInternalCalls(buffers);
     }
 
     private static ByteBuffer tuple(Integer... values)
@@ -1089,12 +1090,12 @@ public class MultiColumnRelationTest
 
     private static ByteBuffer list(ByteBuffer... values)
     {
-        return CollectionType.pack(Arrays.asList(values), values.length);
+        return CollectionSerializer.pack(Arrays.asList(values), values.length, 3);
     }
 
     private static QueryOptions options(ByteBuffer... buffers)
     {
-        return new QueryOptions(ConsistencyLevel.ONE, Arrays.asList(buffers));
+        return QueryOptions.forInternalCalls(Arrays.asList(buffers));
     }
 
     private static void checkRow(int rowIndex, UntypedResultSet results, Integer... expectedValues)
