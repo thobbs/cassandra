@@ -64,6 +64,6 @@ public interface Restriction
 
         public IndexExpression.Operator getIndexOperator(Bound b);
 
-        public void setBound(Relation.Type type, Term t) throws InvalidRequestException;
+        public void setBound(ColumnIdentifier name, Relation.Type type, Term t) throws InvalidRequestException;
     }
 }

@@ -273,7 +273,7 @@ public abstract class SingleColumnRestriction implements Restriction
             throw new AssertionError();
         }
 
-        public void setBound(Relation.Type type, Term t) throws InvalidRequestException
+        public void setBound(ColumnIdentifier name, Relation.Type type, Term t) throws InvalidRequestException
         {
             Bound b;
             boolean inclusive;
@@ -301,7 +301,7 @@ public abstract class SingleColumnRestriction implements Restriction
 
             if (bounds[b.idx] != null)
                 throw new InvalidRequestException(String.format(
-                        "More than one restriction was found for the %s bound", b.name().toLowerCase()));
+                        "More than one restriction was found for the %s bound on %s", b.name().toLowerCase(), name));
 
             bounds[b.idx] = t;
             boundInclusive[b.idx] = inclusive;

@@ -26,7 +26,6 @@ import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 
-import org.apache.cassandra.config.ColumnDefinition;
 import org.github.jamm.MemoryMeter;
 
 import org.apache.cassandra.auth.Permission;
@@ -34,6 +33,7 @@ import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.*;
@@ -1533,7 +1533,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                             restriction = new MultiColumnRestriction.Slice(false);
                         else if (!restriction.isMultiColumn())
                             throw new InvalidRequestException(String.format("Column \"%s\" cannot have both tuple-notation inequalities and single-column inequalities: %s", def.name, relation));
-                        restriction.setBound(relation.operator(), t);
+                        restriction.setBound(def.name, relation.operator(), t);
                         stmt.columnRestrictions[def.position()] = restriction;
                     }
                 }
@@ -1640,9 +1640,10 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                             throw new InvalidRequestException(String.format("Column \"%s\" cannot be restricted by both an equality and an inequality relation", def.name));
                         else if (existingRestriction.isMultiColumn())
                             throw new InvalidRequestException(String.format("Column \"%s\" cannot be restricted by both a tuple notation inequality and a single column inequality (%s)", def.name, newRel));
+
                         Term t = newRel.getValue().prepare(keyspace(), receiver);
                         t.collectMarkerSpecification(boundNames);
-                        ((SingleColumnRestriction.Slice)existingRestriction).setBound(newRel.operator(), t);
+                        ((SingleColumnRestriction.Slice)existingRestriction).setBound(def.name, newRel.operator(), t);
                     }
                     break;
                 case CONTAINS_KEY:
@@ -1786,8 +1787,8 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 }
                 else if (restriction.isSlice())
                 {
-                    previousIsSlice = true;
                     canRestrictFurtherComponents = false;
+                    previousIsSlice = true;
                     Restriction.Slice slice = (Restriction.Slice)restriction;
                     // For non-composite slices, we don't support internally the difference between exclusive and
                     // inclusive bounds, so we deal with it manually.
