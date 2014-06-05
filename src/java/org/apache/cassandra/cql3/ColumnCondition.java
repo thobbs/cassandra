@@ -43,21 +43,24 @@ public class ColumnCondition
 
     private final Term value;
 
-    private ColumnCondition(CFDefinition.Name column, Term collectionElement, Term value)
+    public final Relation.Type operator;
+
+    private ColumnCondition(CFDefinition.Name column, Term collectionElement, Term value, Relation.Type op)
     {
         this.column = column;
         this.collectionElement = collectionElement;
         this.value = value;
+        this.operator = op;
     }
 
-    public static ColumnCondition equal(CFDefinition.Name column, Term value)
+    public static ColumnCondition condition(CFDefinition.Name column, Term value, Relation.Type op)
     {
-        return new ColumnCondition(column, null, value);
+        return new ColumnCondition(column, null, value, op);
     }
 
-    public static ColumnCondition equal(CFDefinition.Name column, Term collectionElement, Term value)
+    public static ColumnCondition condition(CFDefinition.Name column, Term collectionElement, Term value, Relation.Type op)
     {
-        return new ColumnCondition(column, collectionElement, value);
+        return new ColumnCondition(column, collectionElement, value, op);
     }
 
     /**
@@ -83,10 +86,12 @@ public class ColumnCondition
     public static abstract class Bound
     {
         public final CFDefinition.Name column;
+        public final Relation.Type operator;
 
-        protected Bound(CFDefinition.Name column)
+        protected Bound(CFDefinition.Name column, Relation.Type operator)
         {
             this.column = column;
+            this.operator = operator;
         }
 
         /**
@@ -104,11 +109,41 @@ public class ColumnCondition
             return column.kind == CFDefinition.Name.Kind.STATIC ? cfm.getStaticColumnNameBuilder() : rowPrefix.copy();
         }
 
-        protected boolean equalsValue(ByteBuffer value, Column c, AbstractType<?> type, long now)
+        protected boolean isSatisfiedByValue(ByteBuffer value, Column c, AbstractType<?> type, long now) throws InvalidRequestException
         {
-            return value == null
-                 ? c == null || !c.isLive(now)
-                 : c != null && c.isLive(now) && type.compare(c.value(), value) == 0;
+            boolean columnIsNull = c == null || !c.isLive(now);
+            if (value == null)
+            {
+                if (!operator.equals(Relation.Type.EQ))
+                    throw new InvalidRequestException(String.format("Invalid comparison with null for operator \"%s\"", operator));
+                return columnIsNull;
+            }
+
+            if (columnIsNull)
+                return false;
+
+            // both live
+            return compareWithOperator(type, value, c.value());
+        }
+
+        protected boolean compareWithOperator(AbstractType<?> type, ByteBuffer value, ByteBuffer otherValue)
+        {
+            int comparison = type.compare(otherValue, value);
+            switch (operator)
+            {
+                case EQ:
+                    return comparison == 0;
+                case LT:
+                    return comparison < 0;
+                case LTE:
+                    return comparison <= 0;
+                case GT:
+                    return comparison > 0;
+                case GTE:
+                    return comparison >= 0;
+                default:
+                    throw new AssertionError();
+            }
         }
 
         protected Iterator<Column> collectionColumns(ColumnNameBuilder collectionPrefix, ColumnFamily cf, final long now)
@@ -133,7 +168,7 @@ public class ColumnCondition
 
         private SimpleBound(ColumnCondition condition, List<ByteBuffer> variables) throws InvalidRequestException
         {
-            super(condition.column);
+            super(condition.column, condition.operator);
             assert !(column.type instanceof CollectionType) && condition.collectionElement == null;
             this.value = condition.value.bindAndGet(variables);
         }
@@ -145,7 +180,7 @@ public class ColumnCondition
                                   ? prefix.build()
                                   : prefix.add(column.name.key).build();
 
-            return equalsValue(value, current.getColumn(columnName), column.type, now);
+            return isSatisfiedByValue(value, current.getColumn(columnName), column.type, now);
         }
 
         @Override
@@ -156,6 +191,9 @@ public class ColumnCondition
 
             SimpleBound that = (SimpleBound)o;
             if (!column.equals(that.column))
+                return false;
+
+            if (!operator.equals(that.operator))
                 return false;
 
             return value == null || that.value == null
@@ -177,7 +215,7 @@ public class ColumnCondition
 
         private ElementAccessBound(ColumnCondition condition, List<ByteBuffer> variables) throws InvalidRequestException
         {
-            super(condition.column);
+            super(condition.column, condition.operator);
             assert column.type instanceof CollectionType && condition.collectionElement != null;
             this.collectionElement = condition.collectionElement.bindAndGet(variables);
             this.value = condition.value.bindAndGet(variables);
@@ -190,7 +228,7 @@ public class ColumnCondition
 
             ColumnNameBuilder collectionPrefix = copyOrUpdatePrefix(current.metadata(), rowPrefix).add(column.name.key);
             if (column.type instanceof MapType)
-                return equalsValue(value, current.getColumn(collectionPrefix.add(collectionElement).build()), ((MapType)column.type).values, now);
+                return isSatisfiedByValue(value, current.getColumn(collectionPrefix.add(collectionElement).build()), ((MapType) column.type).values, now);
 
             assert column.type instanceof ListType;
             int idx = ByteBufferUtil.toInt(collectionElement);
@@ -207,7 +245,7 @@ public class ColumnCondition
             if (value == null)
                 return false;
 
-            return ((ListType)column.type).elements.compare(iter.next().value(), value) == 0;
+            return compareWithOperator(((ListType)column.type).elements, value, iter.next().value());
         }
 
         public ByteBuffer getCollectionElementValue()
@@ -223,6 +261,9 @@ public class ColumnCondition
 
             ElementAccessBound that = (ElementAccessBound)o;
             if (!column.equals(that.column))
+                return false;
+
+            if (!operator.equals(that.operator))
                 return false;
 
             if ((collectionElement == null) != (that.collectionElement == null))
@@ -249,13 +290,13 @@ public class ColumnCondition
         }
     }
 
-    private static class CollectionBound extends Bound
+    static class CollectionBound extends Bound
     {
         public final Term.Terminal value;
 
         private CollectionBound(ColumnCondition condition, List<ByteBuffer> variables) throws InvalidRequestException
         {
-            super(condition.column);
+            super(condition.column, condition.operator);
             assert column.type instanceof CollectionType && condition.collectionElement == null;
             this.value = condition.value.bind(variables);
         }
@@ -269,7 +310,11 @@ public class ColumnCondition
 
             Iterator<Column> iter = collectionColumns(collectionPrefix, current, now);
             if (value == null)
+            {
+                if (!operator.equals(Relation.Type.EQ))
+                    throw new InvalidRequestException(String.format("Invalid comparison with null for operator \"%s\"", operator));
                 return !iter.hasNext();
+            }
 
             switch (type.kind)
             {
@@ -286,45 +331,84 @@ public class ColumnCondition
             return bbs[bbs.length - 1];
         }
 
-        private boolean listAppliesTo(ListType type, CFMetaData cfm, Iterator<Column> iter, List<ByteBuffer> elements)
+        private boolean setOrListAppliesTo(AbstractType<?> type, Iterator<Column> iter, Iterator<ByteBuffer> conditionIter)
         {
-            for (ByteBuffer e : elements)
-                if (!iter.hasNext() || type.elements.compare(iter.next().value(), e) != 0)
-                    return false;
-            // We must not have more elements than expected
-            return !iter.hasNext();
-        }
-
-        private boolean setAppliesTo(SetType type, CFMetaData cfm, Iterator<Column> iter, Set<ByteBuffer> elements)
-        {
-            Set<ByteBuffer> remaining = new TreeSet<>(type.elements);
-            remaining.addAll(elements);
-            while (iter.hasNext())
+            while(iter.hasNext())
             {
-                if (remaining.isEmpty())
-                    return false;
+                if (!conditionIter.hasNext())
+                    return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE);
 
-                if (!remaining.remove(collectionKey(cfm, iter.next())))
-                    return false;
+                int comparison = type.compare(iter.next().value(), conditionIter.next());
+                if (comparison != 0)
+                    return evaluateComparisonWithOperator(comparison);
             }
-            return remaining.isEmpty();
+
+            if (conditionIter.hasNext())
+                return operator.equals(Relation.Type.LT) || operator.equals(Relation.Type.LTE);
+
+            // they're equal
+            return operator == Relation.Type.EQ || operator == Relation.Type.LTE || operator == Relation.Type.GTE;
         }
 
-        private boolean mapAppliesTo(MapType type, CFMetaData cfm, Iterator<Column> iter, Map<ByteBuffer, ByteBuffer> elements)
+        private boolean evaluateComparisonWithOperator(int comparison)
         {
-            Map<ByteBuffer, ByteBuffer> remaining = new TreeMap<>(type.keys);
-            remaining.putAll(elements);
-            while (iter.hasNext())
+            switch (operator)
             {
-                if (remaining.isEmpty())
+                case EQ:
                     return false;
+                case LT:
+                case LTE:
+                    return comparison < 0;
+                case GT:
+                case GTE:
+                    return comparison > 0;
+                default:
+                    throw new AssertionError();
+            }
+        }
 
+        boolean listAppliesTo(ListType type, CFMetaData cfm, Iterator<Column> iter, List<ByteBuffer> elements)
+        {
+            return setOrListAppliesTo(type.elements, iter, elements.iterator());
+        }
+
+        boolean setAppliesTo(SetType type, CFMetaData cfm, Iterator<Column> iter, Set<ByteBuffer> elements)
+        {
+            Set<ByteBuffer> elementSet = new TreeSet<ByteBuffer>(type.elements);
+            elementSet.addAll(elements);
+            return setOrListAppliesTo(type.elements, iter, elementSet.iterator());
+        }
+
+        boolean mapAppliesTo(MapType type, CFMetaData cfm, Iterator<Column> iter, Map<ByteBuffer, ByteBuffer> elements)
+        {
+            Map<ByteBuffer, ByteBuffer> other = new TreeMap<ByteBuffer, ByteBuffer>(type.keys);
+            other.putAll(elements);
+            Iterator<Map.Entry<ByteBuffer, ByteBuffer>> otherIter = other.entrySet().iterator();
+
+            while(iter.hasNext())
+            {
+                if (!otherIter.hasNext())
+                    return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE);
+
+                Map.Entry<ByteBuffer, ByteBuffer> otherEntry = otherIter.next();
                 Column c = iter.next();
-                ByteBuffer previous = remaining.remove(collectionKey(cfm, c));
-                if (previous == null || type.values.compare(previous, c.value()) != 0)
-                    return false;
+
+                // compare the keys
+                int comparison = type.keys.compare(collectionKey(cfm, c), otherEntry.getKey());
+                if (comparison != 0)
+                    return evaluateComparisonWithOperator(comparison);
+
+                // compare the values
+                comparison = type.values.compare(c.value(), otherEntry.getValue());
+                if (comparison != 0)
+                    return evaluateComparisonWithOperator(comparison);
             }
-            return remaining.isEmpty();
+
+            if (otherIter.hasNext())
+                return operator.equals(Relation.Type.LT) || operator.equals(Relation.Type.LTE);
+
+            // they're equal
+            return operator == Relation.Type.EQ || operator == Relation.Type.LTE || operator == Relation.Type.GTE;
         }
 
         @Override
@@ -335,6 +419,9 @@ public class ColumnCondition
 
             CollectionBound that = (CollectionBound)o;
             if (!column.equals(that.column))
+                return false;
+
+            if (!operator.equals(that.operator))
                 return false;
 
             // Slightly inefficient because it serialize the collection just for the sake of comparison.
@@ -362,20 +449,23 @@ public class ColumnCondition
         // Can be null, only used with the syntax "IF m[e] = ..." (in which case it's 'e')
         private final Term.Raw collectionElement;
 
-        private Raw(Term.Raw value, Term.Raw collectionElement)
+        private final Relation.Type operator;
+
+        private Raw(Term.Raw value, Term.Raw collectionElement, Relation.Type op)
         {
             this.value = value;
             this.collectionElement = collectionElement;
+            this.operator = op;
         }
 
-        public static Raw simpleEqual(Term.Raw value)
+        public static Raw simpleCondition(Term.Raw value, Relation.Type op)
         {
-            return new Raw(value, null);
+            return new Raw(value, null, op);
         }
 
-        public static Raw collectionEqual(Term.Raw value, Term.Raw collectionElement)
+        public static Raw collectionCondition(Term.Raw value, Term.Raw collectionElement, Relation.Type op)
         {
-            return new Raw(value, collectionElement);
+            return new Raw(value, collectionElement, op);
         }
 
         public ColumnCondition prepare(CFDefinition.Name receiver) throws InvalidRequestException
@@ -384,7 +474,7 @@ public class ColumnCondition
                 throw new InvalidRequestException("Condtions on counters are not supported");
 
             if (collectionElement == null)
-                return ColumnCondition.equal(receiver, value.prepare(receiver));
+                return ColumnCondition.condition(receiver, value.prepare(receiver), operator);
 
             if (!(receiver.type.isCollection()))
                 throw new InvalidRequestException(String.format("Invalid element access syntax for non-collection column %s", receiver.name));
@@ -392,11 +482,11 @@ public class ColumnCondition
             switch (((CollectionType)receiver.type).kind)
             {
                 case LIST:
-                    return ColumnCondition.equal(receiver, collectionElement.prepare(Lists.indexSpecOf(receiver)), value.prepare(Lists.valueSpecOf(receiver)));
+                    return ColumnCondition.condition(receiver, collectionElement.prepare(Lists.indexSpecOf(receiver)), value.prepare(Lists.valueSpecOf(receiver)), operator);
                 case SET:
                     throw new InvalidRequestException(String.format("Invalid element access syntax for set column %s", receiver.name));
                 case MAP:
-                    return ColumnCondition.equal(receiver, collectionElement.prepare(Maps.keySpecOf(receiver)), value.prepare(Maps.valueSpecOf(receiver)));
+                    return ColumnCondition.condition(receiver, collectionElement.prepare(Maps.keySpecOf(receiver)), value.prepare(Maps.valueSpecOf(receiver)), operator);
             }
             throw new AssertionError();
         }

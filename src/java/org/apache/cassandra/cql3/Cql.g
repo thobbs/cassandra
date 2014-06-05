@@ -869,8 +869,8 @@ columnOperation[List<Pair<ColumnIdentifier, Operation.RawUpdate>> operations]
 
 columnCondition[List<Pair<ColumnIdentifier, ColumnCondition.Raw>> conditions]
     // Note: we'll reject duplicates later
-    : key=cident '=' t=term { conditions.add(Pair.create(key, ColumnCondition.Raw.simpleEqual(t))); }
-    | key=cident '[' element=term ']' '=' t=term { conditions.add(Pair.create(key, ColumnCondition.Raw.collectionEqual(t, element))); } 
+    : key=cident op=relationType t=term { conditions.add(Pair.create(key, ColumnCondition.Raw.simpleCondition(t, op))); }
+    | key=cident '[' element=term ']' op=relationType t=term { conditions.add(Pair.create(key, ColumnCondition.Raw.collectionCondition(t, element, op))); }
     ;
 
 properties[PropertyDefinitions props]

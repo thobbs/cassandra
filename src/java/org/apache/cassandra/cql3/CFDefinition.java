@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
 import com.google.common.collect.AbstractIterator;
@@ -232,7 +233,8 @@ public class CFDefinition implements Iterable<CFDefinition.Name>
             KEY_ALIAS, COLUMN_ALIAS, VALUE_ALIAS, COLUMN_METADATA, STATIC
         }
 
-        private Name(String ksName, String cfName, ColumnIdentifier name, Kind kind, AbstractType<?> type)
+        @VisibleForTesting
+        Name(String ksName, String cfName, ColumnIdentifier name, Kind kind, AbstractType<?> type)
         {
             this(ksName, cfName, name, kind, -1, type);
         }
