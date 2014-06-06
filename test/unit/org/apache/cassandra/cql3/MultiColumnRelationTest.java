@@ -198,6 +198,12 @@ public class MultiColumnRelationTest
         execute("SELECT * FROM %s.multiple_clustering WHERE a=0 AND (c, d) > (0, 0)");
     }
 
+    @Test(expected=InvalidRequestException.class)
+    public void testNonEqualsRelation() throws Throwable
+    {
+        execute("SELECT * FROM %s.single WHERE a=0 AND (b) != (0)");
+    }
+
     @Test
     public void testSingleClusteringColumnEquality() throws Throwable
     {
@@ -583,7 +589,6 @@ public class MultiColumnRelationTest
         execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 0, 0, 0)");
         execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 0, 1, 1)");
         execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, 0, 1, 0)");
-        execute("INSERT INTO %s.multiple_clustering_reversed (a, b, c, d) VALUES (0, -1, 0, 0)");
 
         UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) IN ((0, 1, 0), (0, 1, 1))");
         assertEquals(2, results.size());
@@ -597,12 +602,11 @@ public class MultiColumnRelationTest
         checkRow(1, results, 0, 0, 1, 0);
 
         results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) IN ((1, 0, 0), (0, 0, 0), (0, 1, 1), (0, 1, 0), (-1, 0, 0))");
-        assertEquals(5, results.size());
+        assertEquals(4, results.size());
         checkRow(0, results, 0, 1, 0, 0);
         checkRow(1, results, 0, 0, 0, 0);
         checkRow(2, results, 0, 0, 1, 1);
         checkRow(3, results, 0, 0, 1, 0);
-        checkRow(4, results, 0, -1, 0, 0);
 
         results = execute("SELECT * FROM %s.multiple_clustering_reversed WHERE a=0 AND (b, c, d) IN ((0, 0, 0))");
         assertEquals(1, results.size());

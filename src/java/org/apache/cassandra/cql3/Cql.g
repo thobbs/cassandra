@@ -893,6 +893,7 @@ relationType returns [Relation.Type op]
     | '<=' { $op = Relation.Type.LTE; }
     | '>'  { $op = Relation.Type.GT; }
     | '>=' { $op = Relation.Type.GTE; }
+    | '!=' { $op = Relation.Type.NEQ; }
     ;
 
 relation[List<Relation> clauses]

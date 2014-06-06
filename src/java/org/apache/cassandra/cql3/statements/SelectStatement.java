@@ -1576,7 +1576,10 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                         restriction.setBound(relation.operator(), t);
                         stmt.columnRestrictions[name.position] = restriction;
                     }
+                    break;
                 }
+                case NEQ:
+                    throw new InvalidRequestException(String.format("Unsupported \"!=\" relation: %s", relation));
             }
         }
 
@@ -1682,8 +1685,10 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     Term t = newRel.getValue().prepare(receiver);
                     t.collectMarkerSpecification(boundNames);
                     ((SingleColumnRestriction.Slice)existingRestriction).setBound(newRel.operator(), t);
+                    break;
                 }
-                break;
+                case NEQ:
+                    throw new InvalidRequestException(String.format("Unsupported \"!=\" relation on column \"%s\"", name));
             }
             return existingRestriction;
         }

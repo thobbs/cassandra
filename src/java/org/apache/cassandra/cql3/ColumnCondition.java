@@ -114,13 +114,13 @@ public class ColumnCondition
             boolean columnIsNull = c == null || !c.isLive(now);
             if (value == null)
             {
-                if (!operator.equals(Relation.Type.EQ))
+                if (!operator.equals(Relation.Type.EQ) && !operator.equals(Relation.Type.NEQ))
                     throw new InvalidRequestException(String.format("Invalid comparison with null for operator \"%s\"", operator));
-                return columnIsNull;
+                return operator.equals(Relation.Type.EQ) ? columnIsNull : !columnIsNull;
             }
 
             if (columnIsNull)
-                return false;
+                return operator.equals(Relation.Type.NEQ);
 
             // both live
             return compareWithOperator(type, value, c.value());
@@ -141,6 +141,8 @@ public class ColumnCondition
                     return comparison > 0;
                 case GTE:
                     return comparison >= 0;
+                case NEQ:
+                    return comparison != 0;
                 default:
                     throw new AssertionError();
             }
@@ -336,7 +338,7 @@ public class ColumnCondition
             while(iter.hasNext())
             {
                 if (!conditionIter.hasNext())
-                    return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE);
+                    return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE) || operator.equals(Relation.Type.NEQ);
 
                 int comparison = type.compare(iter.next().value(), conditionIter.next());
                 if (comparison != 0)
@@ -344,7 +346,7 @@ public class ColumnCondition
             }
 
             if (conditionIter.hasNext())
-                return operator.equals(Relation.Type.LT) || operator.equals(Relation.Type.LTE);
+                return operator.equals(Relation.Type.LT) || operator.equals(Relation.Type.LTE) || operator.equals(Relation.Type.NEQ);
 
             // they're equal
             return operator == Relation.Type.EQ || operator == Relation.Type.LTE || operator == Relation.Type.GTE;
@@ -352,6 +354,7 @@ public class ColumnCondition
 
         private boolean evaluateComparisonWithOperator(int comparison)
         {
+            // called when comparison != 0
             switch (operator)
             {
                 case EQ:
@@ -362,6 +365,8 @@ public class ColumnCondition
                 case GT:
                 case GTE:
                     return comparison > 0;
+                case NEQ:
+                    return true;
                 default:
                     throw new AssertionError();
             }
@@ -388,7 +393,7 @@ public class ColumnCondition
             while(iter.hasNext())
             {
                 if (!otherIter.hasNext())
-                    return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE);
+                    return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE) || operator.equals(Relation.Type.NEQ);
 
                 Map.Entry<ByteBuffer, ByteBuffer> otherEntry = otherIter.next();
                 Column c = iter.next();
@@ -405,7 +410,7 @@ public class ColumnCondition
             }
 
             if (otherIter.hasNext())
-                return operator.equals(Relation.Type.LT) || operator.equals(Relation.Type.LTE);
+                return operator.equals(Relation.Type.LT) || operator.equals(Relation.Type.LTE) || operator.equals(Relation.Type.NEQ);
 
             // they're equal
             return operator == Relation.Type.EQ || operator == Relation.Type.LTE || operator == Relation.Type.GTE;

@@ -70,6 +70,19 @@ public class ColumnConditionTest
         assertFalse(isSatisfiedBy(bound, ONE, null));
         assertFalse(isSatisfiedBy(bound, null, ONE));
 
+        // NEQ
+        condition = ColumnCondition.condition(name, new Constants.Value(ONE), Relation.Type.NEQ);
+        bound = condition.bind(Collections.EMPTY_LIST);
+        assertFalse(isSatisfiedBy(bound, ONE, ONE));
+        assertTrue(isSatisfiedBy(bound, ZERO, ONE));
+        assertTrue(isSatisfiedBy(bound, TWO, ONE));
+        assertTrue(isSatisfiedBy(bound, ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE));
+        assertTrue(isSatisfiedBy(bound, ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        assertFalse(isSatisfiedBy(bound, ByteBufferUtil.EMPTY_BYTE_BUFFER, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        assertFalse(isSatisfiedBy(bound, null, null));
+        assertTrue(isSatisfiedBy(bound, ONE, null));
+        assertTrue(isSatisfiedBy(bound, null, ONE));
+
         // LT
         condition = ColumnCondition.condition(name, new Constants.Value(ONE), Relation.Type.LT);
         bound = condition.bind(Collections.EMPTY_LIST);
@@ -159,6 +172,22 @@ public class ColumnConditionTest
         assertFalse(listAppliesTo(bound, list(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
         assertFalse(listAppliesTo(bound, list(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
         assertTrue(listAppliesTo(bound, list(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+
+        // NEQ
+        condition = ColumnCondition.condition(name, null, new Lists.Value(Arrays.asList(ONE)), Relation.Type.NEQ);
+        bound = (ColumnCondition.CollectionBound) condition.bind(Collections.EMPTY_LIST);
+        assertFalse(listAppliesTo(bound, list(ONE), list(ONE)));
+        assertFalse(listAppliesTo(bound, list(), list()));
+        assertTrue(listAppliesTo(bound, list(ZERO), list(ONE)));
+        assertTrue(listAppliesTo(bound, list(ONE), list(ZERO)));
+        assertTrue(listAppliesTo(bound, list(ONE), list(ONE, ONE)));
+        assertTrue(listAppliesTo(bound, list(ONE, ONE), list(ONE)));
+        assertTrue(listAppliesTo(bound, list(), list(ONE)));
+        assertTrue(listAppliesTo(bound, list(ONE), list()));
+
+        assertTrue(listAppliesTo(bound, list(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
+        assertTrue(listAppliesTo(bound, list(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertFalse(listAppliesTo(bound, list(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
 
         // LT
         condition = ColumnCondition.condition(name, null, new Lists.Value(Arrays.asList(ONE)), Relation.Type.LT);
@@ -285,6 +314,28 @@ public class ColumnConditionTest
         assertFalse(mapAppliesTo(bound, map(ONE, ONE), map(ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER)));
         assertTrue(mapAppliesTo(bound, map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE), map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE)));
         assertTrue(mapAppliesTo(bound, map(ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER), map(ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+
+        // NEQ
+        condition = ColumnCondition.condition(name, null, placeholder, Relation.Type.NEQ);
+        bound = (ColumnCondition.CollectionBound) condition.bind(Collections.EMPTY_LIST);
+
+        assertFalse(mapAppliesTo(bound, map(ONE, ONE), map(ONE, ONE)));
+        assertFalse(mapAppliesTo(bound, map(), map()));
+        assertTrue(mapAppliesTo(bound, map(ZERO, ONE), map(ONE, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ONE), map(ZERO, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ZERO), map(ONE, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ONE), map(ONE, ZERO)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ONE), map(ONE, ONE, TWO, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ONE, TWO, ONE), map(ONE, ONE)));
+        assertTrue(mapAppliesTo(bound, map(), map(ONE, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ONE), map()));
+
+        assertTrue(mapAppliesTo(bound, map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE), map(ONE, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ONE), map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER), map(ONE, ONE)));
+        assertTrue(mapAppliesTo(bound, map(ONE, ONE), map(ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertFalse(mapAppliesTo(bound, map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE), map(ByteBufferUtil.EMPTY_BYTE_BUFFER, ONE)));
+        assertFalse(mapAppliesTo(bound, map(ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER), map(ONE, ByteBufferUtil.EMPTY_BYTE_BUFFER)));
 
         // LT
         condition = ColumnCondition.condition(name, null, placeholder, Relation.Type.LT);
