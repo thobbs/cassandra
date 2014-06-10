@@ -386,30 +386,30 @@ public class ColumnCondition
 
         boolean mapAppliesTo(MapType type, CFMetaData cfm, Iterator<Column> iter, Map<ByteBuffer, ByteBuffer> elements)
         {
-            Map<ByteBuffer, ByteBuffer> other = new TreeMap<ByteBuffer, ByteBuffer>(type.keys);
-            other.putAll(elements);
-            Iterator<Map.Entry<ByteBuffer, ByteBuffer>> otherIter = other.entrySet().iterator();
+            Map<ByteBuffer, ByteBuffer> conditionValues = new TreeMap<ByteBuffer, ByteBuffer>(type.keys);
+            conditionValues.putAll(elements);
+            Iterator<Map.Entry<ByteBuffer, ByteBuffer>> conditionIter = conditionValues.entrySet().iterator();
 
             while(iter.hasNext())
             {
-                if (!otherIter.hasNext())
+                if (!conditionIter.hasNext())
                     return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE) || operator.equals(Relation.Type.NEQ);
 
-                Map.Entry<ByteBuffer, ByteBuffer> otherEntry = otherIter.next();
+                Map.Entry<ByteBuffer, ByteBuffer> conditionEntry = conditionIter.next();
                 Column c = iter.next();
 
                 // compare the keys
-                int comparison = type.keys.compare(collectionKey(cfm, c), otherEntry.getKey());
+                int comparison = type.keys.compare(collectionKey(cfm, c), conditionEntry.getKey());
                 if (comparison != 0)
                     return evaluateComparisonWithOperator(comparison);
 
                 // compare the values
-                comparison = type.values.compare(c.value(), otherEntry.getValue());
+                comparison = type.values.compare(c.value(), conditionEntry.getValue());
                 if (comparison != 0)
                     return evaluateComparisonWithOperator(comparison);
             }
 
-            if (otherIter.hasNext())
+            if (conditionIter.hasNext())
                 return operator.equals(Relation.Type.LT) || operator.equals(Relation.Type.LTE) || operator.equals(Relation.Type.NEQ);
 
             // they're equal
