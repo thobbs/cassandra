@@ -31,6 +31,7 @@ import org.apache.cassandra.db.Column;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -369,7 +370,7 @@ public abstract class Selection
 
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
-            return type.asCQL3Type().equals(receiver.type.asCQL3Type());
+            return receiver.type.isValueCompatibleWith(type);
         }
 
         @Override
@@ -401,7 +402,7 @@ public abstract class Selection
 
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
-            return fun.returnType().asCQL3Type().equals(receiver.type.asCQL3Type());
+            return receiver.type.isValueCompatibleWith(fun.returnType());
         }
 
         @Override
@@ -446,7 +447,7 @@ public abstract class Selection
 
         public boolean isAssignableTo(ColumnSpecification receiver)
         {
-            return receiver.type.asCQL3Type().equals(isWritetime ? CQL3Type.Native.BIGINT : CQL3Type.Native.INT);
+            return receiver.type.isValueCompatibleWith(isWritetime ? LongType.instance : Int32Type.instance);
         }
 
         @Override
