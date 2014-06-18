@@ -84,6 +84,12 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
+    public AbstractType<T> getBaseTypeForValueCompatibility()
+    {
+        return baseType;
+    }
+
+    @Override
     public CQL3Type asCQL3Type()
     {
         return baseType.asCQL3Type();

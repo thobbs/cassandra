@@ -254,7 +254,15 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
      */
     public boolean isValueCompatibleWith(AbstractType<?> otherType)
     {
-        return isCompatibleWith(otherType);
+        return getBaseTypeForValueCompatibility().isCompatibleWith(otherType.getBaseTypeForValueCompatibility());
+    }
+
+    /**
+     * Needed to handle ReversedType in value-compatibility checks.
+     */
+    public AbstractType<T> getBaseTypeForValueCompatibility()
+    {
+        return this;
     }
 
     /**

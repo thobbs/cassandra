@@ -77,6 +77,7 @@ public class LongType extends AbstractType<Long>
     @Override
     public boolean isValueCompatibleWith(AbstractType<?> otherType)
     {
+        otherType = getBaseTypeForValueCompatibility();
         return this == otherType || otherType == DateType.instance || otherType == TimestampType.instance;
     }
 

@@ -139,6 +139,7 @@ public final class IntegerType extends AbstractType<BigInteger>
     @Override
     public boolean isValueCompatibleWith(AbstractType<?> otherType)
     {
+        otherType = otherType.getBaseTypeForValueCompatibility();
         return this == otherType || Int32Type.instance.isValueCompatibleWith(otherType) || LongType.instance.isValueCompatibleWith(otherType);
     }
 

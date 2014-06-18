@@ -239,6 +239,7 @@ public class CompositeType extends AbstractCompositeType
     @Override
     public boolean isValueCompatibleWith(AbstractType<?> otherType)
     {
+        otherType = otherType.getBaseTypeForValueCompatibility();
         if (this == otherType)
             return true;
 
@@ -254,7 +255,7 @@ public class CompositeType extends AbstractCompositeType
         {
             AbstractType tprev = cp.types.get(i);
             AbstractType tnew = types.get(i);
-            if (!tnew.isValueCompatibleWith(tprev))
+            if (!tnew.getBaseTypeForValueCompatibility().isValueCompatibleWith(tprev.getBaseTypeForValueCompatibility()))
                 return false;
         }
         return true;
