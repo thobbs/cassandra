@@ -84,9 +84,9 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
-    public AbstractType<T> getBaseTypeForValueCompatibility()
+    public boolean isValueCompatibleWith(AbstractType<?> otherType)
     {
-        return baseType;
+        return this.baseType.isValueCompatibleWith(otherType);
     }
 
     @Override

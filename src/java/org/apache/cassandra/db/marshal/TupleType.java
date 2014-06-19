@@ -234,9 +234,8 @@ public class TupleType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public boolean isValueCompatibleWith(AbstractType<?> otherType)
+    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
-        otherType = otherType.getBaseTypeForValueCompatibility();
         if (!(otherType instanceof TupleType))
             return false;
 
@@ -249,7 +248,7 @@ public class TupleType extends AbstractType<ByteBuffer>
         {
             AbstractType<?> tprev = tt.type(i);
             AbstractType<?> tnew = type(i);
-            if (!tnew.getBaseTypeForValueCompatibility().isValueCompatibleWith(tprev.getBaseTypeForValueCompatibility()))
+            if (!tnew.isValueCompatibleWith(tprev))
                 return false;
         }
         return true;

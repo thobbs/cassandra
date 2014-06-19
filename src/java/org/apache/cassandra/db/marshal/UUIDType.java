@@ -190,9 +190,8 @@ public class UUIDType extends AbstractType<UUID>
     }
 
     @Override
-    public boolean isValueCompatibleWith(AbstractType<?> otherType)
+    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
-        otherType = otherType.getBaseTypeForValueCompatibility();
         return this == otherType || otherType == TimeUUIDType.instance;
     }
 

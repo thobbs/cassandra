@@ -247,22 +247,23 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
      * compare values the same way.
      *
      * The restriction on the other type being "reasonably" interpreted is to prevent, for example, IntegerType from
-     * being compatible with all other types.  Even though any byte string can is a valid IntegerType valid, it doesn't
+     * being compatible with all other types.  Even though any byte string is a valid IntegerType value, it doesn't
      * necessarily make sense to interpret a UUID or a UTF8 string as an integer.
      *
      * Note that a type should be compatible with at least itself.
      */
     public boolean isValueCompatibleWith(AbstractType<?> otherType)
     {
-        return getBaseTypeForValueCompatibility().isCompatibleWith(otherType.getBaseTypeForValueCompatibility());
+        return isValueCompatibleWithInternal((otherType instanceof ReversedType) ? ((ReversedType) otherType).baseType : otherType);
     }
 
     /**
-     * Needed to handle ReversedType in value-compatibility checks.
+     * Needed to handle ReversedType in value-compatibility checks.  Subclasses should implement this instead of
+     * isValueCompatibleWith().
      */
-    public AbstractType<T> getBaseTypeForValueCompatibility()
+    protected boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
-        return this;
+        return isCompatibleWith(otherType);
     }
 
     /**
