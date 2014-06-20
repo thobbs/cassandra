@@ -629,17 +629,12 @@ public class ColumnCondition
 
         boolean setAppliesTo(SetType type, CFMetaData cfm, Iterator<Column> iter, Set<ByteBuffer> elements, Relation.Type operator)
         {
-            Set<ByteBuffer> elementSet = new TreeSet<ByteBuffer>(type.elements);
-            elementSet.addAll(elements);
-            return setOrListAppliesTo(type.elements, iter, elementSet.iterator(), operator);
+            return setOrListAppliesTo(type.elements, iter, elements.iterator(), operator);
         }
 
         boolean mapAppliesTo(MapType type, CFMetaData cfm, Iterator<Column> iter, Map<ByteBuffer, ByteBuffer> elements, Relation.Type operator)
         {
-            Map<ByteBuffer, ByteBuffer> conditionValues = new TreeMap<ByteBuffer, ByteBuffer>(type.keys);
-            conditionValues.putAll(elements);
-            Iterator<Map.Entry<ByteBuffer, ByteBuffer>> conditionIter = conditionValues.entrySet().iterator();
-
+            Iterator<Map.Entry<ByteBuffer, ByteBuffer>> conditionIter = elements.entrySet().iterator();
             while(iter.hasNext())
             {
                 if (!conditionIter.hasNext())
