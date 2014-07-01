@@ -167,23 +167,30 @@ public class ColumnCondition
 
         protected boolean isSatisfiedByValue(ByteBuffer value, Column c, AbstractType<?> type, Relation.Type operator, long now) throws InvalidRequestException
         {
-            boolean columnIsNull = c == null || !c.isLive(now);
-            if (value == null)
-            {
-                if (!operator.equals(Relation.Type.EQ) && !operator.equals(Relation.Type.NEQ))
-                    throw new InvalidRequestException(String.format("Invalid comparison with null for operator \"%s\"", operator));
-                return operator.equals(Relation.Type.EQ) ? columnIsNull : !columnIsNull;
-            }
-
-            if (columnIsNull)
-                return operator.equals(Relation.Type.NEQ);
-
-            // both live
-            return compareWithOperator(operator, type, value, c.value());
+            ByteBuffer columnValue = (c == null || !c.isLive(now)) ? null : c.value();
+            return compareWithOperator(operator, type, value, columnValue);
         }
 
-        protected boolean compareWithOperator(Relation.Type operator, AbstractType<?> type, ByteBuffer value, ByteBuffer otherValue)
+        protected boolean compareWithOperator(Relation.Type operator, AbstractType<?> type, ByteBuffer value, ByteBuffer otherValue) throws InvalidRequestException
         {
+            if (value == null)
+            {
+                switch (operator)
+                {
+                    case EQ:
+                        return otherValue == null;
+                    case NEQ:
+                        return otherValue != null;
+                    default:
+                        throw new InvalidRequestException(String.format("Invalid comparison with null for operator \"%s\"", operator));
+                }
+            }
+            else if (otherValue == null)
+            {
+                // the condition value is not null, so only NEQ can return true
+                return operator.equals(Relation.Type.NEQ);
+            }
+
             int comparison = type.compare(otherValue, value);
             switch (operator)
             {
@@ -385,30 +392,24 @@ public class ColumnCondition
             if (idx < 0)
                 throw new InvalidRequestException(String.format("Invalid negative list index %d", idx));
 
+            ByteBuffer columnValue = null;
             Iterator<Column> iter = collectionColumns(collectionPrefix, current, now);
             int adv = Iterators.advance(iter, idx);
-            if (adv != idx || !iter.hasNext())
-                throw new InvalidRequestException(String.format("List index %d out of bound, list has size %d", idx, adv));
+            if (adv == idx && iter.hasNext())
+                columnValue = iter.next().value();
 
-            ByteBuffer columnValue = iter.next().value();
             AbstractType<?> valueType = ((ListType) column.type).elements;
             if (operator.equals(Relation.Type.IN))
             {
                 for (ByteBuffer value : inValues)
                 {
-                    // see comment below about value being null
-                    if (value != null && valueType.compare(value, columnValue) == 0)
+                    if (compareWithOperator(Relation.Type.EQ, valueType, value, columnValue))
                         return true;
                 }
                 return false;
             }
             else
             {
-                // We don't support null values inside collections, so a condition like 'IF l[3] = null' can only
-                // be false. We do special case though, as the compare below might mind getting a null.
-                if (value == null)
-                    return false;
-
                 return compareWithOperator(operator, valueType, value, columnValue);
             }
         }
