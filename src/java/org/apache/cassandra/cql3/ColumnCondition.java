@@ -239,27 +239,7 @@ public class ColumnCondition
             TreeSet<ByteBuffer> thatSet = new TreeSet<>(comparator);
             thatSet.addAll(thatValues);
 
-            if (thisSet.size() != thatSet.size())
-                return false;
-
-            Iterator<ByteBuffer> thisIter = thisSet.iterator();
-            Iterator<ByteBuffer> thatIter = thatSet.iterator();
-            while (thisIter.hasNext())
-            {
-                ByteBuffer thisValue = thisIter.next();
-                ByteBuffer thatValue = thatIter.next();
-                if (thisValue == null || thatValue == null)
-                {
-                    if (thisValue != thatValue)
-                        return false;
-                }
-                else
-                {
-                    if (columnType.compare(thisValue, thatValue) != 0)
-                        return false;
-                }
-            }
-            return true;
+            return thisSet.equals(thatSet);
         }
     }
 
