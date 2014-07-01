@@ -46,61 +46,51 @@ public class ColumnCondition
     // For collection, when testing the equality of a specific element, null otherwise.
     private final Term collectionElement;
 
-    private final Term value;
+    private final Term value; // a single value or a marker for a list of IN values
     private final List<Term> inValues;
-    private final Term inMarker;
 
     public final Relation.Type operator;
 
-    private ColumnCondition(CFDefinition.Name column, Term collectionElement, Term value, List<Term> inValues, Term inMarker, Relation.Type op)
+    private ColumnCondition(CFDefinition.Name column, Term collectionElement, Term value, List<Term> inValues, Relation.Type op)
     {
         this.column = column;
         this.collectionElement = collectionElement;
         this.value = value;
         this.inValues = inValues;
-        this.inMarker = inMarker;
         this.operator = op;
 
-        if (operator.equals(Relation.Type.IN))
-        {
-            assert value == null;
-            assert (this.inValues == null) != (this.inMarker == null);
-        }
-        else
-        {
+        if (!operator.equals(Relation.Type.IN))
             assert inValues == null;
-            assert inMarker == null;
-        }
     }
 
     public static ColumnCondition condition(CFDefinition.Name column, Term value, Relation.Type op)
     {
-        return new ColumnCondition(column, null, value, null, null, op);
+        return new ColumnCondition(column, null, value, null, op);
     }
 
     public static ColumnCondition condition(CFDefinition.Name column, Term collectionElement, Term value, Relation.Type op)
     {
-        return new ColumnCondition(column, collectionElement, value, null, null, op);
+        return new ColumnCondition(column, collectionElement, value, null, op);
     }
 
     public static ColumnCondition inCondition(CFDefinition.Name column, List<Term> inValues)
     {
-        return new ColumnCondition(column, null, null, inValues, null, Relation.Type.IN);
+        return new ColumnCondition(column, null, null, inValues, Relation.Type.IN);
     }
 
     public static ColumnCondition inCondition(CFDefinition.Name column, Term collectionElement, List<Term> inValues)
     {
-        return new ColumnCondition(column, collectionElement, null, inValues, null, Relation.Type.IN);
+        return new ColumnCondition(column, collectionElement, null, inValues, Relation.Type.IN);
     }
 
     public static ColumnCondition inCondition(CFDefinition.Name column, Term inMarker)
     {
-        return new ColumnCondition(column, null, null, null, inMarker, Relation.Type.IN);
+        return new ColumnCondition(column, null, inMarker, null, Relation.Type.IN);
     }
 
     public static ColumnCondition inCondition(CFDefinition.Name column, Term collectionElement, Term inMarker)
     {
-        return new ColumnCondition(column, collectionElement, null, null, inMarker, Relation.Type.IN);
+        return new ColumnCondition(column, collectionElement, inMarker, null, Relation.Type.IN);
     }
 
     /**
@@ -114,17 +104,10 @@ public class ColumnCondition
         if (collectionElement != null)
             collectionElement.collectMarkerSpecification(boundNames);
 
-        if (operator.equals(Relation.Type.IN))
+        if (operator.equals(Relation.Type.IN) && inValues != null)
         {
-            if (inValues != null)
-            {
-                for (Term value : inValues)
-                    value.collectMarkerSpecification(boundNames);
-            }
-            else
-            {
-                inMarker.collectMarkerSpecification(boundNames);
-            }
+            for (Term value : inValues)
+                value.collectMarkerSpecification(boundNames);
         }
         else
         {
@@ -262,9 +245,9 @@ public class ColumnCondition
             if (condition.operator.equals(Relation.Type.IN))
             {
                 this.value = null;
-                if (condition.inMarker != null)
+                if (condition.inValues == null)
                 {
-                    this.inValues = ((Lists.Marker) condition.inMarker).bind(variables).getElements();
+                    this.inValues = ((Lists.Marker) condition.value).bind(variables).getElements();
                 }
                 else
                 {
@@ -344,9 +327,9 @@ public class ColumnCondition
             if (condition.operator.equals(Relation.Type.IN))
             {
                 this.value = null;
-                if (condition.inMarker != null)
+                if (condition.inValues == null)
                 {
-                    this.inValues = ((Lists.Marker) condition.inMarker).bind(variables).getElements();
+                    this.inValues = ((Lists.Marker) condition.value).bind(variables).getElements();
                 }
                 else
                 {
@@ -478,26 +461,27 @@ public class ColumnCondition
             {
                 value = null;
                 inValues = new ArrayList<>();
-                if (condition.inMarker != null)
+                if (condition.inValues == null)
                 {
                     // We have a list of serialized collections that need to be deserialized for later comparisons
                     CollectionType collectionType = (CollectionType) column.type;
+                    Lists.Marker inValuesMarker = (Lists.Marker) condition.value;
                     if (column.type instanceof ListType)
                     {
                         ListType deserializer = ListType.getInstance(collectionType.nameComparator());
-                        for (ByteBuffer buffer : ((Lists.Marker) condition.inMarker).bind(variables).elements)
+                        for (ByteBuffer buffer : inValuesMarker.bind(variables).elements)
                             this.inValues.add(Lists.Value.fromSerialized(buffer, deserializer));
                     }
                     else if (column.type instanceof MapType)
                     {
                         MapType deserializer = MapType.getInstance(collectionType.nameComparator(), collectionType.valueComparator());
-                        for (ByteBuffer buffer : ((Lists.Marker) condition.inMarker).bind(variables).elements)
+                        for (ByteBuffer buffer : inValuesMarker.bind(variables).elements)
                             this.inValues.add(Maps.Value.fromSerialized(buffer, deserializer));
                     }
                     else if (column.type instanceof SetType)
                     {
                         SetType deserializer = SetType.getInstance(collectionType.valueComparator());
-                        for (ByteBuffer buffer : ((Lists.Marker) condition.inMarker).bind(variables).elements)
+                        for (ByteBuffer buffer : inValuesMarker.bind(variables).elements)
                             this.inValues.add(Sets.Value.fromSerialized(buffer, deserializer));
                     }
                 }
