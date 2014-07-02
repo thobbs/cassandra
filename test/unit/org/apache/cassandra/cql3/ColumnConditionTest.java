@@ -151,7 +151,7 @@ public class ColumnConditionTest
                 columns.add(value == null ? null : new Column(ByteBufferUtil.bytes("c"), value));
         }
 
-        return bound.listAppliesTo(ListType.getInstance(Int32Type.instance), cfm, columns == null ? null : columns.iterator(), conditionValues, bound.operator);
+        return ColumnCondition.CollectionBound.listAppliesTo(ListType.getInstance(Int32Type.instance), cfm, columns == null ? null : columns.iterator(), conditionValues, bound.operator);
     }
 
     @Test
@@ -284,7 +284,7 @@ public class ColumnConditionTest
             }
         }
 
-        return bound.mapAppliesTo(MapType.getInstance(Int32Type.instance, Int32Type.instance), cfm, columns.iterator(), conditionValues, bound.operator);
+        return ColumnCondition.CollectionBound.mapAppliesTo(MapType.getInstance(Int32Type.instance, Int32Type.instance), cfm, columns.iterator(), conditionValues, bound.operator);
     }
 
     @Test
