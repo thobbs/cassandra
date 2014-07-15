@@ -453,13 +453,16 @@ h3(#dropIndexStmt). DROP INDEX
 
 __Syntax:__
 
-bc(syntax).  <drop-index-stmt> ::= DROP INDEX ( IF EXISTS )? <identifier>
+bc(syntax).  <drop-index-stmt> ::= DROP INDEX ( IF EXISTS )? ( <keyspace> '.' )? <identifier>
 
 __Sample:__
 
-bc(sample). DROP INDEX userIndex;
+bc(sample).. 
+DROP INDEX userIndex;
 
-The @DROP INDEX@ statement is used to drop an existing secondary index. The argument of the statement is the index name.
+DROP INDEX userkeyspace.address_index;
+p. 
+The @DROP INDEX@ statement is used to drop an existing secondary index. The argument of the statement is the index name, which may optionally specify the keyspace of the index.
 
 If the index does not exists, the statement will return an error, unless @IF EXISTS@ is used in which case the operation is a no-op.
 
@@ -1276,6 +1279,7 @@ h3. 3.2.0
 * "@CREATE INDEX@":#createIndexStmt now supports indexing collection columns, including indexing the keys of map collections through the @keys()@ function
 * Indexes on collections may be queried using the new @CONTAINS@ and @CONTAINS KEY@ operators
 * Tuple types were added to hold fixed-length sets of typed positional fields (see the section on "types":#types)
+* "@DROP INDEX@":#dropIndexStmt now supports optionally specifying a keyspace
 
 h3. 3.1.7
 
