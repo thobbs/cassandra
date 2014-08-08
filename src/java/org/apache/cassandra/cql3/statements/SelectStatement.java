@@ -1651,6 +1651,8 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 {
                     if (existingRestriction != null)
                         throw new InvalidRequestException(String.format("%s cannot be restricted by more than one relation if it includes an Equal", def.name));
+                    if (receiver.type.isCollection())
+                        throw new InvalidRequestException(String.format("Collection column %s (%s) cannot be restricted by an equality relation", def.name, receiver.type.asCQL3Type()));
                     Term t = newRel.getValue().prepare(keyspace(), receiver);
                     t.collectMarkerSpecification(boundNames);
                     existingRestriction = new SingleColumnRestriction.EQ(t, newRel.onToken);
