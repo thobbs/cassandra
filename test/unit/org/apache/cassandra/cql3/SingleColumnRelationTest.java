@@ -22,7 +22,7 @@ import org.junit.Test;
 public class SingleColumnRelationTest extends CQLTester
 {
     @Test
-    public void testInvalidCollectionRelation() throws Throwable
+    public void testInvalidCollectionEqualityRelation() throws Throwable
     {
         createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c list<int>, d map<int, int>)");
         createIndex("CREATE INDEX ON %s (b)");
@@ -32,5 +32,20 @@ public class SingleColumnRelationTest extends CQLTester
         assertInvalid("SELECT * FROM %s WHERE a = 0 AND b=?", set(0));
         assertInvalid("SELECT * FROM %s WHERE a = 0 AND c=?", list(0));
         assertInvalid("SELECT * FROM %s WHERE a = 0 AND d=?", map(0, 0));
+    }
+
+    @Test
+    public void testInvalidCollectionNonEQRelation() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int PRIMARY KEY, b set<int>, c int)");
+        createIndex("CREATE INDEX ON %s (c)");
+        execute("INSERT INTO %s (a, b, c) VALUES (0, {0}, 0)");
+
+        // non-EQ operators
+        assertInvalid("SELECT * FROM %s WHERE c = 0 AND b > ?", set(0));
+        assertInvalid("SELECT * FROM %s WHERE c = 0 AND b >= ?", set(0));
+        assertInvalid("SELECT * FROM %s WHERE c = 0 AND b < ?", set(0));
+        assertInvalid("SELECT * FROM %s WHERE c = 0 AND b <= ?", set(0));
+        assertInvalid("SELECT * FROM %s WHERE c = 0 AND b IN (?)", set(0));
     }
 }
