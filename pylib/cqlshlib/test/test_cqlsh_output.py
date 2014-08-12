@@ -101,24 +101,22 @@ class TestCqlshOutput(BaseTestCase):
                 self.assertNoHasColors(c.read_to_next_prompt())
 
     def test_no_prompt_or_colors_output(self):
-        # CQL queries and number of lines expected in output:
-        queries = (('select * from has_all_types limit 1;', 7),)
         for termname in ('', 'dumb', 'vt100', 'xterm'):
             cqlshlog.debug('TERM=%r' % termname)
-            for cql, lines_expected in queries:
-                output, result = testcall_cqlsh(prompt=None, env={'TERM': termname},
-                                                tty=False, input=cql + '\n')
-                output = output.splitlines()
-                for line in output:
-                    self.assertNoHasColors(line)
-                    self.assertNotRegexpMatches(line, r'^cqlsh\S*>')
-                self.assertEqual(len(output), lines_expected,
-                                 msg='output: %r' % '\n'.join(output))
-                self.assertEqual(output[0], '')
-                self.assertNicelyFormattedTableHeader(output[1])
-                self.assertNicelyFormattedTableRule(output[2])
-                self.assertNicelyFormattedTableData(output[3])
-                self.assertEqual(output[4].strip(), '')
+            query = 'select * from has_all_types limit 1;'
+            output, result = testcall_cqlsh(prompt=None, env={'TERM': termname},
+                                            tty=False, input=query + '\n')
+            output = output.splitlines()
+            for line in output:
+                self.assertNoHasColors(line)
+                self.assertNotRegexpMatches(line, r'^cqlsh\S*>')
+            self.assertTrue(6 <= len(output) <= 8,
+                            msg='output: %r' % '\n'.join(output))
+            self.assertEqual(output[0], '')
+            self.assertNicelyFormattedTableHeader(output[1])
+            self.assertNicelyFormattedTableRule(output[2])
+            self.assertNicelyFormattedTableData(output[3])
+            self.assertEqual(output[4].strip(), '')
 
     def test_color_output(self):
         for termname in ('xterm', 'unknown-garbage'):
