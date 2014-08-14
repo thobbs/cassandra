@@ -48,24 +48,10 @@ public abstract class Constants
         STRING, INTEGER, UUID, FLOAT, BOOLEAN, HEX;
     }
 
+    public static final Term.Terminal NULL_VALUE = new NullValue();
+
     public static final Term.Raw NULL_LITERAL = new Term.Raw()
     {
-        private final Term.Terminal NULL_VALUE = new Value(null)
-        {
-            @Override
-            public Terminal bind(QueryOptions options)
-            {
-                // We return null because that makes life easier for collections
-                return null;
-            }
-
-            @Override
-            public String toString()
-            {
-                return "null";
-            }
-        };
-
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
             if (!isAssignableTo(keyspace, receiver))
@@ -267,6 +253,33 @@ public abstract class Constants
         public String toString()
         {
             return ByteBufferUtil.bytesToHex(bytes);
+        }
+    }
+
+    public static class NullValue extends Value
+    {
+        public NullValue()
+        {
+            super(null);
+        }
+
+        @Override
+        public Terminal bind(QueryOptions options)
+        {
+            // We return null because that makes life easier for collections
+            return null;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "null";
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            return other instanceof NullValue;
         }
     }
 

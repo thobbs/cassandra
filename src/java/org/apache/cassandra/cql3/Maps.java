@@ -190,6 +190,26 @@ public abstract class Maps
 
             return true;
         }
+
+        public int compare(MapType type, Value v)
+        {
+            Iterator<Map.Entry<ByteBuffer, ByteBuffer>> thisIter = map.entrySet().iterator();
+            Iterator<Map.Entry<ByteBuffer, ByteBuffer>> thatIter = v.map.entrySet().iterator();
+            for (int i = 0; i < Math.min(map.size(), v.map.size()); i++)
+            {
+                Map.Entry<ByteBuffer, ByteBuffer> thisEntry = thisIter.next();
+                Map.Entry<ByteBuffer, ByteBuffer> thatEntry = thatIter.next();
+                int cmp = type.keys.compare(thisEntry.getKey(), thatEntry.getKey());
+                if (cmp != 0)
+                    return cmp;
+
+                cmp = type.values.compare(thisEntry.getValue(), thatEntry.getValue());
+                if (cmp != 0)
+                    return cmp;
+            }
+            return Integer.compare(map.size(), v.map.size());
+        }
+
     }
 
     // See Lists.DelayedValue
