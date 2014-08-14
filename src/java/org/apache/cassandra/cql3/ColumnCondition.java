@@ -208,26 +208,6 @@ public class ColumnCondition
                 }
             });
         }
-
-        /** Determines if two sets of IN values are equal (when compared as sets). */
-        protected static boolean inValuesAreEqual(List<ByteBuffer> thisValues, List<ByteBuffer> thatValues, final AbstractType<?> columnType)
-        {
-            Comparator<ByteBuffer> comparator = new Comparator<ByteBuffer>() {
-                @Override
-                public int compare(ByteBuffer o1, ByteBuffer o2) {
-                    if (o1 == null)
-                        return o2 == null ? 0 : -1;
-                    if (o2 == null)
-                        return 1;
-                    return columnType.compare(o1, o2);
-                }
-            };
-            TreeSet<ByteBuffer> thisSet = new TreeSet<>(comparator);
-            thisSet.addAll(thisValues);
-            TreeSet<ByteBuffer> thatSet = new TreeSet<>(comparator);
-            thatSet.addAll(thatValues);
-            return thisSet.equals(thatSet);
-        }
     }
 
     /**
@@ -249,24 +229,6 @@ public class ColumnCondition
         {
             CellName name = current.metadata().comparator.create(rowPrefix, column);
             return isSatisfiedByValue(value, current.getColumn(name), column.type, operator, now);
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (!(o instanceof SimpleBound))
-                return false;
-
-            SimpleBound that = (SimpleBound)o;
-            if (!column.equals(that.column))
-                return false;
-
-            if (!operator.equals(that.operator))
-                return false;
-
-            return value == null || that.value == null
-                   ? value == null && that.value == null
-                   : column.type.compare(value, that.value) == 0;
         }
 
         @Override
@@ -307,19 +269,6 @@ public class ColumnCondition
                     return true;
             }
             return false;
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (!(o instanceof SimpleInBound))
-                return false;
-
-            SimpleInBound that = (SimpleInBound)o;
-            if (!column.equals(that.column))
-                return false;
-
-            return Bound.inValuesAreEqual(this.inValues, that.inValues, column.type);
         }
 
         @Override
@@ -386,51 +335,6 @@ public class ColumnCondition
         }
 
         @Override
-        public boolean equals(Object o)
-        {
-            if (!(o instanceof ElementAccessBound))
-                return false;
-
-            ElementAccessBound that = (ElementAccessBound)o;
-            if (!column.equals(that.column))
-                return false;
-
-            if (!operator.equals(that.operator))
-                return false;
-
-            if ((collectionElement == null) != (that.collectionElement == null))
-                return false;
-
-            if (collectionElement != null)
-            {
-                assert column.type instanceof ListType || column.type instanceof MapType;
-                if(getElementComparator(column).compare(collectionElement, that.collectionElement) != 0)
-                    return false;
-            }
-
-            if (value == null || that.value == null)
-                return value == that.value;
-            else
-                return getValueComparator(column).compare(value, that.value) == 0;
-        }
-
-        /** Returns the comparator for keys in the collection. */
-        static AbstractType<?> getElementComparator(ColumnDefinition column)
-        {
-            return column.type instanceof ListType
-                   ? Int32Type.instance
-                   : ((MapType)column.type).keys;
-        }
-
-        /** Returns the comparator for values in the collection. */
-        static AbstractType<?> getValueComparator(ColumnDefinition column)
-        {
-            return (column.type instanceof ListType)
-                   ? ((ListType) column.type).elements
-                   : ((MapType) column.type).values;
-        }
-
-        @Override
         public int hashCode()
         {
             return Objects.hashCode(column, collectionElement, value, operator);
@@ -489,29 +393,6 @@ public class ColumnCondition
                     return true;
             }
             return false;
-        }
-
-        @Override
-        public boolean equals(Object o)
-        {
-            if (!(o instanceof ElementAccessInBound))
-                return false;
-
-            ElementAccessInBound that = (ElementAccessInBound)o;
-            if (!column.equals(that.column))
-                return false;
-
-            if ((collectionElement == null) != (that.collectionElement == null))
-                return false;
-
-            if (collectionElement != null)
-            {
-                assert column.type instanceof ListType || column.type instanceof MapType;
-                if (ElementAccessBound.getElementComparator(column).compare(collectionElement, that.collectionElement) != 0)
-                    return false;
-            }
-
-            return Bound.inValuesAreEqual(this.inValues, that.inValues, ElementAccessBound.getValueComparator(column));
         }
 
         @Override
@@ -645,38 +526,6 @@ public class ColumnCondition
         }
 
         @Override
-        public boolean equals(Object o)
-        {
-            if (!(o instanceof CollectionBound))
-                return false;
-
-            CollectionBound that = (CollectionBound)o;
-            if (!column.equals(that.column))
-                return false;
-
-            if (value == null || that.value == null)
-                return value == null && that.value == null;
-
-            if (!operator.equals(that.operator))
-                return false;
-
-            // make sure to not cast nulls (Constants.Value) to Lists.Value, Sets.Value, or Maps.Value
-            Constants.Value nullConstant = new Constants.Value(null);
-            if (value.equals(nullConstant))
-                return that.value.equals(nullConstant);
-            else if (that.value.equals(nullConstant))
-                return false;
-
-            switch (((CollectionType)column.type).kind)
-            {
-                case LIST: return ((Lists.Value)value).equals((ListType)column.type, (Lists.Value)that.value);
-                case SET: return ((Sets.Value)value).equals((SetType)column.type, (Sets.Value)that.value);
-                case MAP: return ((Maps.Value)value).equals((MapType)column.type, (Maps.Value)that.value);
-            }
-            throw new AssertionError();
-        }
-
-        @Override
         public int hashCode()
         {
             Object val = null;
@@ -771,89 +620,6 @@ public class ColumnCondition
         }
 
         @Override
-        public boolean equals(Object o)
-        {
-            if (!(o instanceof CollectionInBound))
-                return false;
-
-            CollectionInBound that = (CollectionInBound)o;
-            if (!column.equals(that.column))
-                return false;
-
-            CollectionType.Kind kind = (((CollectionType) column.type).kind);
-            if (kind == CollectionType.Kind.LIST)
-            {
-                Comparator<Lists.Value> comparator = new Comparator<Lists.Value>() {
-                    @Override
-                    public int compare(Lists.Value o1, Lists.Value o2)
-                    {
-                        if (o1 == null)
-                            return o2 == null ? 0 : -1;
-                        if (o2 == null)
-                            return 1;
-                        return o1.compare((ListType)column.type, o2);
-                    }
-                };
-
-                TreeSet<Lists.Value> thisSet = new TreeSet<>(comparator);
-                for (Term.Terminal term : this.inValues)
-                    thisSet.add(term == null ? null : (Lists.Value)term);
-
-                TreeSet<Lists.Value> thatSet = new TreeSet<>(comparator);
-                for (Term.Terminal term : that.inValues)
-                    thatSet.add(term == null ? null : (Lists.Value)term);
-                return thisSet.equals(thatSet);
-            }
-            else if (kind == CollectionType.Kind.SET)
-            {
-                Comparator<Sets.Value> comparator = new Comparator<Sets.Value>() {
-                    @Override
-                    public int compare(Sets.Value o1, Sets.Value o2)
-                    {
-                        if (o1 == null)
-                            return o2 == null ? 0 : -1;
-                        if (o2 == null)
-                            return 1;
-                        return o1.compare((SetType)column.type, o2);
-                    }
-                };
-
-                TreeSet<Sets.Value> thisSet = new TreeSet<>(comparator);
-                for (Term.Terminal term : this.inValues)
-                    thisSet.add(term == null ? null : (Sets.Value)term);
-
-                TreeSet<Sets.Value> thatSet = new TreeSet<>(comparator);
-                for (Term.Terminal term : that.inValues)
-                    thatSet.add(term == null ? null : (Sets.Value)term);
-                return thisSet.equals(thatSet);
-            }
-            else if (kind == CollectionType.Kind.MAP)
-            {
-                Comparator<Maps.Value> comparator = new Comparator<Maps.Value>() {
-                    @Override
-                    public int compare(Maps.Value o1, Maps.Value o2)
-                    {
-                        if (o1 == null)
-                            return o2 == null ? 0 : -1;
-                        if (o2 == null)
-                            return 1;
-                        return o1.compare((MapType)column.type, o2);
-                    }
-                };
-
-                TreeSet<Maps.Value> thisSet = new TreeSet<>(comparator);
-                for (Term.Terminal term : this.inValues)
-                    thisSet.add(term == null ? null : (Maps.Value)term);
-
-                TreeSet<Maps.Value> thatSet = new TreeSet<>(comparator);
-                for (Term.Terminal term : that.inValues)
-                    thatSet.add(term == null ? null : (Maps.Value)term);
-                return thisSet.equals(thatSet);
-            }
-            throw new AssertionError();
-        }
-
-        @Override
         public int hashCode()
         {
             List<Collection<ByteBuffer>> inValueBuffers = new ArrayList<>(inValues.size());
@@ -861,24 +627,28 @@ public class ColumnCondition
             {
                 case LIST:
                     for (Term.Terminal term : inValues)
-                        inValueBuffers.add(((Lists.Value)term).elements);
+                        inValueBuffers.add(term == null ? null : ((Lists.Value)term).elements);
                     break;
                 case SET:
                     for (Term.Terminal term : inValues)
-                        inValueBuffers.add(((Sets.Value)term).elements);
+                        inValueBuffers.add(term == null ? null : ((Sets.Value)term).elements);
                     break;
                 case MAP:
                     for (Term.Terminal term : inValues)
                     {
-                        inValueBuffers.add(((Maps.Value)term).map.keySet());
-                        inValueBuffers.add(((Maps.Value)term).map.values());
+                        if (term != null)
+                        {
+                            inValueBuffers.add(((Maps.Value)term).map.keySet());
+                            inValueBuffers.add(((Maps.Value)term).map.values());
+                        }
+                        else
+                            inValueBuffers.add(null);
                     }
                     break;
             }
             return Objects.hashCode(column, inValueBuffers, operator);
         }
     }
-
 
     public static class Raw
     {

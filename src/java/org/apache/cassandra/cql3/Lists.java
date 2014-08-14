@@ -169,17 +169,6 @@ public abstract class Lists
             return true;
         }
 
-        public int compare(ListType type, Value v)
-        {
-            for (int i = 0; i < Math.min(elements.size(), v.elements.size()); i++)
-            {
-                int cmp = type.elements.compare(elements.get(i), v.elements.get(i));
-                if (cmp != 0)
-                    return cmp;
-            }
-            return Integer.compare(elements.size(), v.elements.size());
-        }
-
         public List<ByteBuffer> getElements()
         {
             return elements;

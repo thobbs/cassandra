@@ -177,19 +177,6 @@ public abstract class Sets
 
             return true;
         }
-
-        public int compare(SetType type, Value v)
-        {
-            Iterator<ByteBuffer> thisIter = elements.iterator();
-            Iterator<ByteBuffer> thatIter = v.elements.iterator();
-            for (int i = 0; i < Math.min(elements.size(), v.elements.size()); i++)
-            {
-                int cmp = type.elements.compare(thisIter.next(), thatIter.next());
-                if (cmp != 0)
-                    return cmp;
-            }
-            return Integer.compare(elements.size(), v.elements.size());
-        }
     }
 
     // See Lists.DelayedValue
