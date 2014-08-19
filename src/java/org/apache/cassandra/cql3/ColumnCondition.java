@@ -447,13 +447,16 @@ public class ColumnCondition
             throw new AssertionError();
         }
 
-        private static boolean setOrListAppliesTo(AbstractType<?> type, Iterator<Cell> iter, Iterator<ByteBuffer> conditionIter, Relation.Type operator)
+        private static boolean setOrListAppliesTo(AbstractType<?> type, Iterator<Cell> iter, Iterator<ByteBuffer> conditionIter, Relation.Type operator, boolean isSet)
         {
             while(iter.hasNext())
             {
                 if (!conditionIter.hasNext())
                     return operator.equals(Relation.Type.GT) || operator.equals(Relation.Type.GTE) || operator.equals(Relation.Type.NEQ);
-                int comparison = type.compare(iter.next().value(), conditionIter.next());
+
+                // for lists we use the cell value; for sets we use the cell name
+                ByteBuffer cellValue = isSet? iter.next().name().collectionElement() : iter.next().value();
+                int comparison = type.compare(cellValue, conditionIter.next());
                 if (comparison != 0)
                     return evaluateComparisonWithOperator(comparison, operator);
             }
@@ -487,12 +490,15 @@ public class ColumnCondition
 
         static boolean listAppliesTo(ListType type, Iterator<Cell> iter, List<ByteBuffer> elements, Relation.Type operator)
         {
-            return setOrListAppliesTo(type.elements, iter, elements.iterator(), operator);
+            return setOrListAppliesTo(type.elements, iter, elements.iterator(), operator, false);
         }
 
         static boolean setAppliesTo(SetType type, Iterator<Cell> iter, Set<ByteBuffer> elements, Relation.Type operator)
         {
-            return setOrListAppliesTo(type.elements, iter, elements.iterator(), operator);
+            ArrayList<ByteBuffer> sortedElements = new ArrayList<>(elements.size());
+            sortedElements.addAll(elements);
+            Collections.sort(sortedElements, type.elements);
+            return setOrListAppliesTo(type.elements, iter, sortedElements.iterator(), operator, true);
         }
 
         @SuppressWarnings("unchecked")

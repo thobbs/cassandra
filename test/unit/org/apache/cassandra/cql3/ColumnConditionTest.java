@@ -275,6 +275,136 @@ public class ColumnConditionTest
         assertTrue(listAppliesTo(bound, list(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
     }
 
+    private static Set<ByteBuffer> set(ByteBuffer... values)
+    {
+        Set results = new HashSet<ByteBuffer>(values.length);
+        results.addAll(Arrays.asList(values));
+        return results;
+    }
+
+    private static boolean setAppliesTo(ColumnCondition.CollectionBound bound, Set<ByteBuffer> conditionValues, List<ByteBuffer> columnValues)
+    {
+        CFMetaData cfm = CFMetaData.compile("create table foo(a int PRIMARY KEY, b int, c set<int>)", "ks");
+        Map<ByteBuffer, CollectionType> typeMap = new HashMap<>();
+        typeMap.put(ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance));
+        CompoundSparseCellNameType.WithCollection nameType = new CompoundSparseCellNameType.WithCollection(Collections.EMPTY_LIST, ColumnToCollectionType.getInstance(typeMap));
+        ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance), 0, ColumnDefinition.Kind.REGULAR);
+
+        List<Cell> cells = new ArrayList<>(columnValues.size());
+        if (columnValues != null)
+        {
+            for (int i = 0; i < columnValues.size(); i++)
+            {
+                ByteBuffer key = columnValues.get(i);
+                cells.add(new BufferCell(nameType.create(Composites.EMPTY, definition, key), ByteBufferUtil.EMPTY_BYTE_BUFFER));
+            };
+        }
+
+        return bound.setAppliesTo(SetType.getInstance(Int32Type.instance), cells == null ? null : cells.iterator(), conditionValues, bound.operator);
+    }
+
+    @Test
+    public void testSetCollectionBoundAppliesTo() throws InvalidRequestException
+    {
+        ColumnDefinition definition = new ColumnDefinition("ks", "cf", new ColumnIdentifier("c", true), SetType.getInstance(Int32Type.instance), null, null, null, null, null);
+
+        // EQ
+        ColumnCondition condition = ColumnCondition.condition(definition, null, new Sets.Value(set(ONE)), Relation.Type.EQ);
+        ColumnCondition.CollectionBound bound = (ColumnCondition.CollectionBound) condition.bind(QueryOptions.DEFAULT);
+        assertTrue(setAppliesTo(bound, set(ONE), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(), list()));
+        assertFalse(setAppliesTo(bound, set(ZERO), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ZERO)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ONE, TWO)));
+        assertFalse(setAppliesTo(bound, set(ONE, TWO), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list()));
+
+        assertFalse(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertTrue(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+
+        // NEQ
+        condition = ColumnCondition.condition(definition, null, new Sets.Value(set(ONE)), Relation.Type.NEQ);
+        bound = (ColumnCondition.CollectionBound) condition.bind(QueryOptions.DEFAULT);
+        assertFalse(setAppliesTo(bound, set(ONE), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(), list()));
+        assertTrue(setAppliesTo(bound, set(ZERO), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ZERO)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ONE, TWO)));
+        assertTrue(setAppliesTo(bound, set(ONE, TWO), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list()));
+
+        assertTrue(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertFalse(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+
+        // LT
+        condition = ColumnCondition.condition(definition, null, new Lists.Value(Arrays.asList(ONE)), Relation.Type.LT);
+        bound = (ColumnCondition.CollectionBound) condition.bind(QueryOptions.DEFAULT);
+        assertFalse(setAppliesTo(bound, set(ONE), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(), list()));
+        assertFalse(setAppliesTo(bound, set(ZERO), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ZERO)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ONE, TWO)));
+        assertTrue(setAppliesTo(bound, set(ONE, TWO), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list()));
+
+        assertFalse(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertFalse(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+
+        // LTE
+        condition = ColumnCondition.condition(definition, null, new Lists.Value(Arrays.asList(ONE)), Relation.Type.LTE);
+        bound = (ColumnCondition.CollectionBound) condition.bind(QueryOptions.DEFAULT);
+        assertTrue(setAppliesTo(bound, set(ONE), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(), list()));
+        assertFalse(setAppliesTo(bound, set(ZERO), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ZERO)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ONE, TWO)));
+        assertTrue(setAppliesTo(bound, set(ONE, TWO), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list()));
+
+        assertFalse(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertTrue(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+
+        // GT
+        condition = ColumnCondition.condition(definition, null, new Lists.Value(Arrays.asList(ONE)), Relation.Type.GT);
+        bound = (ColumnCondition.CollectionBound) condition.bind(QueryOptions.DEFAULT);
+        assertFalse(setAppliesTo(bound, set(ONE), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(), list()));
+        assertTrue(setAppliesTo(bound, set(ZERO), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ZERO)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ONE, TWO)));
+        assertFalse(setAppliesTo(bound, set(ONE, TWO), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list()));
+
+        assertTrue(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertFalse(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+
+        // GTE
+        condition = ColumnCondition.condition(definition, null, new Lists.Value(Arrays.asList(ONE)), Relation.Type.GTE);
+        bound = (ColumnCondition.CollectionBound) condition.bind(QueryOptions.DEFAULT);
+        assertTrue(setAppliesTo(bound, set(ONE), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(), list()));
+        assertTrue(setAppliesTo(bound, set(ZERO), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ZERO)));
+        assertTrue(setAppliesTo(bound, set(ONE), list(ONE, TWO)));
+        assertFalse(setAppliesTo(bound, set(ONE, TWO), list(ONE)));
+        assertTrue(setAppliesTo(bound, set(), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list()));
+
+        assertTrue(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ONE)));
+        assertFalse(setAppliesTo(bound, set(ONE), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        assertTrue(setAppliesTo(bound, set(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+    }
+
     // values should be a list of key, value, key, value, ...
     private static Map<ByteBuffer, ByteBuffer> map(ByteBuffer... values)
     {
