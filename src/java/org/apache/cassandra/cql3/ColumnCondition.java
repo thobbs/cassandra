@@ -70,22 +70,27 @@ public class ColumnCondition
     {
         return new ColumnCondition(column, null, value, null, op);
     }
+
     public static ColumnCondition condition(ColumnDefinition column, Term collectionElement, Term value, Relation.Type op)
     {
         return new ColumnCondition(column, collectionElement, value, null, op);
     }
+
     public static ColumnCondition inCondition(ColumnDefinition column, List<Term> inValues)
     {
         return new ColumnCondition(column, null, null, inValues, Relation.Type.IN);
     }
+
     public static ColumnCondition inCondition(ColumnDefinition column, Term collectionElement, List<Term> inValues)
     {
         return new ColumnCondition(column, collectionElement, null, inValues, Relation.Type.IN);
     }
+
     public static ColumnCondition inCondition(ColumnDefinition column, Term inMarker)
     {
         return new ColumnCondition(column, null, inMarker, null, Relation.Type.IN);
     }
+
     public static ColumnCondition inCondition(ColumnDefinition column, Term collectionElement, Term inMarker)
     {
         return new ColumnCondition(column, collectionElement, inMarker, null, Relation.Type.IN);
@@ -501,7 +506,6 @@ public class ColumnCondition
             return setOrListAppliesTo(type.elements, iter, sortedElements.iterator(), operator, true);
         }
 
-        @SuppressWarnings("unchecked")
         static boolean mapAppliesTo(MapType type, Iterator<Cell> iter, Map<ByteBuffer, ByteBuffer> elements, Relation.Type operator)
         {
             Iterator<Map.Entry<ByteBuffer, ByteBuffer>> conditionIter = elements.entrySet().iterator();
@@ -514,7 +518,7 @@ public class ColumnCondition
                 Cell c = iter.next();
 
                 // compare the keys
-                /* unchecked */ int comparison = type.keys.compare(c.name().collectionElement(), conditionEntry.getKey());
+                int comparison = type.keys.compare(c.name().collectionElement(), conditionEntry.getKey());
                 if (comparison != 0)
                     return evaluateComparisonWithOperator(comparison, operator);
 
@@ -676,32 +680,36 @@ public class ColumnCondition
             this.operator = op;
         }
 
-
         /** A condition on a column. For example: "IF col = 'foo'" */
         public static Raw simpleCondition(Term.Raw value, Relation.Type op)
         {
             return new Raw(value, null, null, null, op);
         }
+
         /** An IN condition on a column. For example: "IF col IN ('foo', 'bar', ...)" */
         public static Raw simpleInCondition(List<Term.Raw> inValues)
         {
             return new Raw(null, inValues, null, null, Relation.Type.IN);
         }
+
         /** An IN condition on a column with a single marker. For example: "IF col IN ?" */
         public static Raw simpleInCondition(AbstractMarker.INRaw inMarker)
         {
             return new Raw(null, null, inMarker, null, Relation.Type.IN);
         }
+
         /** A condition on a collection element. For example: "IF col['key'] = 'foo'" */
         public static Raw collectionCondition(Term.Raw value, Term.Raw collectionElement, Relation.Type op)
         {
             return new Raw(value, null, null, collectionElement, op);
         }
+
         /** An IN condition on a collection element. For example: "IF col['key'] IN ('foo', 'bar', ...)" */
         public static Raw collectionInCondition(Term.Raw collectionElement, List<Term.Raw> inValues)
         {
             return new Raw(null, inValues, null, collectionElement, Relation.Type.IN);
         }
+
         /** An IN condition on a collection element with a single marker. For example: "IF col['key'] IN ?" */
         public static Raw collectionInCondition(Term.Raw collectionElement, AbstractMarker.INRaw inMarker)
         {
@@ -711,7 +719,7 @@ public class ColumnCondition
         public ColumnCondition prepare(String keyspace, ColumnDefinition receiver) throws InvalidRequestException
         {
             if (receiver.type instanceof CounterColumnType)
-                throw new InvalidRequestException("Condtions on counters are not supported");
+                throw new InvalidRequestException("Conditions on counters are not supported");
 
             if (collectionElement == null)
             {
@@ -732,7 +740,6 @@ public class ColumnCondition
 
             if (!(receiver.type.isCollection()))
                 throw new InvalidRequestException(String.format("Invalid element access syntax for non-collection column %s", receiver.name));
-
 
             ColumnSpecification elementSpec, valueSpec;
             switch ((((CollectionType)receiver.type).kind))
