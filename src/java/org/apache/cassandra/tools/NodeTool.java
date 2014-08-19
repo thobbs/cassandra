@@ -742,8 +742,12 @@ public class NodeTool
                     System.out.println("\t\tCompacted partition minimum bytes: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "MinRowSize"));
                     System.out.println("\t\tCompacted partition maximum bytes: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "MaxRowSize"));
                     System.out.println("\t\tCompacted partition mean bytes: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "MeanRowSize"));
-                    System.out.println("\t\tAverage live cells per slice (last five minutes): " + ((JmxReporter.HistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "LiveScannedHistogram")).getMean());
-                    System.out.println("\t\tAverage tombstones per slice (last five minutes): " + ((JmxReporter.HistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "TombstoneScannedHistogram")).getMean());
+                    JmxReporter.HistogramMBean histogram = (JmxReporter.HistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "LiveScannedHistogram");
+                    System.out.println("\t\tAverage live cells per slice (last five minutes): " + histogram.getMean());
+                    System.out.println("\t\tMaximum live cells per slice (last five minutes): " + histogram.getMax());
+                    histogram = (JmxReporter.HistogramMBean) probe.getColumnFamilyMetric(keyspaceName, cfName, "TombstoneScannedHistogram");
+                    System.out.println("\t\tAverage tombstones per slice (last five minutes): " + histogram.getMean());
+                    System.out.println("\t\tMaximum tombstones per slice (last five minutes): " + histogram.getMax());
 
                     System.out.println("");
                 }
@@ -1129,26 +1133,56 @@ public class NodeTool
             int compactionThroughput = probe.getCompactionThroughput();
             CompactionManagerMBean cm = probe.getCompactionManagerProxy();
             System.out.println("pending tasks: " + probe.getCompactionMetric("PendingTasks"));
-            if (cm.getCompactions().size() > 0)
-                System.out.printf("%25s%16s%16s%16s%16s%10s%10s%n", "compaction type", "keyspace", "table", "completed", "total", "unit", "progress");
             long remainingBytes = 0;
-            for (Map<String, String> c : cm.getCompactions())
+            if (cm.getCompactions().size() > 0)
             {
-                String percentComplete = new Long(c.get("total")) == 0
-                                         ? "n/a"
-                                         : new DecimalFormat("0.00").format((double) new Long(c.get("completed")) / new Long(c.get("total")) * 100) + "%";
-                System.out.printf("%25s%16s%16s%16s%16s%10s%10s%n", c.get("taskType"), c.get("keyspace"), c.get("columnfamily"), c.get("completed"), c.get("total"), c.get("unit"), percentComplete);
-                if (c.get("taskType").equals(OperationType.COMPACTION.toString()))
-                    remainingBytes += (new Long(c.get("total")) - new Long(c.get("completed")));
-            }
-            long remainingTimeInSecs = compactionThroughput == 0 || remainingBytes == 0
-                                       ? -1
-                                       : (remainingBytes) / (1024L * 1024L * compactionThroughput);
-            String remainingTime = remainingTimeInSecs < 0
-                                   ? "n/a"
-                                   : format("%dh%02dm%02ds", remainingTimeInSecs / 3600, (remainingTimeInSecs % 3600) / 60, (remainingTimeInSecs % 60));
+                List<String[]> lines = new ArrayList<>();
+                int[] columnSizes = new int[] { 0, 0, 0, 0, 0, 0, 0 };
 
-            System.out.printf("%25s%10s%n", "Active compaction remaining time : ", remainingTime);
+                addLine(lines, columnSizes, "compaction type", "keyspace", "table", "completed", "total", "unit", "progress");
+                for (Map<String, String> c : cm.getCompactions())
+                {
+                    long total = Long.parseLong(c.get("total"));
+                    long completed = Long.parseLong(c.get("completed"));
+                    String taskType = c.get("taskType");
+                    String keyspace = c.get("keyspace");
+                    String columnFamily = c.get("columnfamily");
+                    String unit = c.get("unit");
+                    String percentComplete = total == 0 ? "n/a" : new DecimalFormat("0.00").format((double) completed / total * 100) + "%";
+                    addLine(lines, columnSizes, taskType, keyspace, columnFamily, Long.toString(completed), Long.toString(total), unit, percentComplete);
+                    if (taskType.equals(OperationType.COMPACTION.toString()))
+                        remainingBytes += total - completed;
+                }
+
+                StringBuilder buffer = new StringBuilder();
+                for (int columnSize : columnSizes) {
+                    buffer.append("%");
+                    buffer.append(columnSize + 3);
+                    buffer.append("s");
+                }
+                buffer.append("%n");
+                String format = buffer.toString();
+
+                for (String[] line : lines)
+                {
+                    System.out.printf(format, line[0], line[1], line[2], line[3], line[4], line[5], line[6]);
+                }
+
+                String remainingTime = "n/a";
+                if (compactionThroughput != 0)
+                {
+                    long remainingTimeInSecs = remainingBytes / (1024L * 1024L * compactionThroughput);
+                    remainingTime = format("%dh%02dm%02ds", remainingTimeInSecs / 3600, (remainingTimeInSecs % 3600) / 60, (remainingTimeInSecs % 60));
+                }
+                System.out.printf("%25s%10s%n", "Active compaction remaining time : ", remainingTime);
+            }
+        }
+
+        private void addLine(List<String[]> lines, int[] columnSizes, String... columns) {
+            lines.add(columns);
+            for (int i = 0; i < columns.length; i++) {
+                columnSizes[i] = Math.max(columnSizes[i], columns[i].length());
+            }
         }
     }
 

@@ -15,28 +15,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.hadoop;
-
+package org.apache.cassandra.streaming;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.List;
+import java.net.InetAddress;
+import java.net.Socket;
 
-import org.apache.cassandra.thrift.Mutation;
-import org.apache.hadoop.mapreduce.*;
-
-public class BulkOutputFormat extends AbstractBulkOutputFormat<ByteBuffer,List<Mutation>>
+/**
+ * Interface that creates connection used by streaming.
+ */
+public interface StreamConnectionFactory
 {
-    /** Fills the deprecated OutputFormat interface for streaming. */
-    @Deprecated
-    public BulkRecordWriter getRecordWriter(org.apache.hadoop.fs.FileSystem filesystem, org.apache.hadoop.mapred.JobConf job, String name, org.apache.hadoop.util.Progressable progress) throws IOException
-    {
-        return new BulkRecordWriter(job, progress);
-    }
-
-    @Override
-    public BulkRecordWriter getRecordWriter(final TaskAttemptContext context) throws IOException, InterruptedException
-    {
-        return new BulkRecordWriter(context);
-    }
+    Socket createConnection(InetAddress peer) throws IOException;
 }
