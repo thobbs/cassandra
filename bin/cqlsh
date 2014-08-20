@@ -651,16 +651,21 @@ class Shell(cmd.Cmd):
         if ksname is None:
             ksname = self.current_keyspace
 
-        return self.get_usertypes_meta().get_usertypes_names(ksname)
+        return self.get_keyspace_meta(ksname).user_types.keys()
 
     def get_usertype_layout(self, ksname, typename):
         if ksname is None:
             ksname = self.current_keyspace
-        layout = self.get_usertypes_meta().get_fields_with_types(ksname, typename)
 
-        if not layout:
+        ks_meta = self.get_keyspace_meta(ksname)
+
+        try:
+            user_type = ks_meta.user_types[typename]
+        except KeyError:
             raise UserTypeNotFound("User type %r not found" % typename)
-        return layout
+
+        return [(field_name, field_type.cql_parameterized_type())
+                for field_name, field_type in zip(user_type.field_names, user_type.field_types)]
 
     def get_cluster_name(self):
         return self.conn.metadata.cluster_name
