@@ -64,6 +64,7 @@ class _ChainedWriter(object):
         except KeyboardInterrupt:
             self._cancellation_event.set()
             sys.stdout.write('Aborting due to keyboard interrupt\n')
+            self._task_counter.await()
 
         return next(self._num_finished), self._first_error
 
