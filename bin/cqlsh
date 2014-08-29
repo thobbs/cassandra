@@ -1060,7 +1060,7 @@ class Shell(cmd.Cmd):
 
     def print_recreate_usertype(self, ksname, utname, out):
         layout = self.get_usertype_layout(ksname, utname)
-        out.write("CREATE TYPE %s (\n" % utname)
+        out.write("CREATE IMMUTABLE TYPE %s (\n" % utname)
         for (index,(tname,ttype)) in enumerate(layout, 1):
             out.write("  %s %s" % (tname, ttype))
             if index < len(layout):
