@@ -275,6 +275,9 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             if (getIdxOfField(toUpdate, fieldName) >= 0)
                 throw new InvalidRequestException(String.format("Cannot add new field %s to type %s: a field of the same name already exists", fieldName, name));
 
+            if (type.isCollection())
+                throw new InvalidRequestException("Cannot add collection fields to user types");
+
             List<ByteBuffer> newNames = new ArrayList<>(toUpdate.size() + 1);
             newNames.addAll(toUpdate.fieldNames());
             newNames.add(fieldName.bytes);

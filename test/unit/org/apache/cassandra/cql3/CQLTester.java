@@ -156,18 +156,34 @@ public abstract class CQLTester
     {
         String typeName = "type_" + seqNumber.getAndIncrement();
         String fullQuery = String.format(query, KEYSPACE + "." + typeName);
-        currentTypes.add(typeName);
         logger.info(fullQuery);
         schemaChange(fullQuery);
+        currentTypes.add(typeName);
         return typeName;
+    }
+
+    protected void alterType(String typeName, String query)
+    {
+        String fullQuery = String.format(query, KEYSPACE + "." + typeName);
+        logger.info(fullQuery);
+        schemaChange(fullQuery);
     }
 
     protected void createTable(String query)
     {
-        currentTable = "table_" + seqNumber.getAndIncrement();
-        String fullQuery = String.format(query, KEYSPACE + "." + currentTable);
+        String newTable = "table_" + seqNumber.getAndIncrement();
+        String fullQuery = String.format(query, KEYSPACE + "." + newTable);
         logger.info(fullQuery);
-        schemaChange(fullQuery);
+        try
+        {
+            schemaChange(fullQuery);
+            currentTable = newTable;
+        }
+        catch (RuntimeException e)
+        {
+            seqNumber.decrementAndGet();
+            throw e;
+        }
     }
 
     protected void alterTable(String query)

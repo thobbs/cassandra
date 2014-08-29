@@ -17,10 +17,8 @@
  */
 package org.apache.cassandra.cql3;
 
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 public class TypeTest extends CQLTester
@@ -80,6 +78,55 @@ public class TypeTest extends CQLTester
         {
             alterTable("ALTER TABLE %s ALTER b TYPE 'org.apache.cassandra.db.marshal.ReversedType(org.apache.cassandra.db.marshal.DateType)'");
             fail("Expected error for ALTER statement");
+        }
+        catch (RuntimeException e) { }
+    }
+
+    @Test
+    public void testImmutableUDTs() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int PRIMARY KEY, b int)");
+
+        try
+        {
+            createType("CREATE IMMUTABLE TYPE %s (a int, b set<int>)");
+            fail("Expected UDT creation with set<int> field to fail");
+        }
+        catch (RuntimeException e) { }
+
+        String typename = createType("CREATE IMMUTABLE TYPE %s (a int, b int)");
+        try
+        {
+            alterType(typename, "ALTER TYPE %s ADD c set<int>");
+            fail("Expected UDT alter with set<int> field to fail");
+        }
+        catch (RuntimeException e) { }
+    }
+
+    @Test
+    public void testImmutableTuples() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int PRIMARY KEY, b int)");
+
+        try
+        {
+            createTable("CREATE TABLE %s (a int primary key, b tuple<set<int>>)");
+            fail("Expected table creation with tuple<set<int>> column to fail");
+        }
+        catch (RuntimeException e) { }
+
+        try
+        {
+            alterTable("ALTER TABLE %s ADD c tuple<set<int>>");
+            fail("Expected table alter with tuple<set<int>> column to fail");
+        }
+        catch (RuntimeException e) { }
+
+        String typename = createType("CREATE IMMUTABLE TYPE %s (a int, b int)");
+        try
+        {
+            alterType(typename, "ALTER TYPE %s ADD c tuple<set<int>>");
+            fail("Expected UDT alter with tuple<set<int>> field to fail");
         }
         catch (RuntimeException e) { }
     }

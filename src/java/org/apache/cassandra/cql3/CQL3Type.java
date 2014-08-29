@@ -339,8 +339,12 @@ public interface CQL3Type
         public static Raw tuple(List<CQL3Type.Raw> ts) throws InvalidRequestException
         {
             for (int i = 0; i < ts.size(); i++)
+            {
                 if (ts.get(i).isCounter())
                     throw new InvalidRequestException("counters are not allowed inside tuples");
+                if (ts.get(i).isCollection())
+                    throw new InvalidRequestException("collections are not allowed inside tuples");
+            }
 
             return new RawTuple(ts);
         }

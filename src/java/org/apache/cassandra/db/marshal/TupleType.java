@@ -42,6 +42,8 @@ public class TupleType extends AbstractType<ByteBuffer>
     public TupleType(List<AbstractType<?>> types)
     {
         this.types = types;
+        for (AbstractType type : types)
+            assert !type.isCollection();
     }
 
     public static TupleType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException

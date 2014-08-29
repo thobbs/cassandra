@@ -73,8 +73,12 @@ public class CreateTypeStatement extends SchemaAlteringStatement
             throw new InvalidRequestException(String.format("A user type of name %s already exists", name));
 
         for (CQL3Type.Raw type : columnTypes)
+        {
             if (type.isCounter())
                 throw new InvalidRequestException("A user type cannot contain counters");
+            if (type.isCollection())
+                throw new InvalidRequestException("A user type cannot contain collections");
+        }
     }
 
     public static void checkForDuplicateNames(UserType type) throws InvalidRequestException

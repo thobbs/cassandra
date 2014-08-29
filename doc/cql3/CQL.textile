@@ -471,7 +471,7 @@ h3(#createTypeStmt). CREATE TYPE
 __Syntax:__
 
 bc(syntax).. 
-<create-type-stmt> ::= CREATE TYPE ( IF NOT EXISTS )? <typename>
+<create-type-stmt> ::= CREATE IMMUTABLE TYPE ( IF NOT EXISTS )? <typename>
                          '(' <field-definition> ( ',' <field-definition> )* ')'
 
 <typename> ::= ( <keyspace-name> '.' )? <identifier>

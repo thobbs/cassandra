@@ -551,7 +551,7 @@ cfamOrdering[CreateTableStatement.RawStatement expr]
  */
 createTypeStatement returns [CreateTypeStatement expr]
     @init { boolean ifNotExists = false; }
-    : K_CREATE K_TYPE (K_IF K_NOT K_EXISTS { ifNotExists = true; } )?
+    : K_CREATE K_IMMUTABLE K_TYPE (K_IF K_NOT K_EXISTS { ifNotExists = true; } )?
          tn=userTypeName { $expr = new CreateTypeStatement(tn, ifNotExists); }
          '(' typeColumns[expr] ( ',' typeColumns[expr]? )* ')'
     ;
@@ -1171,6 +1171,7 @@ basic_unreserved_keyword returns [String str]
         | K_DISTINCT
         | K_CONTAINS
         | K_STATIC
+        | K_IMMUTABLE
         ) { $str = $k.text; }
     ;
 
@@ -1219,6 +1220,7 @@ K_ALTER:       A L T E R;
 K_RENAME:      R E N A M E;
 K_ADD:         A D D;
 K_TYPE:        T Y P E;
+K_IMMUTABLE:   I M M U T A B L E;
 K_COMPACT:     C O M P A C T;
 K_STORAGE:     S T O R A G E;
 K_ORDER:       O R D E R;
