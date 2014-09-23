@@ -54,7 +54,7 @@ public class CompoundDenseCellNameType extends AbstractCompoundCellNameType
     public CellName create(Composite prefix, ColumnDefinition column)
     {
         // We ignore the column because it's just the COMPACT_VALUE name which is not store in the cell name (and it can be null anyway)
-        assert prefix.size() == fullSize;
+        assert prefix.size() == fullSize : String.format("Expected composite prefix of size %d, but got size %d", fullSize, prefix.size());
         if (prefix instanceof CellName)
             return (CellName)prefix;
 
@@ -69,7 +69,7 @@ public class CompoundDenseCellNameType extends AbstractCompoundCellNameType
         assert !isStatic;
         // A composite dense table cell name don't have to have all the component set to qualify as a
         // proper CellName (for backward compatibility reasons mostly), so always return a cellName
-        Composite c = new CompoundDenseCellName(components, size);
+        CompoundDenseCellName c = new CompoundDenseCellName(components, size);
         return eoc != Composite.EOC.NONE ? c.withEOC(eoc) : c;
     }
 
