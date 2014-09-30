@@ -33,6 +33,7 @@ import org.apache.cassandra.db.filter.NamesQueryFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ColumnToCollectionType;
+import org.apache.cassandra.db.marshal.MultiCellCollectionType;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -217,7 +218,7 @@ public abstract class AbstractCellNameType extends AbstractCType implements Cell
         throw new UnsupportedOperationException();
     }
 
-    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, CollectionType newCollection)
+    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, MultiCellCollectionType newCollection)
     {
         throw new UnsupportedOperationException();
     }
@@ -303,7 +304,7 @@ public abstract class AbstractCellNameType extends AbstractCType implements Cell
                         return cell;
                     }
 
-                    public List<Cell> getCollection(ColumnIdentifier name)
+                    public List<Cell> getMultiCellColumn(ColumnIdentifier name)
                     {
                         return null;
                     }
@@ -445,7 +446,7 @@ public abstract class AbstractCellNameType extends AbstractCType implements Cell
             return columns == null ? null : columns.get(name);
         }
 
-        public List<Cell> getCollection(ColumnIdentifier name)
+        public List<Cell> getMultiCellColumn(ColumnIdentifier name)
         {
             return collections == null ? null : collections.get(name);
         }

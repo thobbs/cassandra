@@ -196,8 +196,8 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
         else if (type instanceof ColumnToCollectionType)
         {
             ColumnToCollectionType ctct = (ColumnToCollectionType)type;
-            Map<ByteBuffer, CollectionType> updatedTypes = null;
-            for (Map.Entry<ByteBuffer, CollectionType> entry : ctct.defined.entrySet())
+            Map<ByteBuffer, MultiCellCollectionType> updatedTypes = null;
+            for (Map.Entry<ByteBuffer, MultiCellCollectionType> entry : ctct.defined.entrySet())
             {
                 AbstractType<?> t = updateWith(entry.getValue(), keyspace, toReplace, updated);
                 if (t == null)
@@ -206,31 +206,38 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
                 if (updatedTypes == null)
                     updatedTypes = new HashMap<>(ctct.defined);
 
-                updatedTypes.put(entry.getKey(), (CollectionType)t);
+                updatedTypes.put(entry.getKey(), (MultiCellCollectionType)t);
             }
             return updatedTypes == null ? null : ColumnToCollectionType.getInstance(updatedTypes);
         }
         else if (type instanceof CollectionType)
         {
-            if (type instanceof ListType)
+            if (type instanceof IListType)
             {
-                AbstractType<?> t = updateWith(((ListType)type).elements, keyspace, toReplace, updated);
-                return t == null ? null : ListType.getInstance(t);
+                AbstractType<?> t = updateWith(((IListType)type).getElementsType(), keyspace, toReplace, updated);
+                if (t == null)
+                    return null;
+                return type.isMultiCell() ? ListType.getInstance(t) : FrozenListType.getInstance(t);
             }
-            else if (type instanceof SetType)
+            else if (type instanceof ISetType)
             {
-                AbstractType<?> t = updateWith(((SetType)type).elements, keyspace, toReplace, updated);
-                return t == null ? null : SetType.getInstance(t);
+                AbstractType<?> t = updateWith(((ISetType)type).getElementsType(), keyspace, toReplace, updated);
+                if (t == null)
+                    return null;
+                return type.isMultiCell() ? SetType.getInstance(t) : FrozenSetType.getInstance(t);
             }
             else
             {
-                assert type instanceof MapType;
-                MapType mt = (MapType)type;
-                AbstractType<?> k = updateWith(mt.keys, keyspace, toReplace, updated);
-                AbstractType<?> v = updateWith(mt.values, keyspace, toReplace, updated);
+                assert type instanceof IMapType;
+                IMapType mt = (IMapType)type;
+                AbstractType<?> k = updateWith(mt.getKeysType(), keyspace, toReplace, updated);
+                AbstractType<?> v = updateWith(mt.getValuesType(), keyspace, toReplace, updated);
                 if (k == null && v == null)
                     return null;
-                return MapType.getInstance(k == null ? mt.keys : k, v == null ? mt.values : v);
+                if (type.isMultiCell())
+                    return MapType.getInstance(k == null ? mt.getKeysType() : k, v == null ? mt.getValuesType() : v);
+                else
+                    return FrozenMapType.getInstance(k == null ? mt.getKeysType() : k, v == null ? mt.getValuesType() : v);
             }
         }
         else

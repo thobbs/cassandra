@@ -23,20 +23,27 @@ public class IndexTarget
 {
     public final ColumnIdentifier column;
     public final boolean isCollectionKeys;
+    public final boolean isFullCollection;
 
-    private IndexTarget(ColumnIdentifier column, boolean isCollectionKeys)
+    private IndexTarget(ColumnIdentifier column, boolean isCollectionKeys, boolean isFullCollection)
     {
         this.column = column;
         this.isCollectionKeys = isCollectionKeys;
+        this.isFullCollection = isFullCollection;
     }
 
     public static IndexTarget of(ColumnIdentifier c)
     {
-        return new IndexTarget(c, false);
+        return new IndexTarget(c, false, false);
     }
 
     public static IndexTarget keysOf(ColumnIdentifier c)
     {
-        return new IndexTarget(c, true);
+        return new IndexTarget(c, true, false);
+    }
+
+    public static IndexTarget fullCollection(ColumnIdentifier c)
+    {
+        return new IndexTarget(c, false, true);
     }
 }

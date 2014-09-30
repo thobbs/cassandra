@@ -20,60 +20,59 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.serializers.TypeSerializer;
-import org.apache.cassandra.serializers.SetSerializer;
+import org.apache.cassandra.serializers.ListSerializer;
 
-public class SetType<T> extends MultiCellCollectionType<Set<T>> implements ISetType<T>
+/** A list that has been serialized into a single blob. The contents of the list cannot change. */
+public class FrozenListType<T> extends CollectionType<List<T>> implements IListType<T>
 {
     // interning instances
-    private static final Map<AbstractType<?>, SetType> instances = new HashMap<AbstractType<?>, SetType>();
+    private static final Map<AbstractType<?>, FrozenListType> instances = new HashMap<>();
 
-    private final AbstractType<T> elements;
-    private final SetSerializer<T> serializer;
+    public final AbstractType<T> elements;
+    public final ListSerializer<T> serializer;
 
-    public static SetType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
+    public static FrozenListType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
         List<AbstractType<?>> l = parser.getTypeParameters();
         if (l.size() != 1)
-            throw new ConfigurationException("SetType takes exactly 1 type parameter");
+            throw new ConfigurationException("FrozenListType takes exactly 1 type parameter");
 
         return getInstance(l.get(0));
     }
 
-    public static synchronized <T> SetType<T> getInstance(AbstractType<T> elements)
+    public static synchronized <T> FrozenListType<T> getInstance(AbstractType<T> elements)
     {
-        SetType<T> t = instances.get(elements);
+        FrozenListType<T> t = instances.get(elements);
         if (t == null)
         {
-            t = new SetType<T>(elements);
+            t = new FrozenListType<T>(elements);
             instances.put(elements, t);
         }
         return t;
     }
 
-    public SetType(AbstractType<T> elements)
+    private FrozenListType(AbstractType<T> elements)
     {
-        super(Kind.SET);
+        super(Kind.LIST);
         this.elements = elements;
-        this.serializer = SetSerializer.getInstance(elements.getSerializer());
+        this.serializer = ListSerializer.getInstance(elements.getSerializer());
     }
 
-    public AbstractType<T> getElementsType()
+    public AbstractType<UUID> nameComparator()
+    {
+        return TimeUUIDType.instance;
+    }
+
+    public AbstractType<T> valueComparator()
     {
         return elements;
     }
 
-    public AbstractType<T> nameComparator()
+    public ListSerializer<T> getSerializer()
     {
-        return elements;
-    }
-
-    public AbstractType<?> valueComparator()
-    {
-        return EmptyType.instance;
+        return serializer;
     }
 
     @Override
@@ -82,26 +81,13 @@ public class SetType<T> extends MultiCellCollectionType<Set<T>> implements ISetT
         return ListType.compareListOrSet(elements, o1, o2);
     }
 
-    public SetSerializer<T> getSerializer()
-    {
-        return serializer;
-    }
-
-    public boolean isByteOrderComparable()
-    {
-        return elements.isByteOrderComparable();
-    }
-
     protected void appendToStringBuilder(StringBuilder sb)
     {
         sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(elements)));
     }
 
-    public List<ByteBuffer> serializedValues(List<Cell> cells)
+    public AbstractType<T> getElementsType()
     {
-        List<ByteBuffer> bbs = new ArrayList<ByteBuffer>(cells.size());
-        for (Cell c : cells)
-            bbs.add(c.name().collectionElement());
-        return bbs;
+        return elements;
     }
 }

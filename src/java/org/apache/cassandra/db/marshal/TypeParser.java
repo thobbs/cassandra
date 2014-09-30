@@ -239,9 +239,9 @@ public class TypeParser
         throw new SyntaxException(String.format("Syntax error parsing '%s' at char %d: unexpected end of string", str, idx));
     }
 
-    public Map<ByteBuffer, CollectionType> getCollectionsParameters() throws SyntaxException, ConfigurationException
+    public Map<ByteBuffer, MultiCellCollectionType> getCollectionsParameters() throws SyntaxException, ConfigurationException
     {
-        Map<ByteBuffer, CollectionType> map = new HashMap<ByteBuffer, CollectionType>();
+        Map<ByteBuffer, MultiCellCollectionType> map = new HashMap<>();
 
         if (isEOS())
             return map;
@@ -270,9 +270,9 @@ public class TypeParser
             try
             {
                 AbstractType<?> type = parse();
-                if (!(type instanceof CollectionType))
+                if (!(type instanceof MultiCellCollectionType))
                     throw new SyntaxException(type.toString() + " is not a collection type");
-                map.put(bb, (CollectionType)type);
+                map.put(bb, (MultiCellCollectionType)type);
             }
             catch (SyntaxException e)
             {
@@ -544,17 +544,16 @@ public class TypeParser
         return sb.toString();
     }
 
-    public static String stringifyCollectionsParameters(Map<ByteBuffer, CollectionType> collections)
+    public static String stringifyCollectionsParameters(Map<ByteBuffer, ? extends CollectionType> collections)
     {
         StringBuilder sb = new StringBuilder();
         sb.append('(');
         boolean first = true;
-        for (Map.Entry<ByteBuffer, CollectionType> entry : collections.entrySet())
+        for (Map.Entry<ByteBuffer, ? extends CollectionType> entry : collections.entrySet())
         {
             if (!first)
-            {
                 sb.append(',');
-            }
+
             first = false;
             sb.append(ByteBufferUtil.bytesToHex(entry.getKey())).append(":");
             entry.getValue().appendToStringBuilder(sb);

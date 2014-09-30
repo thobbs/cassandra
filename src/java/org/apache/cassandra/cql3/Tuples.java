@@ -202,7 +202,7 @@ public class Tuples
                 buffers[i] = elements.get(i).bindAndGet(options);
                 // Inside tuples, we must force the serialization of collections to v3 whatever protocol
                 // version is in use since we're going to store directly that serialized value.
-                if (version < 3 && type.type(i).isCollection())
+                if (version < 3 && type.type(i).isMultiCell())
                     buffers[i] = ((CollectionType)type.type(i)).getSerializer().reserializeToV3(buffers[i]);
             }
             return buffers;
@@ -248,13 +248,13 @@ public class Tuples
                 // but compose does the validation (so we're fine).
                 List<?> l = (List<?>)type.compose(value);
 
-                assert type.elements instanceof TupleType;
-                TupleType tupleType = (TupleType) type.elements;
+                assert type.getElementsType() instanceof TupleType;
+                TupleType tupleType = (TupleType) type.getElementsType();
 
                 // type.split(bytes)
                 List<List<ByteBuffer>> elements = new ArrayList<>(l.size());
                 for (Object element : l)
-                    elements.add(Arrays.asList(tupleType.split(type.elements.decompose(element))));
+                    elements.add(Arrays.asList(tupleType.split(type.getElementsType().decompose(element))));
                 return new InValue(elements);
             }
             catch (MarshalException e)
@@ -337,8 +337,9 @@ public class Tuples
                 if (i < receivers.size() - 1)
                     inName.append(",");
 
-                if (receiver.type instanceof CollectionType)
-                    throw new InvalidRequestException("Collection columns do not support IN relations");
+                if (receiver.type.isCollection() && receiver.type.isMultiCell())
+                    throw new InvalidRequestException("Non-frozen collection columns do not support IN relations");
+
                 types.add(receiver.type);
             }
             inName.append(')');

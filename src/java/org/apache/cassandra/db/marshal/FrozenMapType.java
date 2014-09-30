@@ -23,42 +23,41 @@ import java.util.*;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MapSerializer;
-import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
 
-public class MapType<K, V> extends MultiCellCollectionType<Map<K, V>> implements IMapType<K, V>
+/** A map that has been serialized into a single blob. The contents of the map cannot change. */
+public class FrozenMapType<K, V> extends CollectionType<Map<K, V>> implements IMapType<K, V>
 {
     // interning instances
-    private static final Map<Pair<AbstractType<?>, AbstractType<?>>, MapType> instances = new HashMap<>();
+    private static final Map<Pair<AbstractType<?>, AbstractType<?>>, FrozenMapType> instances = new HashMap<>();
 
     private final AbstractType<K> keys;
     private final AbstractType<V> values;
     private final MapSerializer<K, V> serializer;
 
-    public static MapType<?, ?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
+    public static FrozenMapType<?, ?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
         List<AbstractType<?>> l = parser.getTypeParameters();
         if (l.size() != 2)
-            throw new ConfigurationException("MapType takes exactly 2 type parameters");
+            throw new ConfigurationException("FrozenMapType takes exactly 2 type parameters");
 
         return getInstance(l.get(0), l.get(1));
     }
 
-    public static synchronized <K, V> MapType<K, V> getInstance(AbstractType<K> keys, AbstractType<V> values)
+    public static synchronized <K, V> FrozenMapType<K, V> getInstance(AbstractType<K> keys, AbstractType<V> values)
     {
         Pair<AbstractType<?>, AbstractType<?>> p = Pair.<AbstractType<?>, AbstractType<?>>create(keys, values);
-        MapType<K, V> t = instances.get(p);
+        FrozenMapType<K, V> t = instances.get(p);
         if (t == null)
         {
-            t = new MapType<>(keys, values);
+            t = new FrozenMapType<>(keys, values);
             instances.put(p, t);
         }
         return t;
     }
 
-    private MapType(AbstractType<K> keys, AbstractType<V> values)
+    private FrozenMapType(AbstractType<K> keys, AbstractType<V> values)
     {
         super(Kind.MAP);
         this.keys = keys;
@@ -89,38 +88,7 @@ public class MapType<K, V> extends MultiCellCollectionType<Map<K, V>> implements
     @Override
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
-        // Note that this is only used if the collection is inside an UDT
-        return compareMaps(keys, values, o1, o2);
-    }
-
-    public static int compareMaps(AbstractType<?> keysComparator, AbstractType<?> valuesComparator, ByteBuffer o1, ByteBuffer o2)
-    {
-         if (!o1.hasRemaining() || !o2.hasRemaining())
-            return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
-
-        ByteBuffer bb1 = o1.duplicate();
-        ByteBuffer bb2 = o2.duplicate();
-
-        int protocolVersion = Server.VERSION_3;
-        int size1 = CollectionSerializer.readCollectionSize(bb1, protocolVersion);
-        int size2 = CollectionSerializer.readCollectionSize(bb2, protocolVersion);
-
-        for (int i = 0; i < Math.min(size1, size2); i++)
-        {
-            ByteBuffer k1 = CollectionSerializer.readValue(bb1, protocolVersion);
-            ByteBuffer k2 = CollectionSerializer.readValue(bb2, protocolVersion);
-            int cmp = keysComparator.compare(k1, k2);
-            if (cmp != 0)
-                return cmp;
-
-            ByteBuffer v1 = CollectionSerializer.readValue(bb1, protocolVersion);
-            ByteBuffer v2 = CollectionSerializer.readValue(bb2, protocolVersion);
-            cmp = valuesComparator.compare(v1, v2);
-            if (cmp != 0)
-                return cmp;
-        }
-
-        return size1 == size2 ? 0 : (size1 < size2 ? -1 : 1);
+        return MapType.compareMaps(keys, values, o1, o2);
     }
 
     @Override

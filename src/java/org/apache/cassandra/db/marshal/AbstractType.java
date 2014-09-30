@@ -223,6 +223,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
         return false;
     }
 
+    public boolean isMultiCell()
+    {
+        return false;
+    }
+
     /**
      * The number of subcomponents this type has.
      * This is always 1, i.e. the type has only itself as "subcomponents", except for CompositeType.

@@ -63,19 +63,6 @@ public class IndexExpression
                     throw new AssertionError();
             }
         }
-
-        public boolean allowsIndexQuery()
-        {
-            switch (this)
-            {
-                case EQ:
-                case CONTAINS:
-                case CONTAINS_KEY:
-                    return true;
-                default:
-                    return false;
-            }
-        }
     }
 
     @Override

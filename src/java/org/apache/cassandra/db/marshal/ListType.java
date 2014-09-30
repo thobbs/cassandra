@@ -24,16 +24,19 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class ListType<T> extends CollectionType<List<T>>
+public class ListType<T> extends MultiCellCollectionType<List<T>> implements IListType<T>
 {
+    private static final Logger logger = LoggerFactory.getLogger(ListType.class);
+
     // interning instances
     private static final Map<AbstractType<?>, ListType> instances = new HashMap<AbstractType<?>, ListType>();
 
-    public final AbstractType<T> elements;
+    private final AbstractType<T> elements;
     public final ListSerializer<T> serializer;
 
     public static ListType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
@@ -63,6 +66,11 @@ public class ListType<T> extends CollectionType<List<T>>
         this.serializer = ListSerializer.getInstance(elements.getSerializer());
     }
 
+    public AbstractType<T> getElementsType()
+    {
+        return elements;
+    }
+
     public AbstractType<UUID> nameComparator()
     {
         return TimeUUIDType.instance;
@@ -86,7 +94,7 @@ public class ListType<T> extends CollectionType<List<T>>
 
     static int compareListOrSet(AbstractType<?> elementsComparator, ByteBuffer o1, ByteBuffer o2)
     {
-        // Note that this is only used if the collection is inside an UDT
+        // Note that this is only used if the collection is frozen
         if (!o1.hasRemaining() || !o2.hasRemaining())
             return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
 

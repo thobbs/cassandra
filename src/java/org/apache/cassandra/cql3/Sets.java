@@ -18,15 +18,7 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 import com.google.common.base.Joiner;
 
@@ -34,11 +26,13 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
-import org.apache.cassandra.db.marshal.MapType;
-import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ISetType;
+import org.apache.cassandra.db.marshal.IMapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -51,7 +45,7 @@ public abstract class Sets
 
     public static ColumnSpecification valueSpecOf(ColumnSpecification column)
     {
-        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((SetType)column.type).elements);
+        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((ISetType)column.type).getElementsType());
     }
 
     public static class Literal implements Term.Raw
@@ -69,7 +63,7 @@ public abstract class Sets
 
             // We've parsed empty maps as a set literal to break the ambiguity so
             // handle that case now
-            if (receiver.type instanceof MapType && elements.isEmpty())
+            if (receiver.type instanceof IMapType && elements.isEmpty())
                 return new Maps.Value(Collections.<ByteBuffer, ByteBuffer>emptyMap());
 
             ColumnSpecification valueSpec = Sets.valueSpecOf(receiver);
@@ -87,17 +81,17 @@ public abstract class Sets
 
                 values.add(t);
             }
-            DelayedValue value = new DelayedValue(((SetType)receiver.type).elements, values);
+            DelayedValue value = new DelayedValue(((ISetType)receiver.type).getElementsType(), values);
             return allTerminal ? value.bind(QueryOptions.DEFAULT) : value;
         }
 
         private void validateAssignableTo(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            if (!(receiver.type instanceof SetType))
+            if (!(receiver.type instanceof ISetType))
             {
                 // We've parsed empty maps as a set literal to break the ambiguity so
                 // handle that case now
-                if (receiver.type instanceof MapType && elements.isEmpty())
+                if ((receiver.type instanceof IMapType) && elements.isEmpty())
                     return;
 
                 throw new InvalidRequestException(String.format("Invalid set literal for %s of type %s", receiver.name, receiver.type.asCQL3Type()));
@@ -131,25 +125,25 @@ public abstract class Sets
         }
     }
 
-    public static class Value extends Term.Terminal
+    public static class Value extends Term.Terminal implements Term.CollectionTerminal
     {
-        public final Set<ByteBuffer> elements;
+        public final SortedSet<ByteBuffer> elements;
 
-        public Value(Set<ByteBuffer> elements)
+        public Value(SortedSet<ByteBuffer> elements)
         {
             this.elements = elements;
         }
 
-        public static Value fromSerialized(ByteBuffer value, SetType type, int version) throws InvalidRequestException
+        public static Value fromSerialized(ByteBuffer value, ISetType type, int version) throws InvalidRequestException
         {
             try
             {
                 // Collections have this small hack that validate cannot be called on a serialized object,
                 // but compose does the validation (so we're fine).
                 Set<?> s = (Set<?>)type.getSerializer().deserializeForNativeProtocol(value, version);
-                Set<ByteBuffer> elements = new LinkedHashSet<ByteBuffer>(s.size());
+                SortedSet<ByteBuffer> elements = new TreeSet<ByteBuffer>(type.getElementsType());
                 for (Object element : s)
-                    elements.add(type.elements.decompose(element));
+                    elements.add(type.getElementsType().decompose(element));
                 return new Value(elements);
             }
             catch (MarshalException e)
@@ -160,18 +154,24 @@ public abstract class Sets
 
         public ByteBuffer get(QueryOptions options)
         {
-            return CollectionSerializer.pack(new ArrayList<ByteBuffer>(elements), elements.size(), options.getProtocolVersion());
+            return getWithProtocolVersion(options.getProtocolVersion());
         }
 
-        public boolean equals(SetType st, Value v)
+        public ByteBuffer getWithProtocolVersion(int protocolVersion)
+        {
+            return CollectionSerializer.pack(new ArrayList<>(elements), elements.size(), protocolVersion);
+        }
+
+        public boolean equals(ISetType st, Value v)
         {
             if (elements.size() != v.elements.size())
                 return false;
 
             Iterator<ByteBuffer> thisIter = elements.iterator();
             Iterator<ByteBuffer> thatIter = v.elements.iterator();
+            AbstractType elementsType = st.getElementsType();
             while (thisIter.hasNext())
-                if (st.elements.compare(thisIter.next(), thatIter.next()) != 0)
+                if (elementsType.compare(thisIter.next(), thatIter.next()) != 0)
                     return false;
 
             return true;
@@ -202,7 +202,7 @@ public abstract class Sets
 
         public Value bind(QueryOptions options) throws InvalidRequestException
         {
-            Set<ByteBuffer> buffers = new TreeSet<ByteBuffer>(comparator);
+            SortedSet<ByteBuffer> buffers = new TreeSet<>(comparator);
             for (Term t : elements)
             {
                 ByteBuffer bytes = t.bindAndGet(options);
@@ -227,13 +227,13 @@ public abstract class Sets
         protected Marker(int bindIndex, ColumnSpecification receiver)
         {
             super(bindIndex, receiver);
-            assert receiver.type instanceof SetType;
+            assert receiver.type instanceof ISetType;
         }
 
         public Value bind(QueryOptions options) throws InvalidRequestException
         {
             ByteBuffer value = options.getValues().get(bindIndex);
-            return value == null ? null : Value.fromSerialized(value, (SetType)receiver.type, options.getProtocolVersion());
+            return value == null ? null : Value.fromSerialized(value, (ISetType)receiver.type, options.getProtocolVersion());
         }
     }
 
@@ -246,9 +246,12 @@ public abstract class Sets
 
         public void execute(ByteBuffer rowKey, ColumnFamily cf, Composite prefix, UpdateParameters params) throws InvalidRequestException
         {
-            // delete + add
-            CellName name = cf.getComparator().create(prefix, column);
-            cf.addAtom(params.makeTombstoneForOverwrite(name.slice()));
+            if (column.type.isMultiCell())
+            {
+                // delete + add
+                CellName name = cf.getComparator().create(prefix, column);
+                cf.addAtom(params.makeTombstoneForOverwrite(name.slice()));
+            }
             Adder.doAdd(t, cf, prefix, column, params);
         }
     }
@@ -262,22 +265,35 @@ public abstract class Sets
 
         public void execute(ByteBuffer rowKey, ColumnFamily cf, Composite prefix, UpdateParameters params) throws InvalidRequestException
         {
+            assert column.type.isMultiCell() : "Attempted to add items to a frozen set";
+
             doAdd(t, cf, prefix, column, params);
         }
 
         static void doAdd(Term t, ColumnFamily cf, Composite prefix, ColumnDefinition column, UpdateParameters params) throws InvalidRequestException
         {
             Term.Terminal value = t.bind(params.options);
-            if (value == null)
-                return;
-
-            assert value instanceof Sets.Value : value;
-
-            Set<ByteBuffer> toAdd = ((Sets.Value)value).elements;
-            for (ByteBuffer bb : toAdd)
+            Sets.Value setValue = (Sets.Value)value;
+            if (column.type.isMultiCell())
             {
-                CellName cellName = cf.getComparator().create(prefix, column, bb);
-                cf.addColumn(params.makeColumn(cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+                if (value == null)
+                    return;
+
+                Set<ByteBuffer> toAdd = setValue.elements;
+                for (ByteBuffer bb : toAdd)
+                {
+                    CellName cellName = cf.getComparator().create(prefix, column, bb);
+                    cf.addColumn(params.makeColumn(cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+                }
+            }
+            else
+            {
+                // for frozen sets, we're overwriting the whole cell
+                CellName cellName = cf.getComparator().create(prefix, column);
+                if (value == null)
+                    cf.addAtom(params.makeTombstone(cellName));
+                else
+                    cf.addColumn(params.makeColumn(cellName, ((Value) value).getWithProtocolVersion(Server.CURRENT_VERSION)));
             }
         }
     }
@@ -292,6 +308,8 @@ public abstract class Sets
 
         public void execute(ByteBuffer rowKey, ColumnFamily cf, Composite prefix, UpdateParameters params) throws InvalidRequestException
         {
+            assert column.type.isMultiCell() : "Attempted to remove items from a frozen set";
+
             Term.Terminal value = t.bind(params.options);
             if (value == null)
                 return;

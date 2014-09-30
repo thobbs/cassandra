@@ -29,7 +29,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.IndexType;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.IMapType;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.service.ClientState;
@@ -76,9 +76,25 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         if (cd == null)
             throw new InvalidRequestException("No column definition found for column " + target.column);
 
-        boolean isMap = cd.type instanceof MapType;
-        if (target.isCollectionKeys && !isMap)
-            throw new InvalidRequestException("Cannot create index on keys of column " + target + " with non map type");
+        boolean isMap = cd.type instanceof IMapType;
+        boolean isFrozenCollection = cd.type.isCollection() && !cd.type.isMultiCell();
+        if (target.isCollectionKeys)
+        {
+            if (!isMap)
+                throw new InvalidRequestException("Cannot create index on keys of column " + target + " with non-map type");
+            if (!cd.type.isMultiCell())
+                throw new InvalidRequestException("Cannot create index on keys of frozen<map> column " + target);
+        }
+        else if (target.isFullCollection)
+        {
+            if (!isFrozenCollection)
+                throw new InvalidRequestException("fullCollection() indexes can only be created on frozen collections");
+        }
+        else if (isFrozenCollection)
+        {
+            throw new InvalidRequestException("Frozen collections currently only support fullCollection() indexes. " +
+                                              "For example, 'CREATE INDEX ON <table>(fullCollection(<columnName>))'.");
+        }
 
         if (cd.getIndexType() != null)
         {
@@ -114,7 +130,7 @@ public class CreateIndexStatement extends SchemaAlteringStatement
             throw new InvalidRequestException("Secondary indexes are not allowed on static columns");
 
         if (cd.kind == ColumnDefinition.Kind.PARTITION_KEY && cd.isOnAllComponents())
-            throw new InvalidRequestException(String.format("Cannot add secondary index to already primarily indexed column %s", target.column));
+            throw new InvalidRequestException(String.format("Cannot create secondary index on partition key column %s", target.column));
     }
 
     public boolean announceMigration(boolean isLocalOnly) throws RequestValidationException
@@ -136,7 +152,7 @@ public class CreateIndexStatement extends SchemaAlteringStatement
             // For now, we only allow indexing values for collections, but we could later allow
             // to also index map keys, so we record that this is the values we index to make our
             // lives easier then.
-            if (cd.type.isCollection())
+            if (cd.type.isCollection() && cd.type.isMultiCell())
                 options = ImmutableMap.of(target.isCollectionKeys ? "index_keys" : "index_values", "");
             cd.setIndexType(IndexType.COMPOSITES, options);
         }

@@ -24,10 +24,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.CQL3Row;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.db.marshal.ColumnToCollectionType;
-import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.AbstractAllocator;
 
@@ -117,7 +114,7 @@ public class CompoundSparseCellNameType extends AbstractCompoundCellNameType
     }
 
     @Override
-    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, CollectionType newCollection)
+    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, MultiCellCollectionType newCollection)
     {
         return new WithCollection(clusteringType, ColumnToCollectionType.getInstance(Collections.singletonMap(columnName.bytes, newCollection)), internedIds);
     }
@@ -239,9 +236,9 @@ public class CompoundSparseCellNameType extends AbstractCompoundCellNameType
         }
 
         @Override
-        public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, CollectionType newCollection)
+        public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, MultiCellCollectionType newCollection)
         {
-            Map<ByteBuffer, CollectionType> newMap = new HashMap<>(collectionType.defined);
+            Map<ByteBuffer, MultiCellCollectionType> newMap = new HashMap<>(collectionType.defined);
             newMap.put(columnName.bytes, newCollection);
             return new WithCollection(clusteringType, ColumnToCollectionType.getInstance(newMap), internedIds);
         }

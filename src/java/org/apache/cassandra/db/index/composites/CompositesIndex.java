@@ -57,7 +57,7 @@ public abstract class CompositesIndex extends AbstractSimplePerColumnSecondaryIn
 
     public static CompositesIndex create(ColumnDefinition cfDef)
     {
-        if (cfDef.type.isCollection())
+        if (cfDef.type.isCollection() && cfDef.type.isMultiCell())
         {
             switch (((CollectionType)cfDef.type).kind)
             {
@@ -89,7 +89,7 @@ public abstract class CompositesIndex extends AbstractSimplePerColumnSecondaryIn
     // Check SecondaryIndex.getIndexComparator if you want to know why this is static
     public static CellNameType getIndexComparator(CFMetaData baseMetadata, ColumnDefinition cfDef)
     {
-        if (cfDef.type.isCollection())
+        if (cfDef.type.isCollection() && cfDef.type.isMultiCell())
         {
             switch (((CollectionType)cfDef.type).kind)
             {

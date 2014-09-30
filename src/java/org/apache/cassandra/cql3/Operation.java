@@ -162,7 +162,7 @@ public abstract class Operation
             if (receiver.type instanceof CounterColumnType)
                 throw new InvalidRequestException(String.format("Cannot set the value of counter column %s (counters can only be incremented/decremented, not set)", receiver.name));
 
-            if (!(receiver.type instanceof CollectionType))
+            if (!(receiver.type.isCollection()))
                 return new Constants.Setter(receiver, v);
 
             switch (((CollectionType)receiver.type).kind)
@@ -205,6 +205,8 @@ public abstract class Operation
         {
             if (!(receiver.type instanceof CollectionType))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for non collection column %s", toString(receiver), receiver.name));
+            else if (!(receiver.type.isMultiCell()))
+                throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen collection column %s", toString(receiver), receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
             {
@@ -254,6 +256,8 @@ public abstract class Operation
                     throw new InvalidRequestException(String.format("Invalid operation (%s) for non counter column %s", toString(receiver), receiver.name));
                 return new Constants.Adder(receiver, v);
             }
+            else if (!(receiver.type.isMultiCell()))
+                throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen collection column %s", toString(receiver), receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
             {
@@ -295,6 +299,8 @@ public abstract class Operation
                     throw new InvalidRequestException(String.format("Invalid operation (%s) for non counter column %s", toString(receiver), receiver.name));
                 return new Constants.Substracter(receiver, value.prepare(keyspace, receiver));
             }
+            else if (!(receiver.type.isMultiCell()))
+                throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen collection column %s", toString(receiver), receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
             {
@@ -307,7 +313,7 @@ public abstract class Operation
                     ColumnSpecification vr = new ColumnSpecification(receiver.ksName,
                                                                      receiver.cfName,
                                                                      receiver.name,
-                                                                     SetType.getInstance(((MapType)receiver.type).keys));
+                                                                     SetType.getInstance(((MapType)receiver.type).getKeysType()));
                     return new Sets.Discarder(receiver, value.prepare(keyspace, vr));
             }
             throw new AssertionError();
@@ -339,6 +345,8 @@ public abstract class Operation
 
             if (!(receiver.type instanceof ListType))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for non list column %s", toString(receiver), receiver.name));
+            else if (!(receiver.type.isMultiCell()))
+                throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen list column %s", toString(receiver), receiver.name));
 
             return new Lists.Prepender(receiver, v);
         }
@@ -393,8 +401,10 @@ public abstract class Operation
 
         public Operation prepare(String keyspace, ColumnDefinition receiver) throws InvalidRequestException
         {
-            if (!(receiver.type instanceof CollectionType))
+            if (!(receiver.type.isCollection()))
                 throw new InvalidRequestException(String.format("Invalid deletion operation for non collection column %s", receiver.name));
+            else if (!(receiver.type.isMultiCell()))
+                throw new InvalidRequestException(String.format("Invalid deletion operation for frozen collection column %s", receiver.name));
 
             switch (((CollectionType)receiver.type).kind)
             {

@@ -153,7 +153,7 @@ public class ColumnConditionTest
     private static boolean listAppliesTo(ColumnCondition.CollectionBound bound, List<ByteBuffer> conditionValues, List<ByteBuffer> columnValues)
     {
         CFMetaData cfm = CFMetaData.compile("create table foo(a int PRIMARY KEY, b int, c list<int>)", "ks");
-        Map<ByteBuffer, CollectionType> typeMap = new HashMap<>();
+        Map<ByteBuffer, MultiCellCollectionType> typeMap = new HashMap<>();
         typeMap.put(ByteBufferUtil.bytes("c"), ListType.getInstance(Int32Type.instance));
         CompoundSparseCellNameType.WithCollection nameType = new CompoundSparseCellNameType.WithCollection(Collections.EMPTY_LIST, ColumnToCollectionType.getInstance(typeMap));
         ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("c"), ListType.getInstance(Int32Type.instance), 0, ColumnDefinition.Kind.REGULAR);
@@ -275,9 +275,9 @@ public class ColumnConditionTest
         assertTrue(listAppliesTo(bound, list(ByteBufferUtil.EMPTY_BYTE_BUFFER), list(ByteBufferUtil.EMPTY_BYTE_BUFFER)));
     }
 
-    private static Set<ByteBuffer> set(ByteBuffer... values)
+    private static SortedSet<ByteBuffer> set(ByteBuffer... values)
     {
-        Set results = new HashSet<ByteBuffer>(values.length);
+        SortedSet<ByteBuffer> results = new TreeSet<>(Int32Type.instance);
         results.addAll(Arrays.asList(values));
         return results;
     }
@@ -285,7 +285,7 @@ public class ColumnConditionTest
     private static boolean setAppliesTo(ColumnCondition.CollectionBound bound, Set<ByteBuffer> conditionValues, List<ByteBuffer> columnValues)
     {
         CFMetaData cfm = CFMetaData.compile("create table foo(a int PRIMARY KEY, b int, c set<int>)", "ks");
-        Map<ByteBuffer, CollectionType> typeMap = new HashMap<>();
+        Map<ByteBuffer, MultiCellCollectionType> typeMap = new HashMap<>();
         typeMap.put(ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance));
         CompoundSparseCellNameType.WithCollection nameType = new CompoundSparseCellNameType.WithCollection(Collections.EMPTY_LIST, ColumnToCollectionType.getInstance(typeMap));
         ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance), 0, ColumnDefinition.Kind.REGULAR);
@@ -418,7 +418,7 @@ public class ColumnConditionTest
     private static boolean mapAppliesTo(ColumnCondition.CollectionBound bound, Map<ByteBuffer, ByteBuffer> conditionValues, Map<ByteBuffer, ByteBuffer> columnValues)
     {
         CFMetaData cfm = CFMetaData.compile("create table foo(a int PRIMARY KEY, b map<int, int>)", "ks");
-        Map<ByteBuffer, CollectionType> typeMap = new HashMap<>();
+        Map<ByteBuffer, MultiCellCollectionType> typeMap = new HashMap<>();
         typeMap.put(ByteBufferUtil.bytes("b"), MapType.getInstance(Int32Type.instance, Int32Type.instance));
         CompoundSparseCellNameType.WithCollection nameType = new CompoundSparseCellNameType.WithCollection(Collections.EMPTY_LIST, ColumnToCollectionType.getInstance(typeMap));
         ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("b"), MapType.getInstance(Int32Type.instance, Int32Type.instance), 0, ColumnDefinition.Kind.REGULAR);

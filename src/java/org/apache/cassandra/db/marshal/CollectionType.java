@@ -18,22 +18,19 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
- * The abstract validator that is the base for maps, sets and lists.
+ * The abstract validator that is the base for maps, sets and lists (both frozen and non-frozen).
  *
  * Please note that this comparator shouldn't be used "manually" (through thrift for instance).
- *
  */
 public abstract class CollectionType<T> extends AbstractType<T>
 {
@@ -58,16 +55,8 @@ public abstract class CollectionType<T> extends AbstractType<T>
 
     protected abstract void appendToStringBuilder(StringBuilder sb);
 
-    public abstract List<ByteBuffer> serializedValues(List<Cell> cells);
-
     @Override
     public abstract CollectionSerializer<T> getSerializer();
-
-    @Override
-    public void validateCellValue(ByteBuffer cellValue) throws MarshalException
-    {
-        valueComparator().validate(cellValue);
-    }
 
     @Override
     public String toString()
@@ -94,6 +83,11 @@ public abstract class CollectionType<T> extends AbstractType<T>
         }
     }
 
+    public boolean isCollection()
+    {
+        return true;
+    }
+
     @Override
     public boolean isCompatibleWith(AbstractType<?> previous)
     {
@@ -104,32 +98,28 @@ public abstract class CollectionType<T> extends AbstractType<T>
             return false;
 
         CollectionType tprev = (CollectionType) previous;
-        // The name is part of the Cell name, so we need sorting compatibility, i.e. isCompatibleWith().
-        // But value is the Cell value, so isValueCompatibleWith() is enough
-        return this.nameComparator().isCompatibleWith(tprev.nameComparator())
-            && this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
+
+        if (!this.nameComparator().isCompatibleWith(tprev.nameComparator()))
+            return false;
+
+        if (isMultiCell())
+            // the value is only used for Cell values
+            return this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
+        else
+            return this.valueComparator().isCompatibleWith(tprev.valueComparator());
     }
 
-    public boolean isCollection()
+    @Override
+    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        return true;
-    }
+        // for multi-cell collections, value compatibility inherently involves sorting due to the cell name including
+        // the collection element, so we should just check isCompatibleWith()
+        if (isMultiCell())
+            return isCompatibleWith(previous);
 
-    protected List<Cell> enforceLimit(List<Cell> cells, int version)
-    {
-        if (version >= 3 || cells.size() <= MAX_ELEMENTS)
-            return cells;
-
-        logger.error("Detected collection with {} elements, more than the {} limit. Only the first {} elements will be returned to the client. "
-                   + "Please see http://cassandra.apache.org/doc/cql3/CQL.html#collections for more details.", cells.size(), MAX_ELEMENTS, MAX_ELEMENTS);
-        return cells.subList(0, MAX_ELEMENTS);
-    }
-
-    public ByteBuffer serializeForNativeProtocol(List<Cell> cells, int version)
-    {
-        cells = enforceLimit(cells, version);
-        List<ByteBuffer> values = serializedValues(cells);
-        return CollectionSerializer.pack(values, cells.size(), version);
+        CollectionType tprev = (CollectionType) previous;
+        return this.nameComparator().isValueCompatibleWith(tprev.nameComparator()) &&
+               this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
     }
 
     public CQL3Type asCQL3Type()

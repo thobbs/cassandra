@@ -20,41 +20,40 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.SetSerializer;
 
-public class SetType<T> extends MultiCellCollectionType<Set<T>> implements ISetType<T>
+/** A set that has been serialized into a single blob. The contents of the set cannot change. */
+public class FrozenSetType<T> extends CollectionType<Set<T>> implements ISetType<T>
 {
     // interning instances
-    private static final Map<AbstractType<?>, SetType> instances = new HashMap<AbstractType<?>, SetType>();
+    private static final Map<AbstractType<?>, FrozenSetType> instances = new HashMap<>();
 
     private final AbstractType<T> elements;
     private final SetSerializer<T> serializer;
 
-    public static SetType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
+    public static FrozenSetType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
         List<AbstractType<?>> l = parser.getTypeParameters();
         if (l.size() != 1)
-            throw new ConfigurationException("SetType takes exactly 1 type parameter");
+            throw new ConfigurationException("FrozenSetType takes exactly 1 type parameter");
 
         return getInstance(l.get(0));
     }
 
-    public static synchronized <T> SetType<T> getInstance(AbstractType<T> elements)
+    public static synchronized <T> FrozenSetType<T> getInstance(AbstractType<T> elements)
     {
-        SetType<T> t = instances.get(elements);
+        FrozenSetType<T> t = instances.get(elements);
         if (t == null)
         {
-            t = new SetType<T>(elements);
+            t = new FrozenSetType<T>(elements);
             instances.put(elements, t);
         }
         return t;
     }
 
-    public SetType(AbstractType<T> elements)
+    public FrozenSetType(AbstractType<T> elements)
     {
         super(Kind.SET);
         this.elements = elements;
@@ -97,11 +96,15 @@ public class SetType<T> extends MultiCellCollectionType<Set<T>> implements ISetT
         sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(elements)));
     }
 
-    public List<ByteBuffer> serializedValues(List<Cell> cells)
+    public boolean contains(ByteBuffer serializedList, ByteBuffer serializedItem)
     {
-        List<ByteBuffer> bbs = new ArrayList<ByteBuffer>(cells.size());
-        for (Cell c : cells)
-            bbs.add(c.name().collectionElement());
-        return bbs;
+        T item = elements.getSerializer().deserialize(serializedItem);
+        Set<T> items = serializer.deserialize(serializedList);
+        for (T possibleMatch : items)
+        {
+            if (item.equals(possibleMatch))
+                return true;
+        }
+        return false;
     }
 }

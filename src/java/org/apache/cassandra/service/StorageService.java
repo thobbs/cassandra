@@ -43,6 +43,7 @@ import ch.qos.logback.classic.jmx.JMXConfiguratorMBean;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.Appender;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.FutureCallback;
@@ -453,11 +454,25 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             MessagingService.instance().listen(FBUtilities.getLocalAddress());
         Gossiper.instance.doShadowRound();
         EndpointState epState = Gossiper.instance.getEndpointStateForEndpoint(FBUtilities.getBroadcastAddress());
-        if (epState != null && !Gossiper.instance.isDeadState(epState))
+        if (epState != null && !Gossiper.instance.isDeadState(epState) && !Gossiper.instance.isFatClient(FBUtilities.getBroadcastAddress()))
         {
             throw new RuntimeException(String.format("A node with address %s already exists, cancelling join. " +
                                                      "Use cassandra.replace_address if you want to replace this node.",
                                                      FBUtilities.getBroadcastAddress()));
+        }
+        if (RangeStreamer.useStrictConsistency)
+        {
+            for (Map.Entry<InetAddress, EndpointState> entry : Gossiper.instance.getEndpointStates())
+            {
+
+                if (entry.getValue().getApplicationState(ApplicationState.STATUS) == null)
+                        continue;
+                String[] pieces = entry.getValue().getApplicationState(ApplicationState.STATUS).value.split(VersionedValue.DELIMITER_STR, -1);
+                assert (pieces.length > 0);
+                String state = pieces[0];
+                if (state.equals(VersionedValue.STATUS_BOOTSTRAPPING) || state.equals(VersionedValue.STATUS_LEAVING) || state.equals(VersionedValue.STATUS_MOVING))
+                    throw new UnsupportedOperationException("Other bootstrapping/leaving/moving nodes detected, cannot bootstrap while cassandra.consistent.rangemovement is true");
+            }
         }
         Gossiper.instance.resetEndpointStateMap();
     }
@@ -2565,22 +2580,33 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      * @return collection of ranges that match ring layout in TokenMetadata
      */
     @SuppressWarnings("unchecked")
-    private Collection<Range<Token>> createRepairRangeFrom(String beginToken, String endToken)
+    @VisibleForTesting
+    Collection<Range<Token>> createRepairRangeFrom(String beginToken, String endToken)
     {
         Token parsedBeginToken = getPartitioner().getTokenFactory().fromString(beginToken);
         Token parsedEndToken = getPartitioner().getTokenFactory().fromString(endToken);
 
-        Deque<Range<Token>> repairingRange = new ArrayDeque<>();
         // Break up given range to match ring layout in TokenMetadata
-        Token previous = tokenMetadata.getPredecessor(TokenMetadata.firstToken(tokenMetadata.sortedTokens(), parsedEndToken));
-        while (parsedBeginToken.compareTo(previous) < 0)
-        {
-            repairingRange.addFirst(new Range<>(previous, parsedEndToken));
+        ArrayList<Range<Token>> repairingRange = new ArrayList<>();
 
-            parsedEndToken = previous;
-            previous = tokenMetadata.getPredecessor(previous);
+        ArrayList<Token> tokens = new ArrayList<>(tokenMetadata.sortedTokens());
+        if (!tokens.contains(parsedBeginToken))
+        {
+            tokens.add(parsedBeginToken);
         }
-        repairingRange.addFirst(new Range<>(parsedBeginToken, parsedEndToken));
+        if (!tokens.contains(parsedEndToken))
+        {
+            tokens.add(parsedEndToken);
+        }
+        // tokens now contain all tokens including our endpoints
+        Collections.sort(tokens);
+
+        int start = tokens.indexOf(parsedBeginToken), end = tokens.indexOf(parsedEndToken);
+        for (int i = start; i != end; i = (i+1) % tokens.size())
+        {
+            Range<Token> range = new Range<>(tokens.get(i), tokens.get((i+1) % tokens.size()));
+            repairingRange.add(range);
+        }
 
         return repairingRange;
     }

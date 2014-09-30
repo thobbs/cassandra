@@ -15,27 +15,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.cql3;
+package org.apache.cassandra.db.marshal;
 
-import java.nio.ByteBuffer;
-import java.util.Iterator;
-import java.util.List;
+import org.apache.cassandra.serializers.ListSerializer;
 
-import org.apache.cassandra.db.Cell;
-
-public interface CQL3Row
+public interface IListType<T>
 {
-    public ByteBuffer getClusteringColumn(int i);
-    public Cell getColumn(ColumnIdentifier name);
-    public List<Cell> getMultiCellColumn(ColumnIdentifier name);
+    /** Gets the type for elements in this list */
+    public AbstractType<T> getElementsType();
 
-    public interface Builder
-    {
-        public RowIterator group(Iterator<Cell> cells);
-    }
-
-    public interface RowIterator extends Iterator<CQL3Row>
-    {
-        public CQL3Row getStaticRow();
-    }
+    public ListSerializer<T> getSerializer();
 }

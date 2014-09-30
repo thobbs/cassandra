@@ -212,20 +212,20 @@ public enum DataType implements OptionCodec.Codecable<DataType>
         {
             if (type.isCollection())
             {
-                if (type instanceof ListType)
+                if (type instanceof IListType)
                 {
-                    return Pair.<DataType, Object>create(LIST, ((ListType)type).elements);
+                    return Pair.<DataType, Object>create(LIST, ((IListType)type).getElementsType());
                 }
-                else if (type instanceof MapType)
+                else if (type instanceof IMapType)
                 {
-                    MapType mt = (MapType)type;
-                    return Pair.<DataType, Object>create(MAP, Arrays.asList(mt.keys, mt.values));
+                    IMapType mt = (IMapType)type;
+                    return Pair.<DataType, Object>create(MAP, Arrays.asList(mt.getKeysType(), mt.getValuesType()));
                 }
-                else
+                else if (type instanceof ISetType)
                 {
-                    assert type instanceof SetType;
-                    return Pair.<DataType, Object>create(SET, ((SetType)type).elements);
+                    return Pair.<DataType, Object>create(SET, ((ISetType)type).getElementsType());
                 }
+                throw new AssertionError();
             }
 
             if (type instanceof UserType && version >= 3)

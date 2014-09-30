@@ -32,11 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.db.BufferDecoratedKey;
-import org.apache.cassandra.db.Cell;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.CellNameType;
@@ -52,7 +48,6 @@ import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.memory.MemtableAllocator;
 
 /**
  * Abstract base class for different types of secondary indexes.
@@ -279,6 +274,12 @@ public abstract class SecondaryIndex
             if (it.next().name.bytes.equals(name))
                 it.remove();
         }
+    }
+
+    /** Returns true if the index supports lookups for the given operator, false otherwise. */
+    public boolean supportsOperator(IndexExpression.Operator operator)
+    {
+        return operator == IndexExpression.Operator.EQ;
     }
 
     /**

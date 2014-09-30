@@ -20,10 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import com.google.common.base.Predicate;
-import com.google.common.collect.Iterators;
-import org.apache.cassandra.db.marshal.CollectionType;
-import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.db.marshal.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,8 +29,6 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.CompositeType;
 
 /**
  * Extends a column filter (IFilter) to include a number of IndexExpression.
@@ -303,7 +298,7 @@ public abstract class ExtendedFilter
                 }
                 else
                 {
-                    if (def.type.isCollection())
+                    if (def.type.isCollection() && def.type.isMultiCell())
                     {
                         if (!collectionSatisfies(def, data, prefix, expression, collectionElement))
                             return false;
@@ -317,16 +312,49 @@ public abstract class ExtendedFilter
                 if (dataValue == null)
                     return false;
 
-                int v = validator.compare(dataValue, expression.value);
-                if (!satisfies(v, expression.operator))
-                    return false;
+                if (expression.operator == IndexExpression.Operator.CONTAINS)
+                {
+                    assert def.type.isCollection() && !def.type.isMultiCell();
+                    CollectionType type = (CollectionType)def.type;
+                    switch (type.kind)
+                    {
+                        case LIST:
+                            FrozenListType<?> listType = (FrozenListType)def.type;
+                            if (!listType.getSerializer().deserialize(dataValue).contains(listType.getElementsType().getSerializer().deserialize(expression.value)))
+                                return false;
+                            break;
+                        case SET:
+                            FrozenSetType<?> setType = (FrozenSetType)def.type;
+                            if (!setType.getSerializer().deserialize(dataValue).contains(setType.getElementsType().getSerializer().deserialize(expression.value)))
+                                return false;
+                            break;
+                        case MAP:
+                            FrozenMapType<?,?> mapType = (FrozenMapType)def.type;
+                            if (!mapType.getSerializer().deserialize(dataValue).containsValue(mapType.getValuesType().getSerializer().deserialize(expression.value)))
+                                return false;
+                            break;
+                    }
+                }
+                else if (expression.operator == IndexExpression.Operator.CONTAINS_KEY)
+                {
+                    assert def.type.isCollection() && !def.type.isMultiCell() && def.type instanceof FrozenMapType;
+                    FrozenMapType<?,?> mapType = (FrozenMapType)def.type;
+                    if (mapType.getSerializer().getSerializedValue(dataValue, expression.value, mapType.getKeysType()) == null)
+                        return false;
+                }
+                else
+                {
+                    int v = validator.compare(dataValue, expression.value);
+                    if (!satisfies(v, expression.operator))
+                        return false;
+                }
             }
             return true;
         }
 
         private static boolean collectionSatisfies(ColumnDefinition def, ColumnFamily data, Composite prefix, IndexExpression expr, ByteBuffer collectionElement)
         {
-            assert def.type.isCollection();
+            assert def.type.isCollection() && def.type.isMultiCell();
 
             if (expr.operator == IndexExpression.Operator.CONTAINS)
             {
