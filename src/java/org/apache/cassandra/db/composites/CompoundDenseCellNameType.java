@@ -54,14 +54,13 @@ public class CompoundDenseCellNameType extends AbstractCompoundCellNameType
     public CellName create(Composite prefix, ColumnDefinition column)
     {
         // We ignore the column because it's just the COMPACT_VALUE name which is not store in the cell name (and it can be null anyway)
-        assert prefix.size() == fullSize : String.format("Expected composite prefix of size %d, but got size %d", fullSize, prefix.size());
         if (prefix instanceof CellName)
             return (CellName)prefix;
 
+        // as noted below in makeWith(), compound dense cell names don't have to include all components
         assert prefix instanceof CompoundComposite;
         CompoundComposite lc = (CompoundComposite)prefix;
-        assert lc.elements.length == lc.size;
-        return new CompoundDenseCellName(lc.elements);
+        return new CompoundDenseCellName(lc.elements, lc.size);
     }
 
     protected Composite makeWith(ByteBuffer[] components, int size, Composite.EOC eoc, boolean isStatic)
