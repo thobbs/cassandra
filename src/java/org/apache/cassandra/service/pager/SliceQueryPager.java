@@ -23,6 +23,7 @@ import java.util.List;
 
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.CellName;
+import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.filter.SliceQueryFilter;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
@@ -39,7 +40,7 @@ public class SliceQueryPager extends AbstractQueryPager implements SinglePartiti
 
     private final SliceFromReadCommand command;
 
-    private volatile CellName lastReturned;
+    private volatile Composite lastReturned;
 
     // Don't use directly, use QueryPagers method instead
     SliceQueryPager(SliceFromReadCommand command, ConsistencyLevel consistencyLevel, boolean localQuery)
@@ -54,7 +55,7 @@ public class SliceQueryPager extends AbstractQueryPager implements SinglePartiti
 
         if (state != null)
         {
-            lastReturned = cfm.comparator.cellFromByteBuffer(state.cellName);
+            lastReturned = cfm.comparator.fromByteBuffer(state.cellName);
             restoreState(state.remaining, true);
         }
     }
@@ -74,7 +75,7 @@ public class SliceQueryPager extends AbstractQueryPager implements SinglePartiti
     protected List<Row> queryNextPage(int pageSize, ConsistencyLevel consistencyLevel, boolean localQuery)
     throws RequestValidationException, RequestExecutionException
     {
-        SliceQueryFilter filter = command.filter.withUpdatedCount(pageSize);
+        SliceQueryFilter filter = command.filter.withUpdatedCount(Math.min(command.filter.count, pageSize));
         if (lastReturned != null)
             filter = filter.withUpdatedStart(lastReturned, cfm.comparator);
 
