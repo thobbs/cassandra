@@ -311,17 +311,26 @@ public abstract class CQLTester
 
     protected void assertInvalid(String query, Object... values) throws Throwable
     {
+        assertInvalidMessage(null, query, values);
+    }
+
+    protected void assertInvalidMessage(String errorMessage, String query, Object... values) throws Throwable
+    {
         try
         {
             execute(query, values);
             String q = USE_PREPARED_VALUES
-                     ? query + " (values: " + formatAllValues(values) + ")"
-                     : replaceValues(query, values);
+                       ? query + " (values: " + formatAllValues(values) + ")"
+                       : replaceValues(query, values);
             Assert.fail("Query should be invalid but no error was thrown. Query is: " + q);
         }
         catch (InvalidRequestException e)
         {
-            // This is what we expect
+            if (errorMessage != null)
+            {
+                Assert.assertTrue("Expected error message to contain '" + errorMessage + "', but got '" + e.getMessage() + "'",
+                        e.getMessage().contains(errorMessage));
+            }
         }
     }
 

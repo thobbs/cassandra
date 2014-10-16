@@ -59,7 +59,7 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
         validateForNativeProtocol(bytes, 3);
     }
 
-    public static ByteBuffer pack(List<ByteBuffer> buffers, int elements, int version)
+    public static ByteBuffer pack(Iterable<ByteBuffer> buffers, int elements, int version)
     {
         int size = 0;
         for (ByteBuffer bb : buffers)

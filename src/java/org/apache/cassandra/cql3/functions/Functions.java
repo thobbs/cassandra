@@ -80,6 +80,9 @@ public abstract class Functions
 
     public static Function get(String keyspace, String name, List<? extends AssignementTestable> providedArgs, ColumnSpecification receiver) throws InvalidRequestException
     {
+        if (name.equals("fromJson"))
+            return FromJsonFct.getInstance(receiver.type);
+
         List<Function.Factory> factories = declared.get(name.toLowerCase());
         if (factories.isEmpty())
             throw new InvalidRequestException(String.format("Unknown CQL3 function %s called", name));
