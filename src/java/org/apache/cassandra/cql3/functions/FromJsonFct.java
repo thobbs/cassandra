@@ -19,10 +19,7 @@ package org.apache.cassandra.cql3.functions;
 
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.serializers.MapSerializer;
-import org.apache.cassandra.serializers.MarshalException;
-import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.serializers.*;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.json.simple.JSONArray;
@@ -74,6 +71,8 @@ public class FromJsonFct extends AbstractFunction
             return new DoubleDecoder();
         else if (type instanceof DecimalType)
             return new DecimalDecoder();
+        else if (type instanceof BooleanType)
+            return new BooleanDecoder();
         else if (type instanceof AsciiType)
             return new AsciiDecoder();
         else if (type instanceof UTF8Type)
@@ -82,6 +81,8 @@ public class FromJsonFct extends AbstractFunction
             return new InetAddressDecoder();
         else if (type instanceof TimeUUIDType)
             return new TimeUUIDDecoder();
+        else if (type instanceof TimestampType)
+            return new TimestampDecoder();
         else if (type instanceof UUIDType)
             return new UUIDDecoder();
         else if (type instanceof ListType)
@@ -122,7 +123,7 @@ public class FromJsonFct extends AbstractFunction
 
     private static class IntDecoder implements Decoder
     {
-        private final TypeSerializer serializer = Int32Type.instance.getSerializer();
+        private final TypeSerializer<Integer> serializer = Int32Type.instance.getSerializer();
 
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
@@ -132,14 +133,15 @@ public class FromJsonFct extends AbstractFunction
             }
             catch (ClassCastException exc)
             {
-                throw new InvalidRequestException(String.format("Expected int, got %s", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Expected an int value, but got a %s: %s", object.getClass().getSimpleName(), object));
             }
         }
     }
 
     private static class LongDecoder implements Decoder
     {
-        private final TypeSerializer serializer = LongType.instance.getSerializer();
+        private final TypeSerializer<Long> serializer = LongType.instance.getSerializer();
 
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
@@ -149,14 +151,15 @@ public class FromJsonFct extends AbstractFunction
             }
             catch (ClassCastException exc)
             {
-                throw new InvalidRequestException(String.format("Expected long, got %s", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Expected a long value, but got a %s: %s", object.getClass().getSimpleName(), object));
             }
         }
     }
 
     private static class VarintDecoder implements Decoder
     {
-        private final TypeSerializer serializer = IntegerType.instance.getSerializer();
+        private final TypeSerializer<BigInteger> serializer = IntegerType.instance.getSerializer();
 
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
@@ -166,14 +169,15 @@ public class FromJsonFct extends AbstractFunction
             }
             catch (NumberFormatException exc)
             {
-                throw new InvalidRequestException(String.format("Expected varint, got %s", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Value '%s' is not a valid representation of a varint value", object));
             }
         }
     }
 
     private static class FloatDecoder implements Decoder
     {
-        private final TypeSerializer serializer = FloatType.instance.getSerializer();
+        private final TypeSerializer<Float> serializer = FloatType.instance.getSerializer();
 
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
@@ -183,14 +187,15 @@ public class FromJsonFct extends AbstractFunction
             }
             catch (ClassCastException exc)
             {
-                throw new InvalidRequestException(String.format("Expected float, got %s", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Expected a float value, but got a %s: %s", object.getClass().getSimpleName(), object));
             }
         }
     }
 
     private static class DoubleDecoder implements Decoder
     {
-        private final TypeSerializer serializer = DoubleType.instance.getSerializer();
+        private final TypeSerializer<Double> serializer = DoubleType.instance.getSerializer();
 
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
@@ -200,14 +205,15 @@ public class FromJsonFct extends AbstractFunction
             }
             catch (ClassCastException exc)
             {
-                throw new InvalidRequestException(String.format("Expected double, got %s", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Expected a double value, but got a %s: %s", object.getClass().getSimpleName(), object));
             }
         }
     }
 
     private static class DecimalDecoder implements Decoder
     {
-        private final TypeSerializer serializer = DecimalType.instance.getSerializer();
+        private final TypeSerializer<BigDecimal> serializer = DecimalType.instance.getSerializer();
 
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
@@ -217,7 +223,7 @@ public class FromJsonFct extends AbstractFunction
             }
             catch (NumberFormatException exc)
             {
-                throw new InvalidRequestException(String.format("Expected decimal, got %s", object.getClass().getName()));
+                throw new InvalidRequestException(String.format("Value '%s' is not a valid representation of a decimal value", object));
             }
         }
     }
@@ -232,7 +238,7 @@ public class FromJsonFct extends AbstractFunction
             }
             catch (ClassCastException | MarshalException exc)
             {
-                throw new InvalidRequestException(String.format("Value '%s' is not valid a UTF-8 string: %s", object, exc.getMessage()));
+                throw new InvalidRequestException(String.format("Value '%s' is not a valid UTF-8 string: %s", object, exc.getMessage()));
             }
         }
     }
@@ -267,52 +273,101 @@ public class FromJsonFct extends AbstractFunction
         }
     }
 
+    private static class BooleanDecoder implements Decoder
+    {
+        private static TypeSerializer<Boolean> serializer = BooleanSerializer.instance;
+
+        public ByteBuffer decode(Object object) throws InvalidRequestException
+        {
+            if (!(object instanceof Boolean))
+                throw new InvalidRequestException(String.format(
+                        "Expected a boolean value, but got a %s: %s", object.getClass().getSimpleName(), object));
+
+            return serializer.serialize((Boolean)object);
+        }
+    }
+
     private static class UUIDDecoder implements Decoder
     {
-        protected final TypeSerializer serializer = UUIDType.instance.getSerializer();
-
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
             try
             {
-                return serializer.serialize(UUIDType.instance.fromString((String) object));
+                return UUIDType.instance.fromString((String) object);
             }
             catch (ClassCastException exc)
             {
                 throw new InvalidRequestException(
-                        String.format("Expected string representation of a UUID, but got '%s'", object.getClass().getName()));
+                        String.format("Expected a string representation of a uuid, but got a %s: %s", object.getClass().getSimpleName(), object));
             }
             catch (MarshalException exc)
             {
-                throw new InvalidRequestException(String.format("Got invalid string representation of a UUID: '%s'", object));
+                throw new InvalidRequestException(String.format("Got invalid string representation of a uuid: '%s'", object));
             }
         }
     }
 
-    private static class TimeUUIDDecoder extends UUIDDecoder
+    private static class TimeUUIDDecoder implements Decoder
     {
-        protected final TypeSerializer serializer = TimeUUIDType.instance.getSerializer();
-    }
-
-    private static class InetAddressDecoder implements Decoder
-    {
-        protected final TypeSerializer serializer = InetAddressType.instance.getSerializer();
-
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
             try
             {
-                return serializer.serialize(InetAddressType.instance.fromString((String) object));
+                return TimeUUIDType.instance.fromString((String) object);
             }
             catch (ClassCastException exc)
             {
                 throw new InvalidRequestException(
-                        String.format("Expected string representation of an inet address, but got '%s'", object.getClass().getName()));
+                        String.format("Expected a string representation of a timeuuid, but got a %s: %s", object.getClass().getSimpleName(), object));
             }
             catch (MarshalException exc)
             {
-                throw new InvalidRequestException(
-                        String.format("Got invalid string representation of an inet address: '%s'", object));
+                throw new InvalidRequestException(String.format("Got invalid string representation of a timeuuid: '%s'", object));
+            }
+        }
+    }
+
+    private static class TimestampDecoder implements Decoder
+    {
+        public ByteBuffer decode(Object object) throws InvalidRequestException
+        {
+            if (object instanceof Long)
+                return ByteBufferUtil.bytes((Long) object);
+
+            try
+            {
+                return TimestampType.instance.fromString((String) object);
+            }
+            catch (ClassCastException exc)
+            {
+                throw new InvalidRequestException(String.format(
+                        "Expected a long or a datestring representation of a timestamp value, but got a %s: %s",
+                        object.getClass().getSimpleName(), object));
+            }
+            catch (MarshalException exc)
+            {
+                throw new InvalidRequestException(String.format("Error creating timestamp value: %s", exc.getMessage()));
+            }
+        }
+    }
+
+    private static class InetAddressDecoder implements Decoder
+    {
+        public ByteBuffer decode(Object object) throws InvalidRequestException
+        {
+            try
+            {
+                return InetAddressType.instance.fromString((String) object);
+            }
+            catch (ClassCastException exc)
+            {
+                throw new InvalidRequestException(String.format(
+                        "Expected a string representation of an inet value, but got a %s: %s", object.getClass().getSimpleName(), object));
+            }
+            catch (MarshalException exc)
+            {
+                throw new InvalidRequestException(String.format(
+                        "Value '%s' is not a valid inet representation", object));
             }
         }
     }
@@ -331,12 +386,19 @@ public class FromJsonFct extends AbstractFunction
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
             if (!(object instanceof Map))
-                throw new InvalidRequestException(String.format("Expected a map, but got a '%s'", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Expected a map, but got a %s: %s", object.getClass().getSimpleName(), object));
 
             Map<Object, Object> map = (Map<Object, Object>) object;
             List<ByteBuffer> buffers = new ArrayList<>(map.size() * 2);
             for (Map.Entry<Object, Object> entry : map.entrySet())
             {
+                if (entry.getKey() == null)
+                    throw new InvalidRequestException("Invalid null key in map");
+
+                if (entry.getValue() == null)
+                    throw new InvalidRequestException("Invalid null value in map");
+
                 buffers.add(keyDecoder.decode(entry.getKey()));
                 buffers.add(valueDecoder.decode(entry.getValue()));
             }
@@ -356,12 +418,17 @@ public class FromJsonFct extends AbstractFunction
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
             if (!(object instanceof List))
-                throw new InvalidRequestException(String.format("Expected a list, but got a '%s'", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Expected a list, but got a %s: %s", object.getClass().getSimpleName(), object));
 
             List list = (List) object;
             List<ByteBuffer> buffers = new ArrayList<>(list.size());
             for (Object element : list)
+            {
+                if (element == null)
+                    throw new InvalidRequestException("Invalid null element in list");
                 buffers.add(elementsDecoder.decode(element));
+            }
             return CollectionSerializer.pack(buffers, list.size(), Server.CURRENT_VERSION);
         }
     }
@@ -380,15 +447,20 @@ public class FromJsonFct extends AbstractFunction
         public ByteBuffer decode(Object object) throws InvalidRequestException
         {
             if (!(object instanceof List))
-                throw new InvalidRequestException(String.format("Expected a list, but got a '%s'", object.getClass().getName()));
+                throw new InvalidRequestException(String.format(
+                        "Expected a list (representing a set), but got a %s: %s", object.getClass().getSimpleName(), object));
 
             List list = (List) object;
             TreeSet<ByteBuffer> buffers = new TreeSet<>(elementsType);
             for (Object element : list)
+            {
+                if (element == null)
+                    throw new InvalidRequestException("Invalid null element in set");
                 buffers.add(elementsDecoder.decode(element));
+            }
 
             if (buffers.size() != list.size())
-                throw new InvalidRequestException("JSON representation of a set contained duplicated elements");
+                throw new InvalidRequestException("List representation of set contained duplicate elements");
 
             return CollectionSerializer.pack(buffers, buffers.size(), Server.CURRENT_VERSION);
         }

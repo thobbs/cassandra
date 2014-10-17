@@ -97,7 +97,7 @@ public class TimestampSerializer implements TypeSerializer<Date>
             }
             catch (NumberFormatException e)
             {
-                throw new MarshalException(String.format("unable to make long (for date) from: '%s'", source), e);
+                throw new MarshalException(String.format("Unable to make long (for date) from: '%s'", source), e);
             }
         }
 
@@ -108,7 +108,7 @@ public class TimestampSerializer implements TypeSerializer<Date>
         }
         catch (ParseException e1)
         {
-            throw new MarshalException(String.format("unable to coerce '%s' to a  formatted date (long)", source), e1);
+            throw new MarshalException(String.format("Unable to coerce '%s' to a formatted date (long)", source), e1);
         }
     }
 
