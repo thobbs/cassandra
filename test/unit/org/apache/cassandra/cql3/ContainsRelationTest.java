@@ -133,4 +133,17 @@ public class ContainsRelationTest extends CQLTester
             row("test", 5, map("lmn", "foo"))
         );
     }
+
+    // See CASSANDRA-8155
+    @Test
+    public void testRejectContainsKeyOnValueIndex() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k1 int, k2 int, v map<text,text>, PRIMARY KEY (k1, k2))");
+        createIndex("CREATE INDEX map_values_index ON %s(v)");
+        execute("INSERT INTO %s (k1, k2, v) VALUES (?, ?, ?)", 0, 0, map("a", "b"));
+        assertRows(execute("SELECT * FROM %s WHERE v CONTAINS ?", "b"),
+            row(0, 0, map("a", "b"))
+        );
+        assertInvalid("SELECT * FROM %s WHERE v CONTAINS KEY ?", "a");
+    }
 }

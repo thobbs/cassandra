@@ -76,6 +76,28 @@ public class IndexExpression
                     return false;
             }
         }
+
+        @Override
+        public String toString()
+        {
+            switch (this)
+            {
+                case EQ:
+                    return "=";
+                case LT:
+                    return "<";
+                case LTE:
+                    return "<=";
+                case GT:
+                    return ">";
+                case GTE:
+                    return ">=";
+                case CONTAINS_KEY:
+                    return "CONTAINS KEY";
+                default:
+                    return this.name();
+            }
+        }
     }
 
     @Override

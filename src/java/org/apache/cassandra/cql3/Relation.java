@@ -56,6 +56,8 @@ public abstract class Relation {
                     return ">=";
                 case NEQ:
                     return "!=";
+                case CONTAINS_KEY:
+                    return "CONTAINS KEY";
                 default:
                     return this.name();
             }
