@@ -15,14 +15,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.cql3;
+package org.apache.cassandra.cql3.functions;
 
-import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 
-public interface AssignementTestable
+import java.util.HashMap;
+import java.util.Map;
+
+public class ToJsonFct extends AbstractFunction
 {
-    /**
-     * @return whether this object can be assigned to the provided receiver
-     */
-    public boolean isAssignableTo(String keyspace, ColumnSpecification receiver) throws InvalidRequestException;
+    private static final Map<AbstractType<?>, ToJsonFct> instances = new HashMap<>();
+
+    public static synchronized ToJsonFct getInstance(AbstractType<?> fromType)
+    {
+        ToJsonFct func = instances.get(fromType);
+        if (func == null)
+        {
+            func = new ToJsonFct(fromType);
+            instances.put(fromType, func);
+        }
+        return func;
+    }
+
+    private ToJsonFct(AbstractType<?> returnType)
+    {
+        super("toJson", UTF8Type.instance, returnType);
+    }
 }

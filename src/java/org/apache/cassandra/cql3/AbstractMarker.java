@@ -71,9 +71,9 @@ public abstract class AbstractMarker extends Term.NonTerminal
             throw new AssertionError();
         }
 
-        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
+        public TestResult testAssignment(String keyspace, ColumnSpecification receiver)
         {
-            return true;
+            return TestResult.WEAKLY_ASSIGNABLE;
         }
 
         @Override

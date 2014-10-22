@@ -40,7 +40,7 @@ public abstract class AbstractFunction implements Function
         return name;
     }
 
-    public List<AbstractType<?>> argsType()
+    public List<AbstractType<?>> argTypes()
     {
         return argsType;
     }

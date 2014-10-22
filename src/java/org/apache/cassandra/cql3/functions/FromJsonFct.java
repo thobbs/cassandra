@@ -34,6 +34,8 @@ import java.util.*;
 
 public class FromJsonFct extends AbstractFunction
 {
+    public static final String NAME = "fromJson";
+
     private static final Map<AbstractType<?>, FromJsonFct> instances = new HashMap<>();
 
     public static synchronized FromJsonFct getInstance(AbstractType<?> returnType)
@@ -51,7 +53,7 @@ public class FromJsonFct extends AbstractFunction
 
     private FromJsonFct(AbstractType<?> returnType)
     {
-        super("fromJson", returnType, UTF8Type.instance);
+        super(NAME, returnType, UTF8Type.instance);
         decoder = decoderForType(returnType);
     }
 

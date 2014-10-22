@@ -160,13 +160,12 @@ public abstract class Selection
             for (Selectable rawArg : withFun.args)
                 args.add(makeSelector(cfm, new RawSelector(rawArg, null), defs, null));
 
-            AbstractType<?> returnType = Functions.getReturnType(withFun.functionName, cfm.ksName, cfm.cfName);
-            if (returnType == null)
+            // TODO need special check for fromJson
+            Function fun = Functions.get(cfm.ksName, withFun.functionName, args, cfm.ksName, cfm.cfName);
+            if (fun == null)
                 throw new InvalidRequestException(String.format("Unknown function '%s'", withFun.functionName));
-            ColumnSpecification spec = makeFunctionSpec(cfm, withFun, returnType, raw.alias);
-            Function fun = Functions.get(cfm.ksName, withFun.functionName, args, spec);
             if (metadata != null)
-                metadata.add(spec);
+                metadata.add(makeFunctionSpec(cfm, withFun, fun.returnType(), raw.alias));
             return new FunctionSelector(fun, args);
         }
     }
@@ -370,14 +369,19 @@ public abstract class Selection
         }
     }
 
-    private static abstract class Selector implements AssignementTestable
+    private static abstract class Selector implements AssignmentTestable
     {
         public abstract ByteBuffer compute(ResultSetBuilder rs) throws InvalidRequestException;
         public abstract AbstractType<?> getType();
 
-        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
+        public TestResult testAssignment(String keyspace, ColumnSpecification receiver)
         {
-            return receiver.type.isValueCompatibleWith(getType());
+            if (receiver.type.equals(getType()))
+                return AssignmentTestable.TestResult.EXACT_MATCH;
+            else if (receiver.type.isValueCompatibleWith(getType()))
+                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+            else
+                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
         }
     }
 

@@ -26,7 +26,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 public interface Function
 {
     public String name();
-    public List<AbstractType<?>> argsType();
+    public List<AbstractType<?>> argTypes();
     public AbstractType<?> returnType();
 
     public ByteBuffer execute(List<ByteBuffer> parameters) throws InvalidRequestException;
