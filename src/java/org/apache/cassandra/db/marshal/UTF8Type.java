@@ -20,6 +20,7 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.UTF8Serializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -38,6 +39,21 @@ public class UTF8Type extends AbstractType<String>
     public ByteBuffer fromString(String source)
     {
         return decompose(source);
+    }
+
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a UTF-8 string, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
     }
 
     @Override

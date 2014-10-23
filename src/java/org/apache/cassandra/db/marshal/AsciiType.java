@@ -33,7 +33,9 @@ public class AsciiType extends AbstractType<String>
 {
     public static final AsciiType instance = new AsciiType();
 
-    AsciiType() {} // singleton
+    AsciiType()
+    {
+    } // singleton
 
     private final ThreadLocal<CharsetEncoder> encoder = new ThreadLocal<CharsetEncoder>()
     {
@@ -62,6 +64,20 @@ public class AsciiType extends AbstractType<String>
         catch (CharacterCodingException exc)
         {
             throw new MarshalException(String.format("Invalid ASCII character in string literal: %s", exc));
+        }
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected an ascii string, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
         }
     }
 

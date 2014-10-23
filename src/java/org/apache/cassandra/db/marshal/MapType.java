@@ -24,8 +24,10 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MapSerializer;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -133,5 +135,28 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             bbs.add(c.value());
         }
         return bbs;
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        if (!(parsed instanceof Map))
+            throw new MarshalException(String.format(
+                    "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        Map<Object, Object> map = (Map<Object, Object>) parsed;
+        List<ByteBuffer> buffers = new ArrayList<>(map.size() * 2);
+        for (Map.Entry<Object, Object> entry : map.entrySet())
+        {
+            if (entry.getKey() == null)
+                throw new MarshalException("Invalid null key in map");
+
+            if (entry.getValue() == null)
+                throw new MarshalException("Invalid null value in map");
+
+            buffers.add(keys.fromJSONObject(entry.getKey()));
+            buffers.add(values.fromJSONObject(entry.getValue()));
+        }
+        return CollectionSerializer.pack(buffers, map.size(), Server.CURRENT_VERSION);
     }
 }

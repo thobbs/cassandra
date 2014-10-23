@@ -65,6 +65,20 @@ public class Int32Type extends AbstractType<Integer>
         return decompose(int32Type);
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return getSerializer().serialize(((Number) parsed).intValue());
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected an int value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.INT;

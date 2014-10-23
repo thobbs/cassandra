@@ -60,6 +60,12 @@ public class LocalByPartionerType<T extends Token> extends AbstractType<ByteBuff
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed)
+    {
+        throw new UnsupportedOperationException();
+    }
+
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
         // o1 and o2 can be empty so we need to use RowPosition, not DecoratedKey

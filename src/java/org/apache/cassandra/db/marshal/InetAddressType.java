@@ -57,6 +57,20 @@ public class InetAddressType extends AbstractType<InetAddress>
         return decompose(address);
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return InetAddressType.instance.fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a string representation of an inet value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.INET;

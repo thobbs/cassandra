@@ -137,6 +137,20 @@ public final class IntegerType extends AbstractType<BigInteger>
     }
 
     @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return getSerializer().serialize(new BigInteger(parsed.toString()));
+        }
+        catch (NumberFormatException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Value '%s' is not a valid representation of a varint value", parsed));
+        }
+    }
+
+    @Override
     public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
         return this == otherType || Int32Type.instance.isValueCompatibleWith(otherType) || LongType.instance.isValueCompatibleWith(otherType);

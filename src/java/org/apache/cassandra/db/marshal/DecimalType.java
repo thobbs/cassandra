@@ -59,6 +59,19 @@ public class DecimalType extends AbstractType<BigDecimal>
         return decompose(decimal);
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return getSerializer().serialize(new BigDecimal(parsed.toString()));
+        }
+        catch (NumberFormatException exc)
+        {
+            throw new MarshalException(String.format("Value '%s' is not a valid representation of a decimal value", parsed));
+        }
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.DECIMAL;

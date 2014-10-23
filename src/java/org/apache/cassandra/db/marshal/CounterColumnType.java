@@ -68,6 +68,12 @@ public class CounterColumnType extends AbstractType<Long>
         return ByteBufferUtil.hexToBytes(source);
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed)
+    {
+        throw new UnsupportedOperationException();
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.COUNTER;

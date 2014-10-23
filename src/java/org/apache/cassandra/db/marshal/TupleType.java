@@ -20,6 +20,7 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 
 import com.google.common.base.Objects;
@@ -28,6 +29,7 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
@@ -219,6 +221,27 @@ public class TupleType extends AbstractType<ByteBuffer>
             fields[i] = type.fromString(fieldString.replaceAll("\\\\:", ":").replaceAll("\\\\@", "@"));
         }
         return buildValue(fields);
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        if (!(parsed instanceof List))
+            throw new MarshalException(String.format(
+                    "Expected a list representation of a tuple, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        List list = (List) parsed;
+        List<ByteBuffer> buffers = new ArrayList<>(list.size());
+        Iterator<AbstractType<?>> typeIterator = types.iterator();
+        for (Object element : list)
+        {
+            if (element == null)
+                throw new MarshalException("Invalid null element in list");
+            if (!typeIterator.hasNext())
+                throw new MarshalException(String.format("Tuple contains extra items (expected %s): %s", types.size(), parsed));
+            buffers.add(typeIterator.next().fromJSONObject(element));
+        }
+        return CollectionSerializer.pack(buffers, list.size(), Server.CURRENT_VERSION);
     }
 
     public TypeSerializer<ByteBuffer> getSerializer()

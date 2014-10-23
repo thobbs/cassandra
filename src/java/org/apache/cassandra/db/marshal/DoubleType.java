@@ -58,6 +58,20 @@ public class DoubleType extends AbstractType<Double>
       return decompose(d);
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return getSerializer().serialize(((Number) parsed).doubleValue());
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a double value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.DOUBLE;

@@ -28,6 +28,8 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
+import org.json.simple.JSONValue;
+import org.json.simple.parser.ParseException;
 
 /**
  * Specifies a Comparator for a specific type of ByteBuffer.
@@ -87,6 +89,23 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
     public ByteBuffer fromStringCQL2(String source) throws MarshalException
     {
         return fromString(source);
+    }
+
+    /** Given a parsed JSON string, return a byte representation of the object.
+     * @param parsed the result of parsing a json string
+     **/
+    public abstract ByteBuffer fromJSONObject(Object parsed) throws MarshalException;
+
+    protected Object parseJSON(String source)
+    {
+        try
+        {
+            return JSONValue.parseWithException(source);
+        }
+        catch (ParseException exc)
+        {
+            throw new MarshalException(String.format("Could not decode JSON string '%s': %s", source, exc.toString()));
+        }
     }
 
     /* validate that the byte array is a valid sequence for the type we are supposed to be comparing */

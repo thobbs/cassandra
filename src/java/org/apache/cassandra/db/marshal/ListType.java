@@ -24,9 +24,9 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
-import org.apache.cassandra.serializers.TypeSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.ListSerializer;
-import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.transport.Server;
 
 public class ListType<T> extends CollectionType<List<T>>
 {
@@ -119,5 +119,23 @@ public class ListType<T> extends CollectionType<List<T>>
         for (Cell c : cells)
             bbs.add(c.value());
         return bbs;
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        if (!(parsed instanceof List))
+            throw new MarshalException(String.format(
+                    "Expected a list, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        List list = (List) parsed;
+        List<ByteBuffer> buffers = new ArrayList<>(list.size());
+        for (Object element : list)
+        {
+            if (element == null)
+                throw new MarshalException("Invalid null element in list");
+            buffers.add(elements.fromJSONObject(element));
+        }
+        return CollectionSerializer.pack(buffers, list.size(), Server.CURRENT_VERSION);
     }
 }

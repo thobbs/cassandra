@@ -19,7 +19,6 @@ package org.apache.cassandra.db.marshal;
 
 
 import java.nio.ByteBuffer;
-import java.text.ParseException;
 import java.util.UUID;
 
 import org.apache.cassandra.cql3.CQL3Type;
@@ -29,7 +28,6 @@ import org.apache.cassandra.serializers.UUIDSerializer;
 import org.apache.cassandra.serializers.TimestampSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
-import org.apache.commons.lang3.time.DateUtils;
 
 /**
  * Compares UUIDs using the following criteria:<br>
@@ -186,6 +184,20 @@ public class UUIDType extends AbstractType<UUID>
         catch (MarshalException e)
         {
             throw new MarshalException(String.format("unable to make version 1 UUID from '%s'", source), e);
+        }
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a string representation of a uuid, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
         }
     }
 
