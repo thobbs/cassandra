@@ -262,12 +262,15 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         logger.debug("Beginning redistribution of index summaries for {} sstables with memory pool size {} MB; current spaced used is {} MB",
                      nonCompacting.size(), memoryPoolBytes / 1024L / 1024L, total / 1024.0 / 1024.0);
 
+        final Map<SSTableReader, Double> readRates = new HashMap<>(nonCompacting.size());
         double totalReadsPerSec = 0.0;
         for (SSTableReader sstable : nonCompacting)
         {
             if (sstable.readMeter != null)
             {
-                totalReadsPerSec += sstable.readMeter.fifteenMinuteRate();
+                Double readRate = sstable.readMeter.fifteenMinuteRate();
+                totalReadsPerSec += readRate;
+                readRates.put(sstable, readRate);
             }
         }
         logger.trace("Total reads/sec across all sstables in index summary resize process: {}", totalReadsPerSec);
@@ -278,14 +281,16 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         {
             public int compare(SSTableReader o1, SSTableReader o2)
             {
-                if (o1.readMeter == null && o2.readMeter == null)
+                Double readRate1 = readRates.get(o1);
+                Double readRate2 = readRates.get(o2);
+                if (readRate1 == null && readRate2 == null)
                     return 0;
-                else if (o1.readMeter == null)
+                else if (readRate1 == null)
                     return -1;
-                else if (o2.readMeter == null)
+                else if (readRate2 == null)
                     return 1;
                 else
-                    return Double.compare(o1.readMeter.fifteenMinuteRate(), o2.readMeter.fifteenMinuteRate());
+                    return Double.compare(readRate1, readRate2);
             }
         });
 
