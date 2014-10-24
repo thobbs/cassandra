@@ -405,27 +405,31 @@ public class CreateTableStatement extends SchemaAlteringStatement
             return isReversed != null && isReversed ? ReversedType.getInstance(type) : type;
         }
 
-        public void addDefinition(ColumnIdentifier def, CQL3Type type, boolean isStatic)
+        public void addDefinition(ColumnIdentifier.Raw def, CQL3Type type, boolean isStatic)
         {
-            definedNames.add(def);
-            definitions.put(def, type);
+            ColumnIdentifier id = def.applyComparator(UTF8Type.instance);
+            definedNames.add(id);
+            definitions.put(id, type);
             if (isStatic)
-                staticColumns.add(def);
+                staticColumns.add(id);
         }
 
-        public void addKeyAliases(List<ColumnIdentifier> aliases)
+        public void addKeyAliases(List<ColumnIdentifier.Raw> rawAliases)
         {
+            List<ColumnIdentifier> aliases = new ArrayList<>(rawAliases.size());
+            for (ColumnIdentifier.Raw rawId : rawAliases)
+                aliases.add(rawId.applyComparator(UTF8Type.instance));
             keyAliases.add(aliases);
         }
 
-        public void addColumnAlias(ColumnIdentifier alias)
+        public void addColumnAlias(ColumnIdentifier.Raw alias)
         {
-            columnAliases.add(alias);
+            columnAliases.add(alias.applyComparator(UTF8Type.instance));
         }
 
-        public void setOrdering(ColumnIdentifier alias, boolean reversed)
+        public void setOrdering(ColumnIdentifier.Raw alias, boolean reversed)
         {
-            definedOrdering.put(alias, reversed);
+            definedOrdering.put(alias.applyComparator(UTF8Type.instance), reversed);
         }
 
         public void setCompactStorage()

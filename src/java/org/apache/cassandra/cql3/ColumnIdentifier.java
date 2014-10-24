@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.util.Locale;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.statements.Selectable;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -44,6 +45,12 @@ public class ColumnIdentifier implements Selectable
         this.text = type.getString(key);
     }
 
+    private ColumnIdentifier(ByteBuffer key, String text)
+    {
+        this.key = key;
+        this.text = text;
+    }
+
     @Override
     public final int hashCode()
     {
@@ -63,5 +70,54 @@ public class ColumnIdentifier implements Selectable
     public String toString()
     {
         return text;
+    }
+
+    /**
+     * Because Thrift-created tables may have a non-text comparator, we cannot determine the proper 'key' until
+     * we know the comparator. ColumnIdentifier.Raw is a placeholder that can be converted to a real ColumnIdentifier
+     * once the comparator is known with prepare(). This should only be used with identifiers that are actual
+     * column names. See CASSANDRA-8178 for more background.
+     */
+    public static class Raw implements Selectable.Raw
+    {
+        private final String rawText;
+        private final String text;
+
+        public Raw(String rawText, boolean keepCase)
+        {
+            this.rawText = rawText;
+            this.text =  keepCase ? rawText : rawText.toLowerCase();
+        }
+
+        public ColumnIdentifier prepare(CFMetaData cfm)
+        {
+            return new ColumnIdentifier(cfm.comparator.fromString(rawText), text);
+        }
+
+        public ColumnIdentifier applyComparator(AbstractType type)
+        {
+            return new ColumnIdentifier(type.fromString(rawText), text);
+        }
+
+        @Override
+        public final int hashCode()
+        {
+            return text.hashCode();
+        }
+
+        @Override
+        public final boolean equals(Object o)
+        {
+            if(!(o instanceof ColumnIdentifier.Raw))
+                return false;
+            ColumnIdentifier.Raw that = (ColumnIdentifier.Raw)o;
+            return text.equals(that.text);
+        }
+
+        @Override
+        public String toString()
+        {
+            return text;
+        }
     }
 }
