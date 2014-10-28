@@ -277,22 +277,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
 
         // copy and sort by read rates (ascending)
         List<SSTableReader> sstablesByHotness = new ArrayList<>(nonCompacting);
-        Collections.sort(sstablesByHotness, new Comparator<SSTableReader>()
-        {
-            public int compare(SSTableReader o1, SSTableReader o2)
-            {
-                Double readRate1 = readRates.get(o1);
-                Double readRate2 = readRates.get(o2);
-                if (readRate1 == null && readRate2 == null)
-                    return 0;
-                else if (readRate1 == null)
-                    return -1;
-                else if (readRate2 == null)
-                    return 1;
-                else
-                    return Double.compare(readRate1, readRate2);
-            }
-        });
+        Collections.sort(sstablesByHotness, new ReadRateComparator(readRates));
 
         long remainingBytes = memoryPoolBytes;
         for (SSTableReader sstable : compacting)
@@ -488,6 +473,32 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
             this.sstable = sstable;
             this.newSpaceUsed = newSpaceUsed;
             this.newSamplingLevel = newSamplingLevel;
+        }
+    }
+
+    /** Utility class for sorting sstables by their read rates. */
+    private static class ReadRateComparator implements Comparator<SSTableReader>
+    {
+        private final Map<SSTableReader, Double> readRates;
+
+        public ReadRateComparator(Map<SSTableReader, Double> readRates)
+        {
+            this.readRates = readRates;
+        }
+
+        @Override
+        public int compare(SSTableReader o1, SSTableReader o2)
+        {
+            Double readRate1 = readRates.get(o1);
+            Double readRate2 = readRates.get(o2);
+            if (readRate1 == null && readRate2 == null)
+                return 0;
+            else if (readRate1 == null)
+                return -1;
+            else if (readRate2 == null)
+                return 1;
+            else
+                return Double.compare(readRate1, readRate2);
         }
     }
 }
