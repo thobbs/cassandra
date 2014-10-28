@@ -21,8 +21,11 @@ import java.util.Locale;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.statements.Selectable;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -91,6 +94,18 @@ public class ColumnIdentifier implements Selectable
 
         public ColumnIdentifier prepare(CFMetaData cfm)
         {
+            if (cfm.getIsDense() || cfm.comparator instanceof CompositeType || cfm.comparator instanceof UTF8Type)
+                return new ColumnIdentifier(text, true);
+
+            // We have a Thrift-created table with a non-text comparator.  We need to parse column names with the comparator
+            // to get the correct ByteBuffer representation.  However, this doesn't apply to key aliases, so we need to
+            // make a special check for those and treat them normally.  See CASSANDRA-8178.
+            ByteBuffer bufferName = ByteBufferUtil.bytes(text);
+            for (ColumnDefinition def : cfm.partitionKeyColumns())
+            {
+                if (def.name.equals(bufferName))
+                    return new ColumnIdentifier(text, true);
+            }
             return new ColumnIdentifier(cfm.comparator.fromString(rawText), text);
         }
 
