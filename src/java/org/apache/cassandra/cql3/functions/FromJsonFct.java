@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.functions;
 
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.MarshalException;
 import org.json.simple.JSONValue;
 import org.json.simple.parser.ParseException;
 
@@ -62,6 +63,10 @@ public class FromJsonFct extends AbstractFunction
         catch (ParseException exc)
         {
             throw new InvalidRequestException(String.format("Could not decode JSON string '%s': %s", jsonArg, exc.toString()));
+        }
+        catch (MarshalException exc)
+        {
+            throw new InvalidRequestException(exc.getMessage());
         }
     }
 }

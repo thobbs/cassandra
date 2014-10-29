@@ -29,6 +29,7 @@ import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.functions.Functions;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
+import org.apache.cassandra.cql3.functions.ToJsonFct;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.db.CounterCell;
 import org.apache.cassandra.db.ExpiringCell;
@@ -160,8 +161,19 @@ public abstract class Selection
             for (Selectable rawArg : withFun.args)
                 args.add(makeSelector(cfm, new RawSelector(rawArg, null), defs, null));
 
-            // TODO need special check for fromJson
-            Function fun = Functions.get(cfm.ksName, withFun.functionName, args, cfm.ksName, cfm.cfName);
+            // TODO need special check for toJson
+            Function fun;
+            if (withFun.functionName.equals(ToJsonFct.NAME))
+            {
+                if (args.size() != 1)
+                    throw new InvalidRequestException("Expected 1 argument for toJson(), but got " + args.size());
+                fun = ToJsonFct.getInstance(args.get(0).getType());
+            }
+            else
+            {
+                fun = Functions.get(cfm.ksName, withFun.functionName, args, cfm.ksName, cfm.cfName);
+            }
+
             if (fun == null)
                 throw new InvalidRequestException(String.format("Unknown function '%s'", withFun.functionName));
             if (metadata != null)

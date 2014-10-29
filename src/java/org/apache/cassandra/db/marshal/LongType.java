@@ -83,6 +83,12 @@ public class LongType extends AbstractType<Long>
     }
 
     @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        return getSerializer().deserialize(buffer).toString();
+    }
+
+    @Override
     public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
         return this == otherType || otherType == DateType.instance || otherType == TimestampType.instance;

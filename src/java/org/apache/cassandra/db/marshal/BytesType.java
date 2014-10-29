@@ -60,6 +60,16 @@ public class BytesType extends AbstractType<ByteBuffer>
         {
             throw new MarshalException(String.format("Value '%s' is not a valid blob representation: %s", parsed, exc.getMessage()));
         }
+        catch (MarshalException exc)
+        {
+            throw new MarshalException(String.format("Value '%s' is not a valid blob representation: %s", parsed, exc.getMessage()));
+        }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        return '"' + ByteBufferUtil.bytesToHex(buffer) + '"';
     }
 
     @Override

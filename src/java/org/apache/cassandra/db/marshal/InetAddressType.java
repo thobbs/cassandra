@@ -51,7 +51,7 @@ public class InetAddressType extends AbstractType<InetAddress>
         }
         catch (Exception e)
         {
-            throw new MarshalException(String.format("unable to make inetaddress from '%s'", source), e);
+            throw new MarshalException(String.format("Unable to make inet address from '%s'", source), e);
         }
 
         return decompose(address);
@@ -69,6 +69,12 @@ public class InetAddressType extends AbstractType<InetAddress>
             throw new MarshalException(String.format(
                     "Expected a string representation of an inet value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
         }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        return '"' + getSerializer().deserialize(buffer).getHostAddress() + '"';
     }
 
     public CQL3Type asCQL3Type()

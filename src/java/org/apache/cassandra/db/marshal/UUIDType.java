@@ -173,7 +173,7 @@ public class UUIDType extends AbstractType<UUID>
             }
             catch (IllegalArgumentException e)
             {
-                throw new MarshalException(String.format("unable to make UUID from '%s'", source), e);
+                throw new MarshalException(String.format("Unable to make UUID from '%s'", source), e);
             }
         }
 
@@ -183,7 +183,7 @@ public class UUIDType extends AbstractType<UUID>
         }
         catch (MarshalException e)
         {
-            throw new MarshalException(String.format("unable to make version 1 UUID from '%s'", source), e);
+            throw new MarshalException(String.format("Unable to make UUID from '%s'", source), e);
         }
     }
 

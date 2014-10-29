@@ -98,6 +98,7 @@ public abstract class Functions
         }
         else if (name.equalsIgnoreCase(FromJsonFct.NAME))
         {
+            // TODO need to check for this being used incorrectly earlier, otherwise this will get hit
             assert receiverType != null : "fromJson should not be called without a known receiver type";
             return FromJsonFct.getInstance(receiverType);
         }

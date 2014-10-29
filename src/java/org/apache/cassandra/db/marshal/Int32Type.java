@@ -79,6 +79,12 @@ public class Int32Type extends AbstractType<Integer>
         }
     }
 
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        return getSerializer().deserialize(buffer).toString();
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.INT;

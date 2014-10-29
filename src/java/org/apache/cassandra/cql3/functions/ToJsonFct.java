@@ -19,12 +19,18 @@ package org.apache.cassandra.cql3.functions;
 
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
+import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class ToJsonFct extends AbstractFunction
 {
+    public static final String NAME = "toJson";
+
     private static final Map<AbstractType<?>, ToJsonFct> instances = new HashMap<>();
 
     public static synchronized ToJsonFct getInstance(AbstractType<?> fromType)
@@ -40,6 +46,12 @@ public class ToJsonFct extends AbstractFunction
 
     private ToJsonFct(AbstractType<?> returnType)
     {
-        super("toJson", UTF8Type.instance, returnType);
+        super(NAME, UTF8Type.instance, returnType);
+    }
+
+    public ByteBuffer execute(List<ByteBuffer> parameters) throws InvalidRequestException
+    {
+        assert parameters.size() == 1 : "Expected 1 argument for toJson(), but got " + parameters.size();
+        return ByteBufferUtil.bytes(argsType.get(0).toJSONString(parameters.get(0)));
     }
 }

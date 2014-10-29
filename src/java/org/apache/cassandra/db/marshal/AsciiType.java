@@ -81,6 +81,19 @@ public class AsciiType extends AbstractType<String>
         }
     }
 
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        try
+        {
+            return '"' + ByteBufferUtil.string(buffer, Charset.forName("US-ASCII")) + '"';
+        }
+        catch (CharacterCodingException exc)
+        {
+            throw new AssertionError("ascii value contained non-ascii characters: ", exc);
+        }
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.ASCII;

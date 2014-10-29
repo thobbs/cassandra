@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.cql3;
 
-import org.apache.cassandra.exceptions.InvalidRequestException;
-
 import java.util.Collection;
 
 public interface AssignmentTestable
