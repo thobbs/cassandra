@@ -41,6 +41,8 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     public TupleType(List<AbstractType<?>> types)
     {
+        for (int i = 0; i < types.size(); i++)
+            types.set(i, types.get(i).freeze());
         this.types = types;
     }
 

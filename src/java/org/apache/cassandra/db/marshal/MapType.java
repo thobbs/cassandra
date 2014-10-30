@@ -161,7 +161,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         StringBuilder sb = new StringBuilder();
         if (includeFrozenType)
             sb.append(FrozenType.class.getName()).append("(");
-        sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Arrays.asList(keys, values)));
+        sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Arrays.asList(keys, values), ignoreFreezing || !isMultiCell));
         if (includeFrozenType)
             sb.append(")");
         return sb.toString();

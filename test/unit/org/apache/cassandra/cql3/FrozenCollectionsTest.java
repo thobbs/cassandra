@@ -17,13 +17,19 @@
  */
 package org.apache.cassandra.cql3;
 
+import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+
+import static org.junit.Assert.assertEquals;
 
 public class FrozenCollectionsTest extends CQLTester
 {
@@ -738,5 +744,40 @@ public class FrozenCollectionsTest extends CQLTester
         assertRows(execute("SELECT v.a, v.b FROM %s WHERE k=?", 0),
             row(set(1, 2, 3), tuple(list(1, 2, 3)))
         );
+    }
+
+    private static String clean(String classname)
+    {
+        return StringUtils.remove(classname, "org.apache.cassandra.db.marshal.");
+    }
+
+    @Test
+    public void testToString()
+    {
+        // set<frozen<list<int>>>
+        SetType t = SetType.getInstance(ListType.getInstance(Int32Type.instance, false), true);
+        assertEquals("SetType(FrozenType(ListType(Int32Type)))", clean(t.toString()));
+        assertEquals("SetType(ListType(Int32Type))", clean(t.toString(true)));
+
+        // frozen<set<list<int>>>
+        t = SetType.getInstance(ListType.getInstance(Int32Type.instance, false), false);
+        assertEquals("FrozenType(SetType(ListType(Int32Type)))", clean(t.toString()));
+        assertEquals("SetType(ListType(Int32Type))", clean(t.toString(true)));
+
+        // map<frozen<list<int>>, int>
+        MapType m = MapType.getInstance(ListType.getInstance(Int32Type.instance, false), Int32Type.instance, true);
+        assertEquals("MapType(FrozenType(ListType(Int32Type)),Int32Type)", clean(m.toString()));
+        assertEquals("MapType(ListType(Int32Type),Int32Type)", clean(m.toString(true)));
+
+        // frozen<map<list<int>, int>>
+        m = MapType.getInstance(ListType.getInstance(Int32Type.instance, false), Int32Type.instance, false);
+        assertEquals("FrozenType(MapType(ListType(Int32Type),Int32Type))", clean(m.toString()));
+        assertEquals("MapType(ListType(Int32Type),Int32Type)", clean(m.toString(true)));
+
+        // tuple<set<int>>
+        List<AbstractType<?>> types = new ArrayList<>();
+        types.add(SetType.getInstance(Int32Type.instance, true));
+        TupleType tuple = new TupleType(types);
+        assertEquals("TupleType(SetType(Int32Type))", clean(tuple.toString()));
     }
 }

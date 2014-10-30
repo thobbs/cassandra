@@ -118,7 +118,8 @@ public class SetType<T> extends CollectionType<Set<T>>
         StringBuilder sb = new StringBuilder();
         if (includeFrozenType)
             sb.append(FrozenType.class.getName()).append("(");
-        sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(elements)));
+        sb.append(getClass().getName());
+        sb.append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(elements), ignoreFreezing || !isMultiCell));
         if (includeFrozenType)
             sb.append(")");
         return sb.toString();
