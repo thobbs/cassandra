@@ -202,7 +202,7 @@ public class Tuples
                 buffers[i] = elements.get(i).bindAndGet(options);
                 // Inside tuples, we must force the serialization of collections to v3 whatever protocol
                 // version is in use since we're going to store directly that serialized value.
-                if (version < 3 && type.type(i).isMultiCell())
+                if (version < 3 && type.type(i).isCollection())
                     buffers[i] = ((CollectionType)type.type(i)).getSerializer().reserializeToV3(buffers[i]);
             }
             return buffers;
