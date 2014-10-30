@@ -435,8 +435,6 @@ public abstract class SingleColumnRestriction implements Restriction
 
         public boolean canEvaluateWithSlices()
         {
-            // Technically, if we're operating on a multi-cell map and the operation is CONTAINS KEY or we're operating
-            // on a multi-cell set and the operation is CONTAINS, this could be true, but we don't support that yet.
             return false;
         }
 
