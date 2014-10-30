@@ -27,8 +27,8 @@ import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.ISetType;
-import org.apache.cassandra.db.marshal.IMapType;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -45,7 +45,7 @@ public abstract class Sets
 
     public static ColumnSpecification valueSpecOf(ColumnSpecification column)
     {
-        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((ISetType)column.type).getElementsType());
+        return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((SetType)column.type).getElementsType());
     }
 
     public static class Literal implements Term.Raw
@@ -63,7 +63,7 @@ public abstract class Sets
 
             // We've parsed empty maps as a set literal to break the ambiguity so
             // handle that case now
-            if (receiver.type instanceof IMapType && elements.isEmpty())
+            if (receiver.type instanceof MapType && elements.isEmpty())
                 return new Maps.Value(Collections.<ByteBuffer, ByteBuffer>emptyMap());
 
             ColumnSpecification valueSpec = Sets.valueSpecOf(receiver);
@@ -81,17 +81,17 @@ public abstract class Sets
 
                 values.add(t);
             }
-            DelayedValue value = new DelayedValue(((ISetType)receiver.type).getElementsType(), values);
+            DelayedValue value = new DelayedValue(((SetType)receiver.type).getElementsType(), values);
             return allTerminal ? value.bind(QueryOptions.DEFAULT) : value;
         }
 
         private void validateAssignableTo(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            if (!(receiver.type instanceof ISetType))
+            if (!(receiver.type instanceof SetType))
             {
                 // We've parsed empty maps as a set literal to break the ambiguity so
                 // handle that case now
-                if ((receiver.type instanceof IMapType) && elements.isEmpty())
+                if ((receiver.type instanceof MapType) && elements.isEmpty())
                     return;
 
                 throw new InvalidRequestException(String.format("Invalid set literal for %s of type %s", receiver.name, receiver.type.asCQL3Type()));
@@ -134,7 +134,7 @@ public abstract class Sets
             this.elements = elements;
         }
 
-        public static Value fromSerialized(ByteBuffer value, ISetType type, int version) throws InvalidRequestException
+        public static Value fromSerialized(ByteBuffer value, SetType type, int version) throws InvalidRequestException
         {
             try
             {
@@ -162,7 +162,7 @@ public abstract class Sets
             return CollectionSerializer.pack(new ArrayList<>(elements), elements.size(), protocolVersion);
         }
 
-        public boolean equals(ISetType st, Value v)
+        public boolean equals(SetType st, Value v)
         {
             if (elements.size() != v.elements.size())
                 return false;
@@ -227,13 +227,13 @@ public abstract class Sets
         protected Marker(int bindIndex, ColumnSpecification receiver)
         {
             super(bindIndex, receiver);
-            assert receiver.type instanceof ISetType;
+            assert receiver.type instanceof SetType;
         }
 
         public Value bind(QueryOptions options) throws InvalidRequestException
         {
             ByteBuffer value = options.getValues().get(bindIndex);
-            return value == null ? null : Value.fromSerialized(value, (ISetType)receiver.type, options.getProtocolVersion());
+            return value == null ? null : Value.fromSerialized(value, (SetType)receiver.type, options.getProtocolVersion());
         }
     }
 

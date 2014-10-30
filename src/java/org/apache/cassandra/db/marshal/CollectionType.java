@@ -18,7 +18,10 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 
+import org.apache.cassandra.db.Cell;
+import org.apache.cassandra.transport.Server;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,6 +89,37 @@ public abstract class CollectionType<T> extends AbstractType<T>
     public boolean isCollection()
     {
         return true;
+    }
+
+    @Override
+    public void validateCellValue(ByteBuffer cellValue) throws MarshalException
+    {
+        if (isMultiCell())
+            valueComparator().validate(cellValue);
+        else
+            super.validateCellValue(cellValue);
+    }
+
+    public List<Cell> enforceLimit(List<Cell> cells, int version)
+    {
+        assert isMultiCell();
+
+        if (version >= Server.VERSION_3 || cells.size() <= MAX_ELEMENTS)
+            return cells;
+
+        logger.error("Detected collection with {} elements, more than the {} limit. Only the first {} elements will be returned to the client. "
+                   + "Please see http://cassandra.apache.org/doc/cql3/CQL.html#collections for more details.", cells.size(), MAX_ELEMENTS, MAX_ELEMENTS);
+        return cells.subList(0, MAX_ELEMENTS);
+    }
+
+    public abstract List<ByteBuffer> serializedValues(List<Cell> cells);
+
+    public ByteBuffer serializeForNativeProtocol(List<Cell> cells, int version)
+    {
+        assert isMultiCell();
+        cells = enforceLimit(cells, version);
+        List<ByteBuffer> values = serializedValues(cells);
+        return CollectionSerializer.pack(values, cells.size(), version);
     }
 
     @Override

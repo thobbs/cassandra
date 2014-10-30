@@ -25,11 +25,10 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.ListSerializer;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class ListType<T> extends MultiCellCollectionType<List<T>> implements IListType<T>
+public class ListType<T> extends CollectionType<List<T>>
 {
     private static final Logger logger = LoggerFactory.getLogger(ListType.class);
 
@@ -38,6 +37,7 @@ public class ListType<T> extends MultiCellCollectionType<List<T>> implements ILi
 
     private final AbstractType<T> elements;
     public final ListSerializer<T> serializer;
+    private final boolean isMultiCell;
 
     public static ListType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
@@ -45,25 +45,26 @@ public class ListType<T> extends MultiCellCollectionType<List<T>> implements ILi
         if (l.size() != 1)
             throw new ConfigurationException("ListType takes exactly 1 type parameter");
 
-        return getInstance(l.get(0));
+        return getInstance(l.get(0), true);
     }
 
-    public static synchronized <T> ListType<T> getInstance(AbstractType<T> elements)
+    public static synchronized <T> ListType<T> getInstance(AbstractType<T> elements, boolean isMultiCell)
     {
         ListType<T> t = instances.get(elements);
         if (t == null)
         {
-            t = new ListType<T>(elements);
+            t = new ListType<T>(elements, isMultiCell);
             instances.put(elements, t);
         }
         return t;
     }
 
-    private ListType(AbstractType<T> elements)
+    private ListType(AbstractType<T> elements, boolean isMultiCell)
     {
         super(Kind.LIST);
         this.elements = elements;
         this.serializer = ListSerializer.getInstance(elements.getSerializer());
+        this.isMultiCell = isMultiCell;
     }
 
     public AbstractType<T> getElementsType()
@@ -84,6 +85,12 @@ public class ListType<T> extends MultiCellCollectionType<List<T>> implements ILi
     public ListSerializer<T> getSerializer()
     {
         return serializer;
+    }
+
+    @Override
+    public boolean isMultiCell()
+    {
+        return isMultiCell;
     }
 
     @Override
@@ -123,6 +130,7 @@ public class ListType<T> extends MultiCellCollectionType<List<T>> implements ILi
 
     public List<ByteBuffer> serializedValues(List<Cell> cells)
     {
+        assert isMultiCell;
         List<ByteBuffer> bbs = new ArrayList<ByteBuffer>(cells.size());
         for (Cell c : cells)
             bbs.add(c.value());

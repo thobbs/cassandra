@@ -116,12 +116,12 @@ public class DropTypeStatement extends SchemaAlteringStatement
         }
         else if (toCheck instanceof CollectionType)
         {
-            if (toCheck instanceof IListType)
-                return isUsedBy(((IListType)toCheck).getElementsType());
-            else if (toCheck instanceof ISetType)
-                return isUsedBy(((ISetType)toCheck).getElementsType());
+            if (toCheck instanceof ListType)
+                return isUsedBy(((ListType)toCheck).getElementsType());
+            else if (toCheck instanceof SetType)
+                return isUsedBy(((SetType)toCheck).getElementsType());
             else
-                return isUsedBy(((IMapType)toCheck).getKeysType()) || isUsedBy(((IMapType)toCheck).getKeysType());
+                return isUsedBy(((MapType)toCheck).getKeysType()) || isUsedBy(((MapType)toCheck).getKeysType());
         }
         return false;
     }

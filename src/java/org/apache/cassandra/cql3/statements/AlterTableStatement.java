@@ -131,7 +131,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
                                         "because a collection with the same name and a different type has already been used in the past", columnName));
                     }
 
-                    cfm.comparator = cfm.comparator.addOrUpdateCollection(columnName, (MultiCellCollectionType)type);
+                    cfm.comparator = cfm.comparator.addOrUpdateCollection(columnName, (CollectionType)type);
                 }
 
                 Integer componentIndex = cfm.comparator.isCompound() ? cfm.comparator.clusteringPrefixSize() : null;
@@ -213,7 +213,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
                         // change the underlying sorting order, but we still don't want to have a discrepancy between the type
                         // in the comparator and the one in the ColumnDefinition as that would be dodgy).
                         if (validatorType.isCollection() && validatorType.isMultiCell())
-                            cfm.comparator = cfm.comparator.addOrUpdateCollection(def.name, (MultiCellCollectionType)validatorType);
+                            cfm.comparator = cfm.comparator.addOrUpdateCollection(def.name, (CollectionType)validatorType);
 
                         break;
                 }

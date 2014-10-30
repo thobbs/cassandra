@@ -141,16 +141,16 @@ public class CqlStorage extends AbstractCassandraStorage
     /** set the values of set/list at and after the position of the tuple */
     private void setCollectionTupleValues(Tuple tuple, int position, Object value, AbstractType<?> validator) throws ExecException
     {
-        if (validator instanceof IMapType)
+        if (validator instanceof MapType)
         {
             setMapTupleValues(tuple, position, value, validator);
             return;
         }
         AbstractType elementValidator;
-        if (validator instanceof ISetType)
-            elementValidator = ((ISetType<?>) validator).getElementsType();
-        else if (validator instanceof IListType)
-            elementValidator = ((IListType<?>) validator).getElementsType();
+        if (validator instanceof SetType)
+            elementValidator = ((SetType<?>) validator).getElementsType();
+        else if (validator instanceof ListType)
+            elementValidator = ((ListType<?>) validator).getElementsType();
         else 
             return;
         
@@ -167,8 +167,8 @@ public class CqlStorage extends AbstractCassandraStorage
     /** set the values of set/list at and after the position of the tuple */
     private void setMapTupleValues(Tuple tuple, int position, Object value, AbstractType<?> validator) throws ExecException
     {
-        AbstractType<?> keyValidator = ((IMapType<?, ?>) validator).getKeysType();
-        AbstractType<?> valueValidator = ((IMapType<?, ?>) validator).getValuesType();
+        AbstractType<?> keyValidator = ((MapType<?, ?>) validator).getKeysType();
+        AbstractType<?> valueValidator = ((MapType<?, ?>) validator).getValuesType();
         
         int i = 0;
         Tuple innerTuple = TupleFactory.getInstance().newTuple(((Map<?,?>) value).size());

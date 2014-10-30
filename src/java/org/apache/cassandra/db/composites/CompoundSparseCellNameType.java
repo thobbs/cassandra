@@ -114,7 +114,7 @@ public class CompoundSparseCellNameType extends AbstractCompoundCellNameType
     }
 
     @Override
-    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, MultiCellCollectionType newCollection)
+    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, CollectionType newCollection)
     {
         return new WithCollection(clusteringType, ColumnToCollectionType.getInstance(Collections.singletonMap(columnName.bytes, newCollection)), internedIds);
     }
@@ -236,9 +236,9 @@ public class CompoundSparseCellNameType extends AbstractCompoundCellNameType
         }
 
         @Override
-        public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, MultiCellCollectionType newCollection)
+        public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, CollectionType newCollection)
         {
-            Map<ByteBuffer, MultiCellCollectionType> newMap = new HashMap<>(collectionType.defined);
+            Map<ByteBuffer, CollectionType> newMap = new HashMap<>(collectionType.defined);
             newMap.put(columnName.bytes, newCollection);
             return new WithCollection(clusteringType, ColumnToCollectionType.getInstance(newMap), internedIds);
         }

@@ -239,9 +239,9 @@ public class TypeParser
         throw new SyntaxException(String.format("Syntax error parsing '%s' at char %d: unexpected end of string", str, idx));
     }
 
-    public Map<ByteBuffer, MultiCellCollectionType> getCollectionsParameters() throws SyntaxException, ConfigurationException
+    public Map<ByteBuffer, CollectionType> getCollectionsParameters() throws SyntaxException, ConfigurationException
     {
-        Map<ByteBuffer, MultiCellCollectionType> map = new HashMap<>();
+        Map<ByteBuffer, CollectionType> map = new HashMap<>();
 
         if (isEOS())
             return map;
@@ -270,9 +270,9 @@ public class TypeParser
             try
             {
                 AbstractType<?> type = parse();
-                if (!(type instanceof MultiCellCollectionType))
+                if (!(type instanceof CollectionType))
                     throw new SyntaxException(type.toString() + " is not a collection type");
-                map.put(bb, (MultiCellCollectionType)type);
+                map.put(bb, (CollectionType)type);
             }
             catch (SyntaxException e)
             {

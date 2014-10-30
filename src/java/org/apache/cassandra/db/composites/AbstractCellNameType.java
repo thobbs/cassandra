@@ -33,7 +33,6 @@ import org.apache.cassandra.db.filter.NamesQueryFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ColumnToCollectionType;
-import org.apache.cassandra.db.marshal.MultiCellCollectionType;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -219,7 +218,7 @@ public abstract class AbstractCellNameType extends AbstractCType implements Cell
         throw new UnsupportedOperationException();
     }
 
-    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, MultiCellCollectionType newCollection)
+    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, CollectionType newCollection)
     {
         throw new UnsupportedOperationException();
     }

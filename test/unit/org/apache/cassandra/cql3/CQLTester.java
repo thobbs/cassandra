@@ -672,14 +672,14 @@ public abstract class CQLTester
         {
             List l = (List)value;
             AbstractType elt = l.isEmpty() ? BytesType.instance : typeFor(l.get(0));
-            return ListType.getInstance(elt);
+            return ListType.getInstance(elt, true);
         }
 
         if (value instanceof Set)
         {
             Set s = (Set)value;
             AbstractType elt = s.isEmpty() ? BytesType.instance : typeFor(s.iterator().next());
-            return SetType.getInstance(elt);
+            return SetType.getInstance(elt, true);
         }
 
         if (value instanceof Map)
@@ -697,7 +697,7 @@ public abstract class CQLTester
                 keys = typeFor(entry.getKey());
                 values = typeFor(entry.getValue());
             }
-            return MapType.getInstance(keys, values);
+            return MapType.getInstance(keys, values, true);
         }
 
         throw new IllegalArgumentException("Unsupported value type (value is " + value + ")");

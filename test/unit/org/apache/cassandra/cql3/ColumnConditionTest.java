@@ -153,10 +153,10 @@ public class ColumnConditionTest
     private static boolean listAppliesTo(ColumnCondition.CollectionBound bound, List<ByteBuffer> conditionValues, List<ByteBuffer> columnValues)
     {
         CFMetaData cfm = CFMetaData.compile("create table foo(a int PRIMARY KEY, b int, c list<int>)", "ks");
-        Map<ByteBuffer, MultiCellCollectionType> typeMap = new HashMap<>();
-        typeMap.put(ByteBufferUtil.bytes("c"), ListType.getInstance(Int32Type.instance));
+        Map<ByteBuffer, CollectionType> typeMap = new HashMap<>();
+        typeMap.put(ByteBufferUtil.bytes("c"), ListType.getInstance(Int32Type.instance, true));
         CompoundSparseCellNameType.WithCollection nameType = new CompoundSparseCellNameType.WithCollection(Collections.EMPTY_LIST, ColumnToCollectionType.getInstance(typeMap));
-        ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("c"), ListType.getInstance(Int32Type.instance), 0, ColumnDefinition.Kind.REGULAR);
+        ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("c"), ListType.getInstance(Int32Type.instance, true), 0, ColumnDefinition.Kind.REGULAR);
 
         List<Cell> cells = new ArrayList<>(columnValues.size());
         if (columnValues != null)
@@ -169,14 +169,14 @@ public class ColumnConditionTest
             };
         }
 
-        return bound.listAppliesTo(ListType.getInstance(Int32Type.instance), cells == null ? null : cells.iterator(), conditionValues, bound.operator);
+        return bound.listAppliesTo(ListType.getInstance(Int32Type.instance, true), cells == null ? null : cells.iterator(), conditionValues, bound.operator);
     }
 
     @Test
     // sets use the same check as lists
     public void testListCollectionBoundAppliesTo() throws InvalidRequestException
     {
-        ColumnDefinition definition = new ColumnDefinition("ks", "cf", new ColumnIdentifier("c", true), ListType.getInstance(Int32Type.instance), null, null, null, null, null);
+        ColumnDefinition definition = new ColumnDefinition("ks", "cf", new ColumnIdentifier("c", true), ListType.getInstance(Int32Type.instance, true), null, null, null, null, null);
 
         // EQ
         ColumnCondition condition = ColumnCondition.condition(definition, null, new Lists.Value(Arrays.asList(ONE)), Relation.Type.EQ);
@@ -285,10 +285,10 @@ public class ColumnConditionTest
     private static boolean setAppliesTo(ColumnCondition.CollectionBound bound, Set<ByteBuffer> conditionValues, List<ByteBuffer> columnValues)
     {
         CFMetaData cfm = CFMetaData.compile("create table foo(a int PRIMARY KEY, b int, c set<int>)", "ks");
-        Map<ByteBuffer, MultiCellCollectionType> typeMap = new HashMap<>();
-        typeMap.put(ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance));
+        Map<ByteBuffer, CollectionType> typeMap = new HashMap<>();
+        typeMap.put(ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance, true));
         CompoundSparseCellNameType.WithCollection nameType = new CompoundSparseCellNameType.WithCollection(Collections.EMPTY_LIST, ColumnToCollectionType.getInstance(typeMap));
-        ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance), 0, ColumnDefinition.Kind.REGULAR);
+        ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("c"), SetType.getInstance(Int32Type.instance, true), 0, ColumnDefinition.Kind.REGULAR);
 
         List<Cell> cells = new ArrayList<>(columnValues.size());
         if (columnValues != null)
@@ -300,13 +300,13 @@ public class ColumnConditionTest
             };
         }
 
-        return bound.setAppliesTo(SetType.getInstance(Int32Type.instance), cells == null ? null : cells.iterator(), conditionValues, bound.operator);
+        return bound.setAppliesTo(SetType.getInstance(Int32Type.instance, true), cells == null ? null : cells.iterator(), conditionValues, bound.operator);
     }
 
     @Test
     public void testSetCollectionBoundAppliesTo() throws InvalidRequestException
     {
-        ColumnDefinition definition = new ColumnDefinition("ks", "cf", new ColumnIdentifier("c", true), SetType.getInstance(Int32Type.instance), null, null, null, null, null);
+        ColumnDefinition definition = new ColumnDefinition("ks", "cf", new ColumnIdentifier("c", true), SetType.getInstance(Int32Type.instance, true), null, null, null, null, null);
 
         // EQ
         ColumnCondition condition = ColumnCondition.condition(definition, null, new Sets.Value(set(ONE)), Relation.Type.EQ);
@@ -418,10 +418,10 @@ public class ColumnConditionTest
     private static boolean mapAppliesTo(ColumnCondition.CollectionBound bound, Map<ByteBuffer, ByteBuffer> conditionValues, Map<ByteBuffer, ByteBuffer> columnValues)
     {
         CFMetaData cfm = CFMetaData.compile("create table foo(a int PRIMARY KEY, b map<int, int>)", "ks");
-        Map<ByteBuffer, MultiCellCollectionType> typeMap = new HashMap<>();
-        typeMap.put(ByteBufferUtil.bytes("b"), MapType.getInstance(Int32Type.instance, Int32Type.instance));
+        Map<ByteBuffer, CollectionType> typeMap = new HashMap<>();
+        typeMap.put(ByteBufferUtil.bytes("b"), MapType.getInstance(Int32Type.instance, Int32Type.instance, true));
         CompoundSparseCellNameType.WithCollection nameType = new CompoundSparseCellNameType.WithCollection(Collections.EMPTY_LIST, ColumnToCollectionType.getInstance(typeMap));
-        ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("b"), MapType.getInstance(Int32Type.instance, Int32Type.instance), 0, ColumnDefinition.Kind.REGULAR);
+        ColumnDefinition definition = new ColumnDefinition(cfm, ByteBufferUtil.bytes("b"), MapType.getInstance(Int32Type.instance, Int32Type.instance, true), 0, ColumnDefinition.Kind.REGULAR);
 
         List<Cell> cells = new ArrayList<>(columnValues.size());
         if (columnValues != null)
@@ -430,13 +430,13 @@ public class ColumnConditionTest
                 cells.add(new BufferCell(nameType.create(Composites.EMPTY, definition, entry.getKey()), entry.getValue()));
         }
 
-        return bound.mapAppliesTo(MapType.getInstance(Int32Type.instance, Int32Type.instance), cells.iterator(), conditionValues, bound.operator);
+        return bound.mapAppliesTo(MapType.getInstance(Int32Type.instance, Int32Type.instance, true), cells.iterator(), conditionValues, bound.operator);
     }
 
     @Test
     public void testMapCollectionBoundIsSatisfiedByValue() throws InvalidRequestException
     {
-        ColumnDefinition definition = new ColumnDefinition("ks", "cf", new ColumnIdentifier("b", true), MapType.getInstance(Int32Type.instance, Int32Type.instance), null, null, null, null, null);
+        ColumnDefinition definition = new ColumnDefinition("ks", "cf", new ColumnIdentifier("b", true), MapType.getInstance(Int32Type.instance, Int32Type.instance, true), null, null, null, null, null);
 
         Map<ByteBuffer, ByteBuffer> placeholderMap = new TreeMap<>();
         placeholderMap.put(ONE, ONE);

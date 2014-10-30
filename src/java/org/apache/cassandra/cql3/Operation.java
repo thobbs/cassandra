@@ -313,7 +313,7 @@ public abstract class Operation
                     ColumnSpecification vr = new ColumnSpecification(receiver.ksName,
                                                                      receiver.cfName,
                                                                      receiver.name,
-                                                                     SetType.getInstance(((MapType)receiver.type).getKeysType()));
+                                                                     SetType.getInstance(((MapType)receiver.type).getKeysType(), false));
                     return new Sets.Discarder(receiver, value.prepare(keyspace, vr));
             }
             throw new AssertionError();
@@ -343,7 +343,7 @@ public abstract class Operation
         {
             Term v = value.prepare(keyspace, receiver);
 
-            if (!(receiver.type instanceof IListType))
+            if (!(receiver.type instanceof ListType))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for non list column %s", toString(receiver), receiver.name));
             else if (!(receiver.type.isMultiCell()))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen list column %s", toString(receiver), receiver.name));

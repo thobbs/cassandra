@@ -23,16 +23,16 @@ import java.util.*;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.SetSerializer;
 
-public class SetType<T> extends MultiCellCollectionType<Set<T>> implements ISetType<T>
+public class SetType<T> extends CollectionType<Set<T>>
 {
     // interning instances
     private static final Map<AbstractType<?>, SetType> instances = new HashMap<AbstractType<?>, SetType>();
 
     private final AbstractType<T> elements;
     private final SetSerializer<T> serializer;
+    private final boolean isMultiCell;
 
     public static SetType<?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
@@ -40,25 +40,26 @@ public class SetType<T> extends MultiCellCollectionType<Set<T>> implements ISetT
         if (l.size() != 1)
             throw new ConfigurationException("SetType takes exactly 1 type parameter");
 
-        return getInstance(l.get(0));
+        return getInstance(l.get(0), true);
     }
 
-    public static synchronized <T> SetType<T> getInstance(AbstractType<T> elements)
+    public static synchronized <T> SetType<T> getInstance(AbstractType<T> elements, boolean isMultiCell)
     {
         SetType<T> t = instances.get(elements);
         if (t == null)
         {
-            t = new SetType<T>(elements);
+            t = new SetType<T>(elements, isMultiCell);
             instances.put(elements, t);
         }
         return t;
     }
 
-    public SetType(AbstractType<T> elements)
+    public SetType(AbstractType<T> elements, boolean isMultiCell)
     {
         super(Kind.SET);
         this.elements = elements;
         this.serializer = SetSerializer.getInstance(elements.getSerializer());
+        this.isMultiCell = isMultiCell;
     }
 
     public AbstractType<T> getElementsType()
@@ -74,6 +75,12 @@ public class SetType<T> extends MultiCellCollectionType<Set<T>> implements ISetT
     public AbstractType<?> valueComparator()
     {
         return EmptyType.instance;
+    }
+
+    @Override
+    public boolean isMultiCell()
+    {
+        return isMultiCell;
     }
 
     @Override

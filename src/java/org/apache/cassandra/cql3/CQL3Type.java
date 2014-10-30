@@ -169,16 +169,16 @@ public interface CQL3Type
             switch (type.kind)
             {
                 case LIST:
-                    AbstractType<?> listType = isFrozen ? ((FrozenListType)type).elements : ((ListType)type).getElementsType();
+                    AbstractType<?> listType = ((ListType)type).getElementsType();
                     sb.append("list<").append(listType.asCQL3Type());
                     break;
                 case SET:
-                    AbstractType<?> setType = isFrozen ? ((FrozenSetType)type).getElementsType() : ((SetType)type).getElementsType();
+                    AbstractType<?> setType = ((SetType)type).getElementsType();
                     sb.append("set<").append(setType.asCQL3Type());
                     break;
                 case MAP:
-                    AbstractType<?> keysType = isFrozen ? ((FrozenMapType)type).getKeysType() : ((MapType)type).getKeysType();
-                    AbstractType<?> valuesType = isFrozen ? ((FrozenMapType)type).getValuesType() : ((MapType)type).getValuesType();
+                    AbstractType<?> keysType = ((MapType)type).getKeysType();
+                    AbstractType<?> valuesType = ((MapType)type).getValuesType();
                     sb.append("map<").append(keysType.asCQL3Type()).append(", ").append(valuesType.asCQL3Type());
                     break;
                 default:
@@ -440,21 +440,12 @@ public interface CQL3Type
                 switch (kind)
                 {
                     case LIST:
-                        if (frozen)
-                            return new Collection(FrozenListType.getInstance(values.prepare(keyspace).getType()));
-                        else
-                            return new Collection(ListType.getInstance(values.prepare(keyspace).getType()));
+                        return new Collection(ListType.getInstance(values.prepare(keyspace).getType(), !frozen));
                     case SET:
-                        if (frozen)
-                            return new Collection(FrozenSetType.getInstance(values.prepare(keyspace).getType()));
-                        else
-                            return new Collection(SetType.getInstance(values.prepare(keyspace).getType()));
+                        return new Collection(SetType.getInstance(values.prepare(keyspace).getType(), !frozen));
                     case MAP:
                         assert keys != null : "Got null keys type for a collection";
-                        if (frozen)
-                            return new Collection(FrozenMapType.getInstance(keys.prepare(keyspace).getType(), values.prepare(keyspace).getType()));
-                        else
-                            return new Collection(MapType.getInstance(keys.prepare(keyspace).getType(), values.prepare(keyspace).getType()));
+                        return new Collection(MapType.getInstance(keys.prepare(keyspace).getType(), values.prepare(keyspace).getType(), !frozen));
                 }
                 throw new AssertionError();
             }

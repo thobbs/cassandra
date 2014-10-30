@@ -34,7 +34,6 @@ import org.apache.cassandra.db.filter.NamesQueryFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ColumnToCollectionType;
-import org.apache.cassandra.db.marshal.MultiCellCollectionType;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 
@@ -104,7 +103,7 @@ public interface CellNameType extends CType
      * Return the new type obtained by adding/updating to the new collection type for the provided column name
      * to this type.
      */
-    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, MultiCellCollectionType newCollection);
+    public CellNameType addOrUpdateCollection(ColumnIdentifier columnName, CollectionType newCollection);
 
     /**
      * Returns a new CellNameType that is equivalent to this one but with one

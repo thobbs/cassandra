@@ -28,7 +28,7 @@ import org.apache.cassandra.serializers.MapSerializer;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
 
-public class MapType<K, V> extends MultiCellCollectionType<Map<K, V>> implements IMapType<K, V>
+public class MapType<K, V> extends CollectionType<Map<K, V>>
 {
     // interning instances
     private static final Map<Pair<AbstractType<?>, AbstractType<?>>, MapType> instances = new HashMap<>();
@@ -36,6 +36,7 @@ public class MapType<K, V> extends MultiCellCollectionType<Map<K, V>> implements
     private final AbstractType<K> keys;
     private final AbstractType<V> values;
     private final MapSerializer<K, V> serializer;
+    private final boolean isMultiCell;
 
     public static MapType<?, ?> getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
@@ -43,27 +44,28 @@ public class MapType<K, V> extends MultiCellCollectionType<Map<K, V>> implements
         if (l.size() != 2)
             throw new ConfigurationException("MapType takes exactly 2 type parameters");
 
-        return getInstance(l.get(0), l.get(1));
+        return getInstance(l.get(0), l.get(1), true);
     }
 
-    public static synchronized <K, V> MapType<K, V> getInstance(AbstractType<K> keys, AbstractType<V> values)
+    public static synchronized <K, V> MapType<K, V> getInstance(AbstractType<K> keys, AbstractType<V> values, boolean isMultiCell)
     {
         Pair<AbstractType<?>, AbstractType<?>> p = Pair.<AbstractType<?>, AbstractType<?>>create(keys, values);
         MapType<K, V> t = instances.get(p);
         if (t == null)
         {
-            t = new MapType<>(keys, values);
+            t = new MapType<>(keys, values, isMultiCell);
             instances.put(p, t);
         }
         return t;
     }
 
-    private MapType(AbstractType<K> keys, AbstractType<V> values)
+    private MapType(AbstractType<K> keys, AbstractType<V> values, boolean isMultiCell)
     {
         super(Kind.MAP);
         this.keys = keys;
         this.values = values;
         this.serializer = MapSerializer.getInstance(keys.getSerializer(), values.getSerializer());
+        this.isMultiCell = isMultiCell;
     }
 
     public AbstractType<K> getKeysType()
@@ -84,6 +86,12 @@ public class MapType<K, V> extends MultiCellCollectionType<Map<K, V>> implements
     public AbstractType<V> valueComparator()
     {
         return values;
+    }
+
+    @Override
+    public boolean isMultiCell()
+    {
+        return isMultiCell;
     }
 
     @Override
@@ -141,6 +149,7 @@ public class MapType<K, V> extends MultiCellCollectionType<Map<K, V>> implements
 
     public List<ByteBuffer> serializedValues(List<Cell> cells)
     {
+        assert isMultiCell;
         List<ByteBuffer> bbs = new ArrayList<ByteBuffer>(cells.size() * 2);
         for (Cell c : cells)
         {

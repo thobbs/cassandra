@@ -289,11 +289,11 @@ public class ColumnCondition
         public boolean appliesTo(Composite rowPrefix, ColumnFamily current, final long now) throws InvalidRequestException
         {
             if (collectionElement == null)
-                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof IMapType ? "map" : "list") + " element access");
+                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof MapType ? "map" : "list") + " element access");
 
-            if (column.type instanceof IMapType)
+            if (column.type instanceof MapType)
             {
-                IMapType mapType = (IMapType) column.type;
+                MapType mapType = (MapType) column.type;
                 if (column.type.isMultiCell())
                 {
                     Cell cell = current.getColumn(current.metadata().comparator.create(rowPrefix, column, collectionElement));
@@ -309,7 +309,7 @@ public class ColumnCondition
             }
 
             // sets don't have element access, so it's a list
-            IListType listType = (IListType) column.type;
+            ListType listType = (ListType) column.type;
             if (column.type.isMultiCell())
             {
                 ByteBuffer columnValue = getListItem(
@@ -373,12 +373,12 @@ public class ColumnCondition
         public boolean appliesTo(Composite rowPrefix, ColumnFamily current, final long now) throws InvalidRequestException
         {
             if (collectionElement == null)
-                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof IMapType ? "map" : "list") + " element access");
+                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof MapType ? "map" : "list") + " element access");
 
             CellNameType nameType = current.metadata().comparator;
-            if (column.type instanceof IMapType)
+            if (column.type instanceof MapType)
             {
-                IMapType mapType = (IMapType) column.type;
+                MapType mapType = (MapType) column.type;
                 AbstractType<?> valueType = mapType.getValuesType();
                 if (column.type.isMultiCell())
                 {
@@ -412,7 +412,7 @@ public class ColumnCondition
                 }
             }
 
-            IListType listType = (IListType) column.type;
+            ListType listType = (ListType) column.type;
             AbstractType<?> elementsType = listType.getElementsType();
             if (column.type.isMultiCell())
             {
@@ -621,7 +621,7 @@ public class ColumnCondition
                 Lists.Marker inValuesMarker = (Lists.Marker) condition.value;
                 if (column.type instanceof ListType)
                 {
-                    ListType deserializer = ListType.getInstance(collectionType.valueComparator());
+                    ListType deserializer = ListType.getInstance(collectionType.valueComparator(), false);
                     for (ByteBuffer buffer : inValuesMarker.bind(options).elements)
                     {
                         if (buffer == null)
@@ -632,7 +632,7 @@ public class ColumnCondition
                 }
                 else if (column.type instanceof MapType)
                 {
-                    MapType deserializer = MapType.getInstance(collectionType.nameComparator(), collectionType.valueComparator());
+                    MapType deserializer = MapType.getInstance(collectionType.nameComparator(), collectionType.valueComparator(), false);
                     for (ByteBuffer buffer : inValuesMarker.bind(options).elements)
                     {
                         if (buffer == null)
@@ -643,7 +643,7 @@ public class ColumnCondition
                 }
                 else if (column.type instanceof SetType)
                 {
-                    SetType deserializer = SetType.getInstance(collectionType.valueComparator());
+                    SetType deserializer = SetType.getInstance(collectionType.valueComparator(), false);
                     for (ByteBuffer buffer : inValuesMarker.bind(options).elements)
                     {
                         if (buffer == null)

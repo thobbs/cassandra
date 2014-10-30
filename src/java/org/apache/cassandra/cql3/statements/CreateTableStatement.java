@@ -200,7 +200,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
 
             CreateTableStatement stmt = new CreateTableStatement(cfName, properties, ifNotExists, staticColumns);
 
-            Map<ByteBuffer, MultiCellCollectionType> definedMultiCellCollections = null;
+            Map<ByteBuffer, CollectionType> definedMultiCellCollections = null;
             for (Map.Entry<ColumnIdentifier, CQL3Type.Raw> entry : definitions.entrySet())
             {
                 ColumnIdentifier id = entry.getKey();
@@ -209,7 +209,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
                 {
                     if (definedMultiCellCollections == null)
                         definedMultiCellCollections = new HashMap<>();
-                    definedMultiCellCollections.put(id.bytes, (MultiCellCollectionType) pt.getType());
+                    definedMultiCellCollections.put(id.bytes, (CollectionType) pt.getType());
                 }
                 stmt.columns.put(id, pt.getType()); // we'll remove what is not a column below
             }

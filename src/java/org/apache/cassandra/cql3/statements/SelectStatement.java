@@ -1283,7 +1283,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             List<Cell> cells = row.getMultiCellColumn(def.name);
             ByteBuffer buffer = cells == null
                              ? null
-                             : ((MultiCellCollectionType)def.type).serializeForNativeProtocol(cells, options.getProtocolVersion());
+                             : ((CollectionType)def.type).serializeForNativeProtocol(cells, options.getProtocolVersion());
             result.add(buffer);
             return;
         }
@@ -1778,7 +1778,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                     }
                     break;
                 case CONTAINS_KEY:
-                    if (!(receiver.type instanceof IMapType))
+                    if (!(receiver.type instanceof MapType))
                         throw new InvalidRequestException(String.format("Cannot use CONTAINS KEY on non-map column %s", def.name));
                     // Fallthrough on purpose
                 case CONTAINS:

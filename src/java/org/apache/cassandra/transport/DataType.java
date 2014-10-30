@@ -212,18 +212,18 @@ public enum DataType implements OptionCodec.Codecable<DataType>
         {
             if (type.isCollection())
             {
-                if (type instanceof IListType)
+                if (type instanceof ListType)
                 {
-                    return Pair.<DataType, Object>create(LIST, ((IListType)type).getElementsType());
+                    return Pair.<DataType, Object>create(LIST, ((ListType)type).getElementsType());
                 }
-                else if (type instanceof IMapType)
+                else if (type instanceof MapType)
                 {
-                    IMapType mt = (IMapType)type;
+                    MapType mt = (MapType)type;
                     return Pair.<DataType, Object>create(MAP, Arrays.asList(mt.getKeysType(), mt.getValuesType()));
                 }
-                else if (type instanceof ISetType)
+                else if (type instanceof SetType)
                 {
-                    return Pair.<DataType, Object>create(SET, ((ISetType)type).getElementsType());
+                    return Pair.<DataType, Object>create(SET, ((SetType)type).getElementsType());
                 }
                 throw new AssertionError();
             }
@@ -251,12 +251,12 @@ public enum DataType implements OptionCodec.Codecable<DataType>
                 case CUSTOM:
                     return TypeParser.parse((String)entry.right);
                 case LIST:
-                    return ListType.getInstance((AbstractType)entry.right);
+                    return ListType.getInstance((AbstractType)entry.right, true);
                 case SET:
-                    return SetType.getInstance((AbstractType)entry.right);
+                    return SetType.getInstance((AbstractType)entry.right, true);
                 case MAP:
                     List<AbstractType> l = (List<AbstractType>)entry.right;
-                    return MapType.getInstance(l.get(0), l.get(1));
+                    return MapType.getInstance(l.get(0), l.get(1), true);
                 case UDT:
                     return (AbstractType)entry.right;
                 case TUPLE:

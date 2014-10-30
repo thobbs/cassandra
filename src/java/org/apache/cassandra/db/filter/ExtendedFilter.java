@@ -332,17 +332,17 @@ public abstract class ExtendedFilter
                     switch (type.kind)
                     {
                         case LIST:
-                            FrozenListType<?> listType = (FrozenListType)def.type;
+                            ListType<?> listType = (ListType)def.type;
                             if (!listType.getSerializer().deserialize(dataValue).contains(listType.getElementsType().getSerializer().deserialize(expression.value)))
                                 return false;
                             break;
                         case SET:
-                            FrozenSetType<?> setType = (FrozenSetType)def.type;
+                            SetType<?> setType = (SetType)def.type;
                             if (!setType.getSerializer().deserialize(dataValue).contains(setType.getElementsType().getSerializer().deserialize(expression.value)))
                                 return false;
                             break;
                         case MAP:
-                            FrozenMapType<?,?> mapType = (FrozenMapType)def.type;
+                            MapType<?,?> mapType = (MapType)def.type;
                             if (!mapType.getSerializer().deserialize(dataValue).containsValue(mapType.getValuesType().getSerializer().deserialize(expression.value)))
                                 return false;
                             break;
@@ -350,8 +350,8 @@ public abstract class ExtendedFilter
                 }
                 else if (expression.operator == IndexExpression.Operator.CONTAINS_KEY)
                 {
-                    assert def.type.isCollection() && !def.type.isMultiCell() && def.type instanceof FrozenMapType;
-                    FrozenMapType<?,?> mapType = (FrozenMapType)def.type;
+                    assert def.type.isCollection() && !def.type.isMultiCell() && def.type instanceof MapType;
+                    MapType<?,?> mapType = (MapType)def.type;
                     if (mapType.getSerializer().getSerializedValue(dataValue, expression.value, mapType.getKeysType()) == null)
                         return false;
                 }
