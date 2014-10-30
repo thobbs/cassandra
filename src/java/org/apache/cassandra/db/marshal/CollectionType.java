@@ -118,7 +118,7 @@ public abstract class CollectionType<T> extends AbstractType<T>
             return isCompatibleWith(previous);
 
         CollectionType tprev = (CollectionType) previous;
-        return this.nameComparator().isValueCompatibleWith(tprev.nameComparator()) &&
+        return this.nameComparator().isCompatibleWith(tprev.nameComparator()) &&
                this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
     }
 
