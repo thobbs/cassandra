@@ -92,7 +92,7 @@ public class CompositesIndexOnCollectionKey extends CompositesIndex
     public boolean supportsOperator(IndexExpression.Operator operator)
     {
         return operator == IndexExpression.Operator.CONTAINS_KEY ||
-               operator == IndexExpression.Operator.CONTAINS && columnDef.type instanceof SetType;
+               (operator == IndexExpression.Operator.CONTAINS && columnDef.type instanceof SetType);
     }
 
     @Override
