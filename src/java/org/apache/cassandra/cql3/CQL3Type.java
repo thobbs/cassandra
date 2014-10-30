@@ -393,8 +393,8 @@ public interface CQL3Type
         private static class RawCollection extends Raw
         {
             private final CollectionType.Kind kind;
-            private CQL3Type.Raw keys;
-            private CQL3Type.Raw values;
+            private final CQL3Type.Raw keys;
+            private final CQL3Type.Raw values;
 
             private RawCollection(CollectionType.Kind kind, CQL3Type.Raw keys, CQL3Type.Raw values)
             {
@@ -426,14 +426,14 @@ public interface CQL3Type
             {
                 assert values != null : "Got null values type for a collection";
 
-                if (!frozen && values.isCollection() && !values.frozen)
+                if (!frozen && values.supportsFreezing() && !values.frozen)
                     throw new InvalidRequestException("Non-frozen collections are not allowed inside collections: " + this);
                 if (values.isCounter())
                     throw new InvalidRequestException("Counters are not allowed inside collections: " + this);
 
                 if (keys != null)
                 {
-                    if (!frozen && keys.isCollection() && !keys.frozen)
+                    if (!frozen && keys.supportsFreezing() && !keys.frozen)
                         throw new InvalidRequestException("Non-frozen collections are not allowed inside collections: " + this);
                 }
 
