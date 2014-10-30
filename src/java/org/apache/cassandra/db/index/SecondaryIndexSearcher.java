@@ -75,10 +75,6 @@ public abstract class SecondaryIndexSearcher
      */
     public void validate(IndexExpression indexExpression) throws InvalidRequestException
     {
-        SecondaryIndex index = indexManager.getIndexForColumn(indexExpression.column);
-
-        if (index == null || index.getIndexCfs() == null)
-            throw new InvalidRequestException(String.format("Column '%s' is not indexed", indexExpression.column));
     }
 
     protected IndexExpression highestSelectivityPredicate(List<IndexExpression> clause)
