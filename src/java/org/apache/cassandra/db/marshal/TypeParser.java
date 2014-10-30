@@ -539,9 +539,22 @@ public class TypeParser
      */
     public static String stringifyTypeParameters(List<AbstractType<?>> types)
     {
-        StringBuilder sb = new StringBuilder();
-        sb.append('(').append(StringUtils.join(types, ",")).append(')');
-        return sb.toString();
+        return stringifyTypeParameters(types, false);
+    }
+
+    /**
+     * Helper function to ease the writing of AbstractType.toString() methods.
+     */
+    public static String stringifyTypeParameters(List<AbstractType<?>> types, boolean ignoreFreezing)
+    {
+        StringBuilder sb = new StringBuilder("(");
+        for (int i = 0; i < types.size(); i++)
+        {
+            if (i > 0)
+                sb.append(",");
+            sb.append(types.get(i).toString(ignoreFreezing));
+        }
+        return sb.append(')').toString();
     }
 
     public static String stringifyCollectionsParameters(Map<ByteBuffer, ? extends CollectionType> collections)
@@ -556,7 +569,7 @@ public class TypeParser
 
             first = false;
             sb.append(ByteBufferUtil.bytesToHex(entry.getKey())).append(":");
-            entry.getValue().appendToStringBuilder(sb);
+            sb.append(entry.getValue());
         }
         sb.append(')');
         return sb.toString();
@@ -571,7 +584,9 @@ public class TypeParser
         {
             sb.append(',');
             sb.append(ByteBufferUtil.bytesToHex(columnNames.get(i))).append(":");
-            sb.append(columnTypes.get(i).toString());
+
+            // omit FrozenType(...) from fields because it is currently implicit
+            sb.append(columnTypes.get(i).toString(true));
         }
         sb.append(')');
         return sb.toString();

@@ -33,7 +33,8 @@ public class ListType<T> extends CollectionType<List<T>>
     private static final Logger logger = LoggerFactory.getLogger(ListType.class);
 
     // interning instances
-    private static final Map<AbstractType<?>, ListType> instances = new HashMap<AbstractType<?>, ListType>();
+    private static final Map<AbstractType<?>, ListType> instances = new HashMap<>();
+    private static final Map<AbstractType<?>, ListType> frozenInstances = new HashMap<>();
 
     private final AbstractType<T> elements;
     public final ListSerializer<T> serializer;
@@ -50,11 +51,12 @@ public class ListType<T> extends CollectionType<List<T>>
 
     public static synchronized <T> ListType<T> getInstance(AbstractType<T> elements, boolean isMultiCell)
     {
-        ListType<T> t = instances.get(elements);
+        Map<AbstractType<?>, ListType> internMap = isMultiCell ? instances : frozenInstances;
+        ListType<T> t = internMap.get(elements);
         if (t == null)
         {
             t = new ListType<T>(elements, isMultiCell);
-            instances.put(elements, t);
+            internMap.put(elements, t);
         }
         return t;
     }
@@ -85,6 +87,15 @@ public class ListType<T> extends CollectionType<List<T>>
     public ListSerializer<T> getSerializer()
     {
         return serializer;
+    }
+
+    @Override
+    public AbstractType<?> freeze()
+    {
+        if (isMultiCell)
+            return getInstance(this.elements, false);
+        else
+            return this;
     }
 
     @Override
@@ -123,9 +134,18 @@ public class ListType<T> extends CollectionType<List<T>>
         return size1 == size2 ? 0 : (size1 < size2 ? -1 : 1);
     }
 
-    protected void appendToStringBuilder(StringBuilder sb)
+    @Override
+    public String toString(boolean ignoreFreezing)
     {
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append("(");
         sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(elements)));
+        if (includeFrozenType)
+            sb.append(")");
+        return sb.toString();
     }
 
     public List<ByteBuffer> serializedValues(List<Cell> cells)

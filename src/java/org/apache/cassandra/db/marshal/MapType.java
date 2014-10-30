@@ -32,6 +32,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
 {
     // interning instances
     private static final Map<Pair<AbstractType<?>, AbstractType<?>>, MapType> instances = new HashMap<>();
+    private static final Map<Pair<AbstractType<?>, AbstractType<?>>, MapType> frozenInstances = new HashMap<>();
 
     private final AbstractType<K> keys;
     private final AbstractType<V> values;
@@ -49,12 +50,13 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
 
     public static synchronized <K, V> MapType<K, V> getInstance(AbstractType<K> keys, AbstractType<V> values, boolean isMultiCell)
     {
+        Map<Pair<AbstractType<?>, AbstractType<?>>, MapType> internMap = isMultiCell ? instances : frozenInstances;
         Pair<AbstractType<?>, AbstractType<?>> p = Pair.<AbstractType<?>, AbstractType<?>>create(keys, values);
-        MapType<K, V> t = instances.get(p);
+        MapType<K, V> t = internMap.get(p);
         if (t == null)
         {
             t = new MapType<>(keys, values, isMultiCell);
-            instances.put(p, t);
+            internMap.put(p, t);
         }
         return t;
     }
@@ -92,6 +94,15 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     public boolean isMultiCell()
     {
         return isMultiCell;
+    }
+
+    @Override
+    public AbstractType<?> freeze()
+    {
+        if (isMultiCell)
+            return getInstance(this.keys, this.values, false);
+        else
+            return this;
     }
 
     @Override
@@ -142,9 +153,18 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         return keys.isByteOrderComparable();
     }
 
-    protected void appendToStringBuilder(StringBuilder sb)
+    @Override
+    public String toString(boolean ignoreFreezing)
     {
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append("(");
         sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Arrays.asList(keys, values)));
+        if (includeFrozenType)
+            sb.append(")");
+        return sb.toString();
     }
 
     public List<ByteBuffer> serializedValues(List<Cell> cells)

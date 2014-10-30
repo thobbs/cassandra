@@ -56,18 +56,8 @@ public abstract class CollectionType<T> extends AbstractType<T>
     public abstract AbstractType<?> nameComparator();
     public abstract AbstractType<?> valueComparator();
 
-    protected abstract void appendToStringBuilder(StringBuilder sb);
-
     @Override
     public abstract CollectionSerializer<T> getSerializer();
-
-    @Override
-    public String toString()
-    {
-        StringBuilder sb = new StringBuilder();
-        appendToStringBuilder(sb);
-        return sb.toString();
-    }
 
     public String getString(ByteBuffer bytes)
     {
@@ -133,6 +123,9 @@ public abstract class CollectionType<T> extends AbstractType<T>
 
         CollectionType tprev = (CollectionType) previous;
 
+        if (isMultiCell() != tprev.isMultiCell())
+            return false;
+
         if (!this.nameComparator().isCompatibleWith(tprev.nameComparator()))
             return false;
 
@@ -150,6 +143,8 @@ public abstract class CollectionType<T> extends AbstractType<T>
         // the collection element, so we should just check isCompatibleWith()
         if (isMultiCell())
             return isCompatibleWith(previous);
+        else if (previous.isMultiCell())
+            return false;
 
         CollectionType tprev = (CollectionType) previous;
         return this.nameComparator().isCompatibleWith(tprev.nameComparator()) &&
@@ -159,5 +154,11 @@ public abstract class CollectionType<T> extends AbstractType<T>
     public CQL3Type asCQL3Type()
     {
         return new CQL3Type.Collection(this);
+    }
+
+    @Override
+    public String toString()
+    {
+        return this.toString(false);
     }
 }

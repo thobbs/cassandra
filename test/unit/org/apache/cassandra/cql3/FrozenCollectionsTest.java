@@ -728,4 +728,15 @@ public class FrozenCollectionsTest extends CQLTester
             row(0, list(4, 5, 6), set(1, 2, 3), map(1, "a"))
         );
     }
+
+    @Test
+    public void testUserDefinedTypes() throws Throwable
+    {
+        String myType = createType("CREATE TYPE %s (a set<int>, b tuple<list<int>>)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v frozen<" + myType + ">)");
+        execute("INSERT INTO %s (k, v) VALUES (?, {a: ?, b: ?})", 0, set(1, 2, 3), tuple(list(1, 2, 3)));
+        assertRows(execute("SELECT v.a, v.b FROM %s WHERE k=?", 0),
+            row(set(1, 2, 3), tuple(list(1, 2, 3)))
+        );
+    }
 }

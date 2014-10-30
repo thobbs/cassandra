@@ -28,7 +28,8 @@ import org.apache.cassandra.serializers.SetSerializer;
 public class SetType<T> extends CollectionType<Set<T>>
 {
     // interning instances
-    private static final Map<AbstractType<?>, SetType> instances = new HashMap<AbstractType<?>, SetType>();
+    private static final Map<AbstractType<?>, SetType> instances = new HashMap<>();
+    private static final Map<AbstractType<?>, SetType> frozenInstances = new HashMap<>();
 
     private final AbstractType<T> elements;
     private final SetSerializer<T> serializer;
@@ -45,11 +46,12 @@ public class SetType<T> extends CollectionType<Set<T>>
 
     public static synchronized <T> SetType<T> getInstance(AbstractType<T> elements, boolean isMultiCell)
     {
-        SetType<T> t = instances.get(elements);
+        Map<AbstractType<?>, SetType> internMap = isMultiCell ? instances : frozenInstances;
+        SetType<T> t = internMap.get(elements);
         if (t == null)
         {
             t = new SetType<T>(elements, isMultiCell);
-            instances.put(elements, t);
+            internMap.put(elements, t);
         }
         return t;
     }
@@ -84,6 +86,15 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
+    public AbstractType<?> freeze()
+    {
+        if (isMultiCell)
+            return getInstance(this.elements, false);
+        else
+            return this;
+    }
+
+    @Override
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
         return ListType.compareListOrSet(elements, o1, o2);
@@ -99,9 +110,18 @@ public class SetType<T> extends CollectionType<Set<T>>
         return elements.isByteOrderComparable();
     }
 
-    protected void appendToStringBuilder(StringBuilder sb)
+    @Override
+    public String toString(boolean ignoreFreezing)
     {
+        boolean includeFrozenType = !ignoreFreezing && !isMultiCell();
+
+        StringBuilder sb = new StringBuilder();
+        if (includeFrozenType)
+            sb.append(FrozenType.class.getName()).append("(");
         sb.append(getClass().getName()).append(TypeParser.stringifyTypeParameters(Collections.<AbstractType<?>>singletonList(elements)));
+        if (includeFrozenType)
+            sb.append(")");
+        return sb.toString();
     }
 
     public List<ByteBuffer> serializedValues(List<Cell> cells)

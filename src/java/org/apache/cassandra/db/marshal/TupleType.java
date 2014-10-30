@@ -46,7 +46,10 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     public static TupleType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
     {
-        return new TupleType(parser.getTypeParameters());
+        List<AbstractType<?>> types = parser.getTypeParameters();
+        for (int i = 0; i < types.size(); i++)
+            types.set(i, types.get(i).freeze());
+        return new TupleType(types);
     }
 
     public AbstractType<?> type(int i)
@@ -293,6 +296,6 @@ public class TupleType extends AbstractType<ByteBuffer>
     @Override
     public String toString()
     {
-        return getClass().getName() + TypeParser.stringifyTypeParameters(types);
+        return getClass().getName() + TypeParser.stringifyTypeParameters(types, true);
     }
 }
