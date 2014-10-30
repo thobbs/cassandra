@@ -287,7 +287,7 @@ public abstract class Selection
 
         private ResultSetBuilder(long now)
         {
-            this.resultSet = new ResultSet(getResultMetadata(), new ArrayList<List<ByteBuffer>>());
+            this.resultSet = new ResultSet(getResultMetadata().copy(), new ArrayList<List<ByteBuffer>>());
             this.timestamps = collectTimestamps ? new long[columns.size()] : null;
             this.ttls = collectTTLs ? new int[columns.size()] : null;
             this.now = now;
@@ -303,7 +303,7 @@ public abstract class Selection
             current.add(isDead(c) ? null : value(c));
             if (timestamps != null)
             {
-                timestamps[current.size() - 1] = isDead(c) ? -1 : c.timestamp();
+                timestamps[current.size() - 1] = isDead(c) ? Long.MIN_VALUE : c.timestamp();
             }
             if (ttls != null)
             {
@@ -503,7 +503,7 @@ public abstract class Selection
             if (isWritetime)
             {
                 long ts = rs.timestamps[idx];
-                return ts >= 0 ? ByteBufferUtil.bytes(ts) : null;
+                return ts != Long.MIN_VALUE ? ByteBufferUtil.bytes(ts) : null;
             }
 
             int ttl = rs.ttls[idx];

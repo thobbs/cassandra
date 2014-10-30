@@ -54,6 +54,7 @@ import org.apache.cassandra.streaming.SessionInfo;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.utils.EstimatedHistogram;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
@@ -577,7 +578,13 @@ public class NodeTool
                 System.out.printf("%s %s%n", status.description, status.planId.toString());
                 for (SessionInfo info : status.sessions)
                 {
-                    System.out.printf("    %s%n", info.peer.toString());
+                    System.out.printf("    %s", info.peer.toString());
+                    // print private IP when it is used
+                    if (!info.peer.equals(info.connecting))
+                    {
+                        System.out.printf(" (using %s)", info.connecting.toString());
+                    }
+                    System.out.printf("%n");
                     if (!info.receivingSummaries.isEmpty())
                     {
                         if (humanReadable)
@@ -1393,13 +1400,13 @@ public class NodeTool
         }
     }
 
-    @Command(name = "getstreamthroughput", description = "Print the MB/s throughput cap for streaming in the system")
+    @Command(name = "getstreamthroughput", description = "Print the Mb/s throughput cap for streaming in the system")
     public static class GetStreamThroughput extends NodeToolCmd
     {
         @Override
         public void execute(NodeProbe probe)
         {
-            System.out.println("Current stream throughput: " + probe.getStreamThroughput() + " MB/s");
+            System.out.println("Current stream throughput: " + probe.getStreamThroughput() + " Mb/s");
         }
     }
 
@@ -1765,10 +1772,10 @@ public class NodeTool
         }
     }
 
-    @Command(name = "setstreamthroughput", description = "Set the MB/s throughput cap for streaming in the system, or 0 to disable throttling")
+    @Command(name = "setstreamthroughput", description = "Set the Mb/s throughput cap for streaming in the system, or 0 to disable throttling")
     public static class SetStreamThroughput extends NodeToolCmd
     {
-        @Arguments(title = "stream_throughput", usage = "<value_in_mb>", description = "Value in MB, 0 to disable throttling", required = true)
+        @Arguments(title = "stream_throughput", usage = "<value_in_mb>", description = "Value in Mb, 0 to disable throttling", required = true)
         private Integer streamThroughput = null;
 
         @Override
@@ -2164,8 +2171,9 @@ public class NodeTool
             try
             {
                 probe.stopCassandraDaemon();
-            } catch (Exception ignored)
+            } catch (Exception e)
             {
+                JVMStabilityInspector.inspectThrowable(e);
                 // ignored
             }
             System.out.println("Cassandra has shutdown.");

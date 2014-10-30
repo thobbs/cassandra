@@ -31,6 +31,7 @@ import org.github.jamm.MemoryMeter;
 
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.statements.SingleColumnRestriction.Contains;
 import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.config.CFMetaData;
@@ -226,7 +227,10 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             List<Row> page = pager.fetchPage(pageSize);
             ResultMessage.Rows msg = processResults(page, options, limit, now);
 
-            return pager.isExhausted() ? msg : msg.withPagingState(pager.state());
+            if (!pager.isExhausted())
+                msg.result.metadata.setHasMorePages(pager.state());
+
+            return msg;
         }
     }
 
@@ -1367,6 +1371,27 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 throw new InvalidRequestException(String.format("SELECT DISTINCT queries must request all the partition key columns (missing %s)", def.name));
     }
 
+    /**
+     * Checks if the specified column is restricted by multiple contains or contains key.
+     *
+     * @param columnDef the definition of the column to check
+     * @return <code>true</code> the specified column is restricted by multiple contains or contains key,
+     * <code>false</code> otherwise
+     */
+    private boolean isRestrictedByMultipleContains(ColumnDefinition columnDef)
+    {
+        if (!columnDef.type.isCollection())
+            return false;
+
+        Restriction restriction = metadataRestrictions.get(columnDef.name);
+
+        if (!(restriction instanceof Contains))
+            return false;
+
+        Contains contains = (Contains) restriction;
+        return (contains.numberOfValues() + contains.numberOfKeys()) > 1;
+    }
+
     public static class RawStatement extends CFStatement
     {
         private final Parameters parameters;
@@ -2040,7 +2065,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 // We will potentially filter data if either:
                 //  - Have more than one IndexExpression
                 //  - Have no index expression and the column filter is not the identity
-                if (stmt.restrictedColumns.size() > 1 || (stmt.restrictedColumns.isEmpty() && !stmt.columnFilterIsIdentity()))
+                if (needFiltering(stmt))
                     throw new InvalidRequestException("Cannot execute this query as it might involve data filtering and " +
                                                       "thus may have unpredictable performance. If you want to execute " +
                                                       "this query despite the performance unpredictability, use ALLOW FILTERING");
@@ -2063,6 +2088,21 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                                                               + "This is not supported by the underlying storage engine for COMPACT tables if a LIMIT is provided. "
                                                               + "Please either make the condition non strict (%s) or remove the user LIMIT", rel, rel.withNonStrictOperator()));
             }
+        }
+
+        /**
+         * Checks if the specified statement will need to filter the data.
+         *
+         * @param stmt the statement to test.
+         * @return <code>true</code> if the specified statement will need to filter the data, <code>false</code>
+         * otherwise.
+         */
+        private static boolean needFiltering(SelectStatement stmt)
+        {
+            return stmt.restrictedColumns.size() > 1
+                    || (stmt.restrictedColumns.isEmpty() && !stmt.columnFilterIsIdentity())
+                    || (!stmt.restrictedColumns.isEmpty()
+                            && stmt.isRestrictedByMultipleContains(Iterables.getOnlyElement(stmt.restrictedColumns)));
         }
 
         private int indexOf(ColumnDefinition def, Selection selection)

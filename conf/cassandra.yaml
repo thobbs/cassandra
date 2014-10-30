@@ -104,6 +104,8 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 # commitlog_directory: /var/lib/cassandra/commitlog
 
 # policy for data disk failures:
+# die: shut down gossip and Thrift and kill the JVM for any fs errors or
+#      single-sstable errors, so the node can be replaced.
 # stop_paranoid: shut down gossip and Thrift even for single-sstable errors.
 # stop: shut down gossip and Thrift, leaving the node effectively dead, but
 #       can still be inspected via JMX.
@@ -114,9 +116,10 @@ partitioner: org.apache.cassandra.dht.Murmur3Partitioner
 disk_failure_policy: stop
 
 # policy for commit disk failures:
+# die: shut down gossip and Thrift and kill the JVM, so the node can be replaced.
 # stop: shut down gossip and Thrift, leaving the node effectively dead, but
 #       can still be inspected via JMX.
-# stop_commit: shutdown the commit log, letting writes collect but 
+# stop_commit: shutdown the commit log, letting writes collect but
 #              continuing to service reads, as in pre-2.0.5 Cassandra
 # ignore: ignore fatal errors and let the batches fail
 commit_failure_policy: stop
@@ -427,7 +430,8 @@ rpc_keepalive: true
 # hsha  -> Stands for "half synchronous, half asynchronous." All thrift clients are handled
 #          asynchronously using a small number of threads that does not vary with the amount
 #          of thrift clients (and thus scales well to many clients). The rpc requests are still
-#          synchronous (one thread per active request).
+#          synchronous (one thread per active request). If hsha is selected then it is essential
+#          that rpc_max_threads is changed from the default value of unlimited.
 #
 # The default is sync because on Windows hsha is about 30% slower.  On Linux,
 # sync/hsha performance is about the same, with hsha of course using less memory.

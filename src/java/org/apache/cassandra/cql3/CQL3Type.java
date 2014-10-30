@@ -435,12 +435,7 @@ public interface CQL3Type
                 {
                     if (!frozen && keys.isCollection() && !keys.frozen)
                         throw new InvalidRequestException("Non-frozen collections are not allowed inside collections: " + this);
-                    if (values.isCounter())
-                        throw new InvalidRequestException("Counters are not allowed inside collections: " + this);
                 }
-                if (!frozen && ((values != null && values.isCollection() && !values.frozen) ||
-                                (keys != null && keys.isCollection() && !keys.frozen)))
-                    throw new InvalidRequestException("Non-frozen collections are not allowed inside collections: " + this);
 
                 switch (kind)
                 {

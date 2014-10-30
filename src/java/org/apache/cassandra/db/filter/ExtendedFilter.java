@@ -20,7 +20,7 @@ package org.apache.cassandra.db.filter;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import org.apache.cassandra.db.marshal.*;
+import com.google.common.base.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +29,7 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
+import org.apache.cassandra.db.marshal.*;
 
 /**
  * Extends a column filter (IFilter) to include a number of IndexExpression.
@@ -144,6 +145,18 @@ public abstract class ExtendedFilter
             default:
                 throw new IllegalStateException();
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        return Objects.toStringHelper(this)
+                      .add("dataRange", dataRange)
+                      .add("maxResults", maxResults)
+                      .add("currentLimit", currentLimit)
+                      .add("timestamp", timestamp)
+                      .add("countCQL3Rows", countCQL3Rows)
+                      .toString();
     }
 
     public static class WithClauses extends ExtendedFilter
@@ -355,6 +368,7 @@ public abstract class ExtendedFilter
         private static boolean collectionSatisfies(ColumnDefinition def, ColumnFamily data, Composite prefix, IndexExpression expr, ByteBuffer collectionElement)
         {
             assert def.type.isCollection() && def.type.isMultiCell();
+            CollectionType type = (CollectionType)def.type;
 
             if (expr.operator == IndexExpression.Operator.CONTAINS)
             {
@@ -362,14 +376,22 @@ public abstract class ExtendedFilter
                 Iterator<Cell> iter = data.iterator(new ColumnSlice[]{ data.getComparator().create(prefix, def).slice() });
                 while (iter.hasNext())
                 {
-                    if (((CollectionType) def.type).valueComparator().compare(iter.next().value(), expr.value) == 0)
-                        return true;
+                    Cell cell = iter.next();
+                    if (type.kind == CollectionType.Kind.SET)
+                    {
+                        if (type.nameComparator().compare(cell.name().collectionElement(), expr.value) == 0)
+                            return true;
+                    }
+                    else
+                    {
+                        if (type.valueComparator().compare(cell.value(), expr.value) == 0)
+                            return true;
+                    }
                 }
 
                 return false;
             }
 
-            CollectionType type = (CollectionType)def.type;
             switch (type.kind)
             {
                 case LIST:
@@ -413,6 +435,16 @@ public abstract class ExtendedFilter
                     return data.getSortedColumns().iterator().next().value();
             }
             throw new AssertionError();
+        }
+
+        @Override
+        public String toString()
+        {
+            return Objects.toStringHelper(this)
+                          .add("dataRange", dataRange)
+                          .add("timestamp", timestamp)
+                          .add("clause", clause)
+                          .toString();
         }
     }
 
