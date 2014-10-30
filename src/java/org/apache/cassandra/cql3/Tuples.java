@@ -386,7 +386,7 @@ public class Tuples
         protected InMarker(int bindIndex, ColumnSpecification receiver)
         {
             super(bindIndex, receiver);
-            assert receiver.type instanceof ListType;
+            assert receiver.type instanceof IListType;
         }
 
         public InValue bind(QueryOptions options) throws InvalidRequestException

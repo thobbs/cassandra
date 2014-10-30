@@ -343,7 +343,7 @@ public abstract class Operation
         {
             Term v = value.prepare(keyspace, receiver);
 
-            if (!(receiver.type instanceof ListType))
+            if (!(receiver.type instanceof IListType))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for non list column %s", toString(receiver), receiver.name));
             else if (!(receiver.type.isMultiCell()))
                 throw new InvalidRequestException(String.format("Invalid operation (%s) for frozen list column %s", toString(receiver), receiver.name));

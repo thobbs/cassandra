@@ -289,7 +289,7 @@ public class ColumnCondition
         public boolean appliesTo(Composite rowPrefix, ColumnFamily current, final long now) throws InvalidRequestException
         {
             if (collectionElement == null)
-                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof MapType ? "map" : "list") + " element access");
+                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof IMapType ? "map" : "list") + " element access");
 
             if (column.type instanceof IMapType)
             {
@@ -373,7 +373,7 @@ public class ColumnCondition
         public boolean appliesTo(Composite rowPrefix, ColumnFamily current, final long now) throws InvalidRequestException
         {
             if (collectionElement == null)
-                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof MapType ? "map" : "list") + " element access");
+                throw new InvalidRequestException("Invalid null value for " + (column.type instanceof IMapType ? "map" : "list") + " element access");
 
             CellNameType nameType = current.metadata().comparator;
             if (column.type instanceof IMapType)
