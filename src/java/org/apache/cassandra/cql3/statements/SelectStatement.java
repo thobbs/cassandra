@@ -845,7 +845,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             // But if the actual comparator itself is reversed, we must inversed the bounds too.
             Bound b = isReversed == isReversedType(def) ? bound : Bound.reverse(bound);
             Restriction r = restrictions[def.position()];
-            if (isNullRestriction(r, b))
+            if (isNullRestriction(r, b) || !r.canEvaluateWithSlices())
             {
                 // There wasn't any non EQ relation on that key, we select all records having the preceding component as prefix.
                 // For composites, if there was preceding component and we're computing the end, we must change the last component
@@ -859,7 +859,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
                 Relation.Type relType = ((Restriction.Slice)r).getRelation(eocBound, b);
                 return Collections.singletonList(builder.build().withEOC(eocForRelation(relType)));
             }
-            else if (!r.isContains())
+            else
             {
                 // IN or EQ
                 List<ByteBuffer> values = r.values(options);
@@ -1016,7 +1016,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
 
     private static boolean isNullRestriction(Restriction r, Bound b)
     {
-        return r == null || r.isContains() || (r.isSlice() && !((Restriction.Slice)r).hasBound(b));
+        return r == null || (r.isSlice() && !((Restriction.Slice)r).hasBound(b));
     }
 
     private static ByteBuffer getSliceValue(Restriction r, Bound b, QueryOptions options) throws InvalidRequestException
