@@ -90,12 +90,12 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         else if (target.isFullCollection)
         {
             if (!isFrozenCollection)
-                throw new InvalidRequestException("fullCollection() indexes can only be created on frozen collections");
+                throw new InvalidRequestException("full() indexes can only be created on frozen collections");
         }
         else if (isFrozenCollection)
         {
-            throw new InvalidRequestException("Frozen collections currently only support fullCollection() indexes. " +
-                                              "For example, 'CREATE INDEX ON <table>(fullCollection(<columnName>))'.");
+            throw new InvalidRequestException("Frozen collections currently only support full-collection indexes. " +
+                                              "For example, 'CREATE INDEX ON <table>(full(<columnName>))'.");
         }
 
         if (cd.getIndexType() != null)

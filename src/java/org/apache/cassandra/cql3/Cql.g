@@ -577,7 +577,7 @@ createIndexStatement returns [CreateIndexStatement expr]
 indexIdent returns [IndexTarget.Raw id]
     : c=cident                { $id = IndexTarget.Raw.valuesOf(c); }
     | K_KEYS '(' c=cident ')' { $id = IndexTarget.Raw.keysOf(c); }
-    | K_FULL_COLLECTION '(' c=cident ')' { $id = IndexTarget.Raw.fullCollection(c); }
+    | K_FULL '(' c=cident ')' { $id = IndexTarget.Raw.fullCollection(c); }
     ;
 
 
@@ -1228,7 +1228,7 @@ K_WHERE:       W H E R E;
 K_AND:         A N D;
 K_KEY:         K E Y;
 K_KEYS:        K E Y S;
-K_FULL_COLLECTION: F U L L C O L L E C T I O N;
+K_FULL:        F U L L;
 K_INSERT:      I N S E R T;
 K_UPDATE:      U P D A T E;
 K_WITH:        W I T H;
