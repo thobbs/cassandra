@@ -106,6 +106,37 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     }
 
     @Override
+    public boolean isCompatibleWith(AbstractType<?> previous)
+    {
+        if (isMultiCell())
+            return super.isMultiCellCompatibleWith(previous);
+
+        return this.isValueCompatibleWithInternal(previous) &&
+                this.keys.isCompatibleWith(((MapType) previous).getKeysType()) &&
+                this.values.isCompatibleWith(((MapType) previous).getValuesType());
+    }
+
+    @Override
+    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    {
+        if (isMultiCell())
+            return super.isMultiCellValueCompatibleWithInternal(previous);
+
+        if (this == previous)
+            return true;
+
+        if (!(previous instanceof MapType))
+            return false;
+
+        if (previous.isMultiCell())
+            return false;
+
+        MapType tprev = (MapType) previous;
+        return this.keys.isValueCompatibleWithInternal(tprev.keys) &&
+               this.values.isValueCompatibleWithInternal(tprev.values);
+    }
+
+    @Override
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
         // Note that this is only used if the collection is inside an UDT

@@ -121,9 +121,11 @@ public abstract class CollectionType<T> extends AbstractType<T>
         return CollectionSerializer.pack(values, cells.size(), version);
     }
 
-    @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    protected boolean isMultiCellCompatibleWith(AbstractType<?> previous)
     {
+        // subclasses should handle compatibility checks for frozen collections
+        assert this.isMultiCell();
+
         if (this == previous)
             return true;
 
@@ -131,33 +133,22 @@ public abstract class CollectionType<T> extends AbstractType<T>
             return false;
 
         CollectionType tprev = (CollectionType) previous;
-
-        if (isMultiCell() != tprev.isMultiCell())
+        if (!tprev.isMultiCell())
             return false;
 
         if (!this.nameComparator().isCompatibleWith(tprev.nameComparator()))
             return false;
 
-        if (isMultiCell())
-            // the value is only used for Cell values
-            return this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
-        else
-            return this.valueComparator().isCompatibleWith(tprev.valueComparator());
+        // the value comparator is only used for Cell values, so sorting doesn't matter
+        return this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
     }
 
-    @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    protected boolean isMultiCellValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        // for multi-cell collections, value compatibility inherently involves sorting due to the cell name including
-        // the collection element, so we should just check isCompatibleWith()
-        if (isMultiCell())
-            return isCompatibleWith(previous);
-        else if (previous.isMultiCell())
-            return false;
+        // subclasses should handle compatibility checks for frozen collections
+        assert this.isMultiCell();
 
-        CollectionType tprev = (CollectionType) previous;
-        return this.nameComparator().isCompatibleWith(tprev.nameComparator()) &&
-               this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
+        return isCompatibleWith(previous);
     }
 
     public CQL3Type asCQL3Type()

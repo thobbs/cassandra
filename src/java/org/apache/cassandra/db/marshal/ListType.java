@@ -105,6 +105,35 @@ public class ListType<T> extends CollectionType<List<T>>
     }
 
     @Override
+    public boolean isCompatibleWith(AbstractType<?> previous)
+    {
+        if (isMultiCell())
+            return super.isMultiCellCompatibleWith(previous);
+
+        return this.isValueCompatibleWithInternal(previous) &&
+                this.elements.isCompatibleWith(((ListType) previous).getElementsType());
+    }
+
+    @Override
+    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    {
+        if (isMultiCell())
+            return super.isMultiCellValueCompatibleWithInternal(previous);
+
+        if (this == previous)
+            return true;
+
+        if (!(previous instanceof ListType))
+            return false;
+
+        if (previous.isMultiCell())
+            return false;
+
+        ListType tprev = (ListType) previous;
+        return this.elements.isValueCompatibleWithInternal(tprev.elements);
+    }
+
+    @Override
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
         return compareListOrSet(elements, o1, o2);

@@ -95,6 +95,35 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
+    public boolean isCompatibleWith(AbstractType<?> previous)
+    {
+        if (isMultiCell())
+            return super.isMultiCellCompatibleWith(previous);
+
+        return this.isValueCompatibleWithInternal(previous) &&
+                this.elements.isCompatibleWith(((SetType) previous).getElementsType());
+    }
+
+    @Override
+    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    {
+        if (isMultiCell())
+            return super.isMultiCellValueCompatibleWithInternal(previous);
+
+        if (this == previous)
+            return true;
+
+        if (!(previous instanceof SetType))
+            return false;
+
+        if (previous.isMultiCell())
+            return false;
+
+        SetType tprev = (SetType) previous;
+        return this.elements.isValueCompatibleWithInternal(tprev.elements);
+    }
+
+    @Override
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
         return ListType.compareListOrSet(elements, o1, o2);
