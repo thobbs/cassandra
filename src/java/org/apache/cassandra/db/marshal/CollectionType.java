@@ -90,6 +90,15 @@ public abstract class CollectionType<T> extends AbstractType<T>
             super.validateCellValue(cellValue);
     }
 
+    /**
+     * Checks if this collection is Map.
+     * @return <code>true</code> if this collection is a Map, <code>false</code> otherwise.
+     */
+    public boolean isMap()
+    {
+        return kind == Kind.MAP;
+    }
+
     public List<Cell> enforceLimit(List<Cell> cells, int version)
     {
         assert isMultiCell();

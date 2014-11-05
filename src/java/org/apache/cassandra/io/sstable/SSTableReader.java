@@ -240,6 +240,7 @@ public class SSTableReader extends SSTable
                 try
                 {
                     CompactionMetadata metadata = (CompactionMetadata) sstable.descriptor.getMetadataSerializer().deserialize(sstable.descriptor, MetadataType.COMPACTION);
+                    assert metadata != null : sstable.getFilename();
                     if (cardinality == null)
                         cardinality = metadata.cardinalityEstimator;
                     else
@@ -1599,6 +1600,12 @@ public class SSTableReader extends SSTable
         }
     }
 
+    @VisibleForTesting
+    int referenceCount()
+    {
+        return references.get();
+    }
+
     /**
      * Release reference to this SSTableReader.
      * If there is no one referring to this SSTable, and is marked as compacted,
@@ -1627,7 +1634,7 @@ public class SSTableReader extends SSTable
 
         synchronized (replaceLock)
         {
-            assert replacedBy == null;
+            assert replacedBy == null : getFilename();
         }
         return !isCompacted.getAndSet(true);
     }
