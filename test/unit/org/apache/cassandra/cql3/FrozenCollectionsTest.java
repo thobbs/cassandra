@@ -581,15 +581,15 @@ public class FrozenCollectionsTest extends CQLTester
         createTable("CREATE TABLE %s (a frozen<map<int, text>> PRIMARY KEY, b frozen<map<int, text>>)");
 
         // for now, we don't support indexing values or keys of collections in the primary key
-        assertInvalidIndexCreationWithMessage("CREATE INDEX ON %s (fullCollection(a))", "Cannot create secondary index on partition key column");
+        assertInvalidIndexCreationWithMessage("CREATE INDEX ON %s (full(a))", "Cannot create secondary index on partition key column");
         assertInvalidIndexCreationWithMessage("CREATE INDEX ON %s (keys(a))", "Cannot create index on keys of frozen<map> column");
         assertInvalidIndexCreationWithMessage("CREATE INDEX ON %s (keys(b))", "Cannot create index on keys of frozen<map> column");
 
         createTable("CREATE TABLE %s (a int, b frozen<list<int>>, c frozen<set<int>>, d frozen<map<int, text>>, PRIMARY KEY (a, b))");
 
-        createIndex("CREATE INDEX ON %s (fullCollection(b))");
-        createIndex("CREATE INDEX ON %s (fullCollection(c))");
-        createIndex("CREATE INDEX ON %s (fullCollection(d))");
+        createIndex("CREATE INDEX ON %s (full(b))");
+        createIndex("CREATE INDEX ON %s (full(c))");
+        createIndex("CREATE INDEX ON %s (full(d))");
 
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, list(1, 2, 3), set(1, 2, 3), map(1, "a"));
         execute("INSERT INTO %s (a, b, c, d) VALUES (?, ?, ?, ?)", 0, list(4, 5, 6), set(1, 2, 3), map(1, "a"));
