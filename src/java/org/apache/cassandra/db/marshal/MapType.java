@@ -112,8 +112,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             return super.isMultiCellCompatibleWith(previous);
 
         return this.isValueCompatibleWithInternal(previous) &&
-                this.keys.isCompatibleWith(((MapType) previous).getKeysType()) &&
-                this.values.isCompatibleWith(((MapType) previous).getValuesType());
+               this.values.isCompatibleWith(((MapType) previous).getValuesType());
     }
 
     @Override
@@ -132,14 +131,13 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             return false;
 
         MapType tprev = (MapType) previous;
-        return this.keys.isValueCompatibleWithInternal(tprev.keys) &&
+        return this.keys.isCompatibleWith(tprev.keys) &&
                this.values.isValueCompatibleWithInternal(tprev.values);
     }
 
     @Override
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
-        // Note that this is only used if the collection is inside an UDT
         return compareMaps(keys, values, o1, o2);
     }
 

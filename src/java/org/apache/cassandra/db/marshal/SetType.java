@@ -100,8 +100,7 @@ public class SetType<T> extends CollectionType<Set<T>>
         if (isMultiCell())
             return super.isMultiCellCompatibleWith(previous);
 
-        return this.isValueCompatibleWithInternal(previous) &&
-                this.elements.isCompatibleWith(((SetType) previous).getElementsType());
+        return this.isValueCompatibleWithInternal(previous);
     }
 
     @Override
@@ -120,7 +119,7 @@ public class SetType<T> extends CollectionType<Set<T>>
             return false;
 
         SetType tprev = (SetType) previous;
-        return this.elements.isValueCompatibleWithInternal(tprev.elements);
+        return this.elements.isCompatibleWith(tprev.elements);
     }
 
     @Override
