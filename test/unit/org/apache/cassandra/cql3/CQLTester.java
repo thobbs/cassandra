@@ -633,6 +633,9 @@ public abstract class CQLTester
         if (value instanceof Date)
             return TimestampType.instance;
 
+        if (value instanceof UUID)
+            return UUIDType.instance;
+
         if (value instanceof List)
         {
             List l = (List)value;

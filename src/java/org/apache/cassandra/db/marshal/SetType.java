@@ -124,4 +124,10 @@ public class SetType<T> extends CollectionType<Set<T>>
 
         return CollectionSerializer.pack(buffers, buffers.size(), Server.CURRENT_VERSION);
     }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        return ListType.setOrListToJsonString(buffer, elements);
+    }
 }

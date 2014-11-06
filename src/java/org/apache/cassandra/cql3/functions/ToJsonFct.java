@@ -52,6 +52,10 @@ public class ToJsonFct extends AbstractFunction
     public ByteBuffer execute(List<ByteBuffer> parameters) throws InvalidRequestException
     {
         assert parameters.size() == 1 : "Expected 1 argument for toJson(), but got " + parameters.size();
-        return ByteBufferUtil.bytes(argsType.get(0).toJSONString(parameters.get(0)));
+        ByteBuffer parameter = parameters.get(0);
+        if (parameter == null)
+            return ByteBufferUtil.bytes("null");
+
+        return ByteBufferUtil.bytes(argsType.get(0).toJSONString(parameter));
     }
 }

@@ -81,7 +81,7 @@ public class FunctionCall extends Term.NonTerminal
         catch (MarshalException e)
         {
             throw new RuntimeException(String.format("Return of function %s (%s) is not a valid value for its declared return type %s", 
-                                                     fun, ByteBufferUtil.bytesToHex(result), fun.returnType().asCQL3Type()));
+                                                     fun.name(), ByteBufferUtil.bytesToHex(result), fun.returnType().asCQL3Type()));
         }
     }
 

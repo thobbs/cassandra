@@ -159,4 +159,22 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         }
         return CollectionSerializer.pack(buffers, map.size(), Server.CURRENT_VERSION);
     }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        // TODO we cannot assume the current protocol version here, since the collection gets serialized prior to function execution
+        StringBuilder sb = new StringBuilder("{");
+        int size = CollectionSerializer.readCollectionSize(buffer, Server.CURRENT_VERSION);
+        for (int i = 0; i < size; i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+            sb.append(": ");
+            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+        }
+        return sb.append("}").toString();
+    }
 }

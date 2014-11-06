@@ -231,17 +231,42 @@ public class TupleType extends AbstractType<ByteBuffer>
                     "Expected a list representation of a tuple, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
         List list = (List) parsed;
+
+        if (list.size() > types.size())
+            throw new MarshalException(String.format("Tuple contains extra items (expected %s): %s", types.size(), parsed));
+        else if (types.size() > list.size())
+            throw new MarshalException(String.format("Tuple is missing items (expected %s): %s", types.size(), parsed));
+
         List<ByteBuffer> buffers = new ArrayList<>(list.size());
         Iterator<AbstractType<?>> typeIterator = types.iterator();
         for (Object element : list)
         {
             if (element == null)
-                throw new MarshalException("Invalid null element in list");
-            if (!typeIterator.hasNext())
-                throw new MarshalException(String.format("Tuple contains extra items (expected %s): %s", types.size(), parsed));
+                throw new MarshalException("Invalid null element in tuple");
             buffers.add(typeIterator.next().fromJSONObject(element));
         }
-        return CollectionSerializer.pack(buffers, list.size(), Server.CURRENT_VERSION);
+
+        int size = 0;
+        for (ByteBuffer bb : buffers)
+            size += CollectionSerializer.sizeOfValue(bb, Server.CURRENT_VERSION);
+
+        ByteBuffer result = ByteBuffer.allocate(size);
+        for (ByteBuffer bb : buffers)
+            CollectionSerializer.writeValue(result, bb, Server.CURRENT_VERSION);
+        return (ByteBuffer)result.flip();
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < types.size(); i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+            sb.append(types.get(i).toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+        }
+        return sb.append("]").toString();
     }
 
     public TypeSerializer<ByteBuffer> getSerializer()

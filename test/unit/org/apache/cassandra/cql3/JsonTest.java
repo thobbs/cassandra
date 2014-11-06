@@ -56,7 +56,8 @@ public class JsonTest extends CQLTester
                 "varintval varint, " +
                 "listval list<int>, " +
                 "setval set<uuid>, " +
-                "mapval map<ascii, int>)");
+                "mapval map<ascii, int>," +
+                "tupleval frozen<tuple<int, ascii, uuid>>)");
 
         // fails JSON parsing
         assertInvalidMessage("Could not decode JSON string '\u038E\u0394\u03B4\u03E0'",
@@ -301,6 +302,28 @@ public class JsonTest extends CQLTester
 
         assertInvalidMessage("Invalid null value in map",
                 "INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{\"a\": null}");
+
+        // ================ tuples ================
+        execute("INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))", 0, "[1, \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
+        assertRows(execute("SELECT k, tupleval FROM %s WHERE k = ?", 0),
+            row(0, tuple(1, "foobar", UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")))
+        );
+
+        assertInvalidMessage("Invalid null element in tuple",
+                "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
+                0, "[1, null, \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
+
+        assertInvalidMessage("Tuple contains extra items",
+                "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
+                0, "[1, \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\", 1, 2, 3]");
+
+        assertInvalidMessage("Tuple is missing items",
+                "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
+                0, "[1, \"foobar\"]");
+
+        assertInvalidMessage("Expected an int value, but got a String",
+                "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
+                0, "[\"not an int\", \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
     }
 
     @Test
@@ -325,7 +348,8 @@ public class JsonTest extends CQLTester
                 "varintval varint, " +
                 "listval list<int>, " +
                 "setval set<uuid>, " +
-                "mapval map<ascii, int>)");
+                "mapval map<ascii, int>, " +
+                "tupleval frozen<tuple<int, ascii, uuid>>)");
 
         // ================ ascii ================
         execute("INSERT INTO %s (k, asciival) VALUES (?, ?)", 0, "ascii text");
@@ -405,109 +429,48 @@ public class JsonTest extends CQLTester
 
         // ================ timestamp ================
         execute("INSERT INTO %s (k, timestampval) VALUES (?, ?)", 0, new SimpleDateFormat("y-M-d").parse("2014-01-01"));
-        assertRows(execute("SELECT k, toJson(timestampval) FROM %s WHERE k = ?", 0), row(0, "\"2014-01-01\""));
+        assertRows(execute("SELECT k, toJson(timestampval) FROM %s WHERE k = ?", 0), row(0, "\"2014-01-01 00:00:00.000\""));
 
-        /*
         // ================ timeuuid ================
-        execute("INSERT INTO %s (k, timeuuidval) VALUES (?, fromJson(?))", 0, "\"6bddc89a-5644-11e4-97fc-56847afe9799\"");
-        assertRows(execute("SELECT k, timeuuidval FROM %s WHERE k = ?", 0), row(0, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")));
-
-        execute("INSERT INTO %s (k, timeuuidval) VALUES (?, fromJson(?))", 0, "\"6BDDC89A-5644-11E4-97FC-56847AFE9799\"");
-        assertRows(execute("SELECT k, timeuuidval FROM %s WHERE k = ?", 0), row(0, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")));
-
-        assertInvalidMessage("TimeUUID supports only version 1 UUIDs",
-                "INSERT INTO %s (k, timeuuidval) VALUES (?, fromJson(?))", 0, "\"00000000-0000-0000-0000-000000000000\"");
-
-        assertInvalidMessage("Expected a string representation of a timeuuid, but got a Long",
-                "INSERT INTO %s (k, timeuuidval) VALUES (?, fromJson(?))", 0, "123");
+        execute("INSERT INTO %s (k, timeuuidval) VALUES (?, ?)", 0, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"));
+        assertRows(execute("SELECT k, toJson(timeuuidval) FROM %s WHERE k = ?", 0), row(0, "\"6bddc89a-5644-11e4-97fc-56847afe9799\""));
 
          // ================ uuidval ================
-        execute("INSERT INTO %s (k, uuidval) VALUES (?, fromJson(?))", 0, "\"6bddc89a-5644-11e4-97fc-56847afe9799\"");
-        assertRows(execute("SELECT k, uuidval FROM %s WHERE k = ?", 0), row(0, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")));
-
-        execute("INSERT INTO %s (k, uuidval) VALUES (?, fromJson(?))", 0, "\"6BDDC89A-5644-11E4-97FC-56847AFE9799\"");
-        assertRows(execute("SELECT k, uuidval FROM %s WHERE k = ?", 0), row(0, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")));
-
-        assertInvalidMessage("Unable to make UUID from",
-                "INSERT INTO %s (k, uuidval) VALUES (?, fromJson(?))", 0, "\"00000000-0000-0000-zzzz-000000000000\"");
-
-        assertInvalidMessage("Expected a string representation of a uuid, but got a Long",
-                "INSERT INTO %s (k, uuidval) VALUES (?, fromJson(?))", 0, "123");
+        execute("INSERT INTO %s (k, uuidval) VALUES (?, ?)", 0, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"));
+        assertRows(execute("SELECT k, toJson(uuidval) FROM %s WHERE k = ?", 0), row(0, "\"6bddc89a-5644-11e4-97fc-56847afe9799\""));
 
         // ================ varint ================
-        execute("INSERT INTO %s (k, varintval) VALUES (?, fromJson(?))", 0, "123123123123");
-        assertRows(execute("SELECT k, varintval FROM %s WHERE k = ?", 0), row(0, new BigInteger("123123123123")));
-
-        // accept strings for numbers that cannot be represented as longs
-        execute("INSERT INTO %s (k, varintval) VALUES (?, fromJson(?))", 0, "\"1234567890123456789012345678901234567890\"");
-        assertRows(execute("SELECT k, varintval FROM %s WHERE k = ?", 0), row(0, new BigInteger("1234567890123456789012345678901234567890")));
-
-        assertInvalidMessage("Value '123123.123' is not a valid representation of a varint value",
-                "INSERT INTO %s (k, varintval) VALUES (?, fromJson(?))", 0, "123123.123");
-
-        assertInvalidMessage("Value 'xyzz' is not a valid representation of a varint value",
-                "INSERT INTO %s (k, varintval) VALUES (?, fromJson(?))", 0, "\"xyzz\"");
-
-        assertInvalidMessage("Value '' is not a valid representation of a varint value",
-                "INSERT INTO %s (k, varintval) VALUES (?, fromJson(?))", 0, "\"\"");
-
-        assertInvalidMessage("Value 'true' is not a valid representation of a varint value",
-                "INSERT INTO %s (k, varintval) VALUES (?, fromJson(?))", 0, "true");
+        execute("INSERT INTO %s (k, varintval) VALUES (?, ?)", 0, new BigInteger("123123123123123123123"));
+        assertRows(execute("SELECT k, toJson(varintval) FROM %s WHERE k = ?", 0), row(0, "\"123123123123123123123\""));
 
         // ================ lists ================
-        execute("INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "[1, 2, 3]");
-        assertRows(execute("SELECT k, listval FROM %s WHERE k = ?", 0), row(0, list(1, 2, 3)));
+        execute("INSERT INTO %s (k, listval) VALUES (?, ?)", 0, list(1, 2, 3));
+        assertRows(execute("SELECT k, toJson(listval) FROM %s WHERE k = ?", 0), row(0, "[1, 2, 3]"));
 
-        execute("INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "[]");
-        assertRows(execute("SELECT k, listval FROM %s WHERE k = ?", 0), row(0, null));
-
-        assertInvalidMessage("Expected a list, but got a Long",
-                "INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "123");
-
-        assertInvalidMessage("Expected an int value, but got a String",
-                "INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "[\"abc\"]");
-
-        assertInvalidMessage("Invalid null element in list",
-                "INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "[null]");
+        execute("INSERT INTO %s (k, listval) VALUES (?, ?)", 0, list());
+        assertRows(execute("SELECT k, toJson(listval) FROM %s WHERE k = ?", 0), row(0, "null"));
 
         // ================ sets ================
-        execute("INSERT INTO %s (k, setval) VALUES (?, fromJson(?))",
-                0, "[\"6bddc89a-5644-11e4-97fc-56847afe9798\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
-        assertRows(execute("SELECT k, setval FROM %s WHERE k = ?", 0),
-                row(0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))))
+        execute("INSERT INTO %s (k, setval) VALUES (?, ?)",
+                0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))));
+        assertRows(execute("SELECT k, toJson(setval) FROM %s WHERE k = ?", 0),
+                row(0, "[\"6bddc89a-5644-11e4-97fc-56847afe9798\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]")
         );
 
-        execute("INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "[]");
-        assertRows(execute("SELECT k, setval FROM %s WHERE k = ?", 0), row(0, null));
-
-        assertInvalidMessage("List representation of set contained duplicate elements",
-                "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))",
-                0, "[\"6bddc89a-5644-11e4-97fc-56847afe9799\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
-
-        assertInvalidMessage("Expected a list (representing a set), but got a Long",
-                "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "123");
-
-        assertInvalidMessage("Unable to make UUID from",
-                "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "[\"abc\"]");
-
-        assertInvalidMessage("Invalid null element in set",
-                "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "[null]");
+        execute("INSERT INTO %s (k, setval) VALUES (?, ?)", 0, set());
+        assertRows(execute("SELECT k, toJson(setval) FROM %s WHERE k = ?", 0), row(0, "null"));
 
         // ================ maps ================
-        execute("INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{\"a\": 1, \"b\": 2}");
-        assertRows(execute("SELECT k, mapval FROM %s WHERE k = ?", 0), row(0, map("a", 1, "b", 2)));
+        execute("INSERT INTO %s (k, mapval) VALUES (?, ?)", 0, map("a", 1, "b", 2));
+        assertRows(execute("SELECT k, toJson(mapval) FROM %s WHERE k = ?", 0), row(0, "{\"a\": 1, \"b\": 2}"));
 
-        execute("INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{}");
-        assertRows(execute("SELECT k, mapval FROM %s WHERE k = ?", 0), row(0, null));
+        execute("INSERT INTO %s (k, mapval) VALUES (?, ?)", 0, map());
+        assertRows(execute("SELECT k, toJson(mapval) FROM %s WHERE k = ?", 0), row(0, "null"));
 
-        assertInvalidMessage("Expected a map, but got a Long",
-                "INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "123");
-
-        assertInvalidMessage("Invalid ASCII character in string literal",
-                "INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{\"\\u1fff\\u2013\\u33B4\\u2014\": 1}");
-
-        assertInvalidMessage("Invalid null value in map",
-                "INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{\"a\": null}");
-        */
+        // ================ tuples ================
+        execute("INSERT INTO %s (k, tupleval) VALUES (?, ?)", 0, tuple(1, "foobar", UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")));
+        assertRows(execute("SELECT k, toJson(tupleval) FROM %s WHERE k = ?", 0),
+            row(0, "[1, \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]")
+        );
     }
 }

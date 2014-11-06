@@ -75,6 +75,12 @@ public class DateType extends AbstractType<Date>
     }
 
     @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        return '"' + TimestampSerializer.TO_JSON_FORMAT.format(TimestampSerializer.instance.deserialize(buffer)) + '"';
+    }
+
+    @Override
     public boolean isCompatibleWith(AbstractType<?> previous)
     {
         if (super.isCompatibleWith(previous))
