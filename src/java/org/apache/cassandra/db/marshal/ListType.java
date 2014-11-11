@@ -105,32 +105,17 @@ public class ListType<T> extends CollectionType<List<T>>
     }
 
     @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    public boolean isCompatibleWithFrozen(CollectionType<?> previous)
     {
-        if (isMultiCell())
-            return super.isMultiCellCompatibleWith(previous);
-
-        return this.isValueCompatibleWithInternal(previous) &&
-                this.elements.isCompatibleWith(((ListType) previous).getElementsType());
+        assert !isMultiCell;
+        return this.elements.isCompatibleWith(((ListType) previous).elements);
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    public boolean isValueCompatibleWithFrozen(CollectionType<?> previous)
     {
-        if (isMultiCell())
-            return super.isMultiCellValueCompatibleWithInternal(previous);
-
-        if (this == previous)
-            return true;
-
-        if (!(previous instanceof ListType))
-            return false;
-
-        if (previous.isMultiCell())
-            return false;
-
-        ListType tprev = (ListType) previous;
-        return this.elements.isValueCompatibleWithInternal(tprev.elements);
+        assert !isMultiCell;
+        return this.elements.isValueCompatibleWithInternal(((ListType) previous).elements);
     }
 
     @Override

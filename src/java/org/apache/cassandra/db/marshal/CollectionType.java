@@ -121,11 +121,9 @@ public abstract class CollectionType<T> extends AbstractType<T>
         return CollectionSerializer.pack(values, cells.size(), version);
     }
 
-    protected boolean isMultiCellCompatibleWith(AbstractType<?> previous)
+    @Override
+    public boolean isCompatibleWith(AbstractType<?> previous)
     {
-        // subclasses should handle compatibility checks for frozen collections
-        assert this.isMultiCell();
-
         if (this == previous)
             return true;
 
@@ -133,8 +131,12 @@ public abstract class CollectionType<T> extends AbstractType<T>
             return false;
 
         CollectionType tprev = (CollectionType) previous;
-        if (!tprev.isMultiCell())
+        if (this.isMultiCell() != tprev.isMultiCell())
             return false;
+
+        // subclasses should handle compatibility checks for frozen collections
+        if (!this.isMultiCell())
+            return isCompatibleWithFrozen(tprev);
 
         if (!this.nameComparator().isCompatibleWith(tprev.nameComparator()))
             return false;
@@ -143,13 +145,32 @@ public abstract class CollectionType<T> extends AbstractType<T>
         return this.valueComparator().isValueCompatibleWith(tprev.valueComparator());
     }
 
-    protected boolean isMultiCellValueCompatibleWithInternal(AbstractType<?> previous)
+    @Override
+    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
     {
-        // subclasses should handle compatibility checks for frozen collections
-        assert this.isMultiCell();
+        // for multi-cell collections, compatibility and value-compatibility are the same
+        if (this.isMultiCell())
+            return isCompatibleWith(previous);
 
-        return isCompatibleWith(previous);
+        if (this == previous)
+            return true;
+
+        if (!getClass().equals(previous.getClass()))
+            return false;
+
+        CollectionType tprev = (CollectionType) previous;
+        if (this.isMultiCell() != tprev.isMultiCell())
+            return false;
+
+        // subclasses should handle compatibility checks for frozen collections
+        return isValueCompatibleWithFrozen(tprev);
     }
+
+    /** A version of isCompatibleWith() to deal with non-multicell (frozen) collections */
+    protected abstract boolean isCompatibleWithFrozen(CollectionType<?> previous);
+
+    /** A version of isValueCompatibleWith() to deal with non-multicell (frozen) collections */
+    protected abstract boolean isValueCompatibleWithFrozen(CollectionType<?> previous);
 
     public CQL3Type asCQL3Type()
     {

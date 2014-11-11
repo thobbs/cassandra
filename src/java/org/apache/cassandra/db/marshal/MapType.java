@@ -106,33 +106,19 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     }
 
     @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    public boolean isCompatibleWithFrozen(CollectionType<?> previous)
     {
-        if (isMultiCell())
-            return super.isMultiCellCompatibleWith(previous);
-
-        return this.isValueCompatibleWithInternal(previous) &&
-               this.values.isCompatibleWith(((MapType) previous).getValuesType());
+        assert !isMultiCell;
+        MapType tprev = (MapType) previous;
+        return keys.isCompatibleWith(tprev.keys) && values.isCompatibleWith(tprev.values);
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    public boolean isValueCompatibleWithFrozen(CollectionType<?> previous)
     {
-        if (isMultiCell())
-            return super.isMultiCellValueCompatibleWithInternal(previous);
-
-        if (this == previous)
-            return true;
-
-        if (!(previous instanceof MapType))
-            return false;
-
-        if (previous.isMultiCell())
-            return false;
-
+        assert !isMultiCell;
         MapType tprev = (MapType) previous;
-        return this.keys.isCompatibleWith(tprev.keys) &&
-               this.values.isValueCompatibleWithInternal(tprev.values);
+        return keys.isCompatibleWith(tprev.keys) && values.isValueCompatibleWith(tprev.values);
     }
 
     @Override

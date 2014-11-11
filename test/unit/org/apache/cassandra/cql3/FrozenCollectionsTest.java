@@ -559,6 +559,14 @@ public class FrozenCollectionsTest extends CQLTester
 
         alterTable("ALTER TABLE %s DROP c");
         alterTable("ALTER TABLE %s ADD c frozen<set<int>>");
+        assertInvalidAlterWithMessage("ALTER TABLE %s ALTER c TYPE frozen<set<blob>>",
+                                      "types are incompatible");
+
+        alterTable("ALTER TABLE %s DROP c");
+        alterTable("ALTER TABLE %s ADD c frozen<map<int, int>>");
+        assertInvalidAlterWithMessage("ALTER TABLE %s ALTER c TYPE frozen<map<blob, int>>",
+                                      "types are incompatible");
+        alterTable("ALTER TABLE %s ALTER c TYPE frozen<map<int, blob>>");
     }
 
     private void assertInvalidIndexCreationWithMessage(String statement, String errorMessage) throws Throwable

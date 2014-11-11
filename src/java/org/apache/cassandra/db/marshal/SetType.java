@@ -95,31 +95,17 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
-    public boolean isCompatibleWith(AbstractType<?> previous)
+    public boolean isCompatibleWithFrozen(CollectionType<?> previous)
     {
-        if (isMultiCell())
-            return super.isMultiCellCompatibleWith(previous);
-
-        return this.isValueCompatibleWithInternal(previous);
+        assert !isMultiCell;
+        return this.elements.isCompatibleWith(((SetType) previous).elements);
     }
 
     @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> previous)
+    public boolean isValueCompatibleWithFrozen(CollectionType<?> previous)
     {
-        if (isMultiCell())
-            return super.isMultiCellValueCompatibleWithInternal(previous);
-
-        if (this == previous)
-            return true;
-
-        if (!(previous instanceof SetType))
-            return false;
-
-        if (previous.isMultiCell())
-            return false;
-
-        SetType tprev = (SetType) previous;
-        return this.elements.isCompatibleWith(tprev.elements);
+        // because sets are ordered, any changes to the type must maintain the ordering
+        return isCompatibleWithFrozen(previous);
     }
 
     @Override
