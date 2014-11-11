@@ -82,11 +82,11 @@ public abstract class Selection
         return columns.size() - 1;
     }
 
-    private static boolean isUsingFunction(List<RawSelector> rawSelectors)
+    private static boolean processesSelection(List<RawSelector> rawSelectors)
     {
         for (RawSelector rawSelector : rawSelectors)
         {
-            if (!(rawSelector.selectable instanceof ColumnIdentifier))
+            if (rawSelector.processesSelection())
                 return true;
         }
         return false;
@@ -100,8 +100,8 @@ public abstract class Selection
                 SelectorFactories.createFactoriesAndCollectColumnDefinitions(RawSelector.toSelectables(rawSelectors, cfm), cfm, defs);
         List<ColumnSpecification> metadata = collectMetadata(cfm, rawSelectors, factories);
 
-        return isUsingFunction(rawSelectors) ? new SelectionWithFunctions(defs, metadata, factories)
-                                             : new SimpleSelection(defs, metadata, false);
+        return processesSelection(rawSelectors) ? new SelectionWithFunctions(defs, metadata, factories)
+                                                : new SimpleSelection(defs, metadata, false);
     }
 
     private static List<ColumnSpecification> collectMetadata(CFMetaData cfm,
@@ -339,6 +339,14 @@ public abstract class Selection
 
             if (factories.doesAggregation() && !factories.containsOnlyAggregateFunctions())
                 throw new InvalidRequestException("the select clause must either contains only aggregates or none");
+        }
+
+        @Override
+        public int addColumnForOrdering(ColumnDefinition c)
+        {
+            int index = super.addColumnForOrdering(c);
+            factories.addSelectorForOrdering(c, index);
+            return index;
         }
 
         public boolean isAggregate()
