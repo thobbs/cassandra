@@ -19,7 +19,6 @@ package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 
 import org.apache.cassandra.cql3.*;
@@ -37,12 +36,12 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 public abstract class Selection
 {
-    private final Collection<CFDefinition.Name> columns;
+    private final List<CFDefinition.Name> columns;
     private final List<ColumnSpecification> metadata;
     private final boolean collectTimestamps;
     private final boolean collectTTLs;
 
-    protected Selection(Collection<CFDefinition.Name> columns, List<ColumnSpecification> metadata, boolean collectTimestamps, boolean collectTTLs)
+    protected Selection(List<CFDefinition.Name> columns, List<ColumnSpecification> metadata, boolean collectTimestamps, boolean collectTTLs)
     {
         this.columns = columns;
         this.metadata = metadata;
@@ -69,7 +68,7 @@ public abstract class Selection
         return new SimpleSelection(all, true);
     }
 
-    public static Selection forColumns(Collection<CFDefinition.Name> columns)
+    public static Selection forColumns(List<CFDefinition.Name> columns)
     {
         return new SimpleSelection(columns, false);
     }
@@ -231,7 +230,7 @@ public abstract class Selection
     /**
      * @return the list of CQL3 columns value this SelectionClause needs.
      */
-    public Collection<CFDefinition.Name> getColumns()
+    public List<CFDefinition.Name> getColumns()
     {
         return columns;
     }
@@ -322,12 +321,12 @@ public abstract class Selection
     {
         private final boolean isWildcard;
 
-        public SimpleSelection(Collection<CFDefinition.Name> columns, boolean isWildcard)
+        public SimpleSelection(List<CFDefinition.Name> columns, boolean isWildcard)
         {
             this(columns, new ArrayList<ColumnSpecification>(columns), isWildcard);
         }
 
-        public SimpleSelection(Collection<CFDefinition.Name> columns, List<ColumnSpecification> metadata, boolean isWildcard)
+        public SimpleSelection(List<CFDefinition.Name> columns, List<ColumnSpecification> metadata, boolean isWildcard)
         {
             /*
              * In theory, even a simple selection could have multiple time the same column, so we
@@ -466,7 +465,7 @@ public abstract class Selection
     {
         private final List<Selector> selectors;
 
-        public SelectionWithFunctions(Collection<CFDefinition.Name> columns, List<ColumnSpecification> metadata, List<Selector> selectors, boolean collectTimestamps, boolean collectTTLs)
+        public SelectionWithFunctions(List<CFDefinition.Name> columns, List<ColumnSpecification> metadata, List<Selector> selectors, boolean collectTimestamps, boolean collectTTLs)
         {
             super(columns, metadata, collectTimestamps, collectTTLs);
             this.selectors = selectors;
