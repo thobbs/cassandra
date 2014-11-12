@@ -73,11 +73,11 @@ public abstract class Selection
         return new SimpleSelection(columns, false);
     }
 
-    private static boolean isUsingFunction(List<RawSelector> rawSelectors)
+    private static boolean selectionsNeedProcessing(List<RawSelector> rawSelectors)
     {
         for (RawSelector rawSelector : rawSelectors)
         {
-            if (!(rawSelector.selectable instanceof ColumnIdentifier))
+            if (rawSelector.processesSelection())
                 return true;
         }
         return false;
@@ -173,9 +173,9 @@ public abstract class Selection
 
     public static Selection fromSelectors(CFDefinition cfDef, List<RawSelector> rawSelectors) throws InvalidRequestException
     {
-        boolean usesFunction = isUsingFunction(rawSelectors);
+        boolean needsProcessing = selectionsNeedProcessing(rawSelectors);
 
-        if (usesFunction)
+        if (needsProcessing)
         {
             List<CFDefinition.Name> names = new ArrayList<CFDefinition.Name>();
             List<ColumnSpecification> metadata = new ArrayList<ColumnSpecification>(rawSelectors.size());
