@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import com.google.common.base.Objects;
 
@@ -28,6 +29,7 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
@@ -121,6 +123,52 @@ public class UserType extends TupleType
         // We're allowed to get less fields than declared, but not more
         if (input.hasRemaining())
             throw new MarshalException("Invalid remaining data after end of UDT value");
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    {
+        if (!(parsed instanceof Map))
+            throw new MarshalException(String.format(
+                    "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        Map map = (Map) parsed;
+        List<ByteBuffer> buffers = new ArrayList<>(map.size() / 2);
+
+        for (int i = 0; i < types.size(); i++)
+        {
+            Object value = map.get(fieldNames.get(i))
+        }
+        for (Map.Entry<Object, Object> entry : map.entrySet())
+        {
+            if (entry.getKey() == null)
+                throw new MarshalException("Invalid null field name in user-defined type");
+
+            if (entry.getValue() == null)
+                throw new MarshalException("Invalid null value in map");
+
+            buffers.add(UTF8Type.instance.fromJSONObject(entry.getKey()));
+            buffers.add(values.fromJSONObject(entry.getValue()));
+        }
+        return CollectionSerializer.pack(buffers, map.size(), Server.CURRENT_VERSION);
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer)
+    {
+        // TODO we cannot assume the current protocol version here, since the collection gets serialized prior to function execution
+        StringBuilder sb = new StringBuilder("{");
+        int size = CollectionSerializer.readCollectionSize(buffer, Server.CURRENT_VERSION);
+        for (int i = 0; i < size; i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+            sb.append(": ");
+            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+        }
+        return sb.append("}").toString();
     }
 
     @Override
