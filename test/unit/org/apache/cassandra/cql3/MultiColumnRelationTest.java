@@ -259,7 +259,7 @@ public class MultiColumnRelationTest
             results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a=0 AND (b, c, d) = (1, 1, 1)");
             assertEquals(1, results.size());
             checkRow(0, results, 0, 1, 1, 1);
-            execute("DELETE FROM %s.multiple_clustering WHERE" + tableSuffix + " a=0 AND b=2 and c=0 and d=0");
+            execute("DELETE FROM %s.multiple_clustering" + tableSuffix + " WHERE a=0 AND b=2 and c=0 and d=0");
         }
     }
 
