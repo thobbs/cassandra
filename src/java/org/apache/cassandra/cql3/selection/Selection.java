@@ -100,7 +100,7 @@ public abstract class Selection
                 SelectorFactories.createFactoriesAndCollectColumnDefinitions(RawSelector.toSelectables(rawSelectors, cfm), cfm, defs);
         List<ColumnSpecification> metadata = collectMetadata(cfm, rawSelectors, factories);
 
-        return processesSelection(rawSelectors) ? new SelectionWithFunctions(defs, metadata, factories)
+        return processesSelection(rawSelectors) ? new SelectionWithProcessing(defs, metadata, factories)
                                                 : new SimpleSelection(defs, metadata, false);
     }
 
@@ -326,13 +326,13 @@ public abstract class Selection
         }
     }
 
-    private static class SelectionWithFunctions extends Selection
+    private static class SelectionWithProcessing extends Selection
     {
         private final SelectorFactories factories;
 
-        public SelectionWithFunctions(Collection<ColumnDefinition> columns,
-                                      List<ColumnSpecification> metadata,
-                                      SelectorFactories factories) throws InvalidRequestException
+        public SelectionWithProcessing(Collection<ColumnDefinition> columns,
+                                       List<ColumnSpecification> metadata,
+                                       SelectorFactories factories) throws InvalidRequestException
         {
             super(columns, metadata, factories.containsWritetimeSelectorFactory(), factories.containsTTLSelectorFactory());
             this.factories = factories;
