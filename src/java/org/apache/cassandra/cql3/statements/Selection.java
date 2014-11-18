@@ -200,10 +200,11 @@ public abstract class Selection
             List<ColumnSpecification> metadata = new ArrayList<ColumnSpecification>(rawSelectors.size());
             for (RawSelector rawSelector : rawSelectors)
             {
-                assert rawSelector.selectable instanceof ColumnIdentifier;
-                CFDefinition.Name name = cfDef.get((ColumnIdentifier)rawSelector.selectable);
+                assert rawSelector.selectable instanceof ColumnIdentifier.Raw;
+                ColumnIdentifier id = ((ColumnIdentifier.Raw)rawSelector.selectable).prepare(cfDef.cfm);
+                CFDefinition.Name name = cfDef.get(id);
                 if (name == null)
-                    throw new InvalidRequestException(String.format("Undefined name %s in selection clause", rawSelector.selectable));
+                    throw new InvalidRequestException(String.format("Undefined name %s in selection clause", id));
                 names.add(name);
                 metadata.add(rawSelector.alias == null ? name : makeAliasSpec(cfDef, name.type, rawSelector.alias));
             }
