@@ -192,7 +192,7 @@ public abstract class Selection
                     collectTTLs |= !((WritetimeOrTTLSelector)selector).isWritetime;
                 }
             }
-            return new SelectionWithFunctions(names, metadata, selectors, collectTimestamps, collectTTLs);
+            return new SelectionWithProcessing(names, metadata, selectors, collectTimestamps, collectTTLs);
         }
         else
         {
@@ -349,6 +349,27 @@ public abstract class Selection
         }
     }
 
+    private static class SelectionWithProcessing extends Selection
+    {
+        private final List<Selector> selectors;
+
+        public SelectionWithProcessing(List<CFDefinition.Name> columns, List<ColumnSpecification> metadata, List<Selector> selectors, boolean collectTimestamps, boolean collectTTLs)
+        {
+            super(columns, metadata, collectTimestamps, collectTTLs);
+            this.selectors = selectors;
+        }
+
+        protected List<ByteBuffer> handleRow(ResultSetBuilder rs) throws InvalidRequestException
+        {
+            List<ByteBuffer> result = new ArrayList<ByteBuffer>();
+            for (Selector selector : selectors)
+            {
+                result.add(selector.compute(rs));
+            }
+            return result;
+        }
+    }
+
     private interface Selector extends AssignementTestable
     {
         public ByteBuffer compute(ResultSetBuilder rs) throws InvalidRequestException;
@@ -458,27 +479,6 @@ public abstract class Selection
         public String toString()
         {
             return columnName;
-        }
-    }
-
-    private static class SelectionWithFunctions extends Selection
-    {
-        private final List<Selector> selectors;
-
-        public SelectionWithFunctions(List<CFDefinition.Name> columns, List<ColumnSpecification> metadata, List<Selector> selectors, boolean collectTimestamps, boolean collectTTLs)
-        {
-            super(columns, metadata, collectTimestamps, collectTTLs);
-            this.selectors = selectors;
-        }
-
-        protected List<ByteBuffer> handleRow(ResultSetBuilder rs) throws InvalidRequestException
-        {
-            List<ByteBuffer> result = new ArrayList<ByteBuffer>();
-            for (Selector selector : selectors)
-            {
-                result.add(selector.compute(rs));
-            }
-            return result;
         }
     }
 }
