@@ -94,9 +94,14 @@ public abstract class Functions
         }
         else if (name.equalsIgnoreCase(FromJsonFct.NAME))
         {
-            // TODO need to check for this being used incorrectly earlier, otherwise this will get hit
-            assert receiverType != null : "fromJson should not be called without a known receiver type";
+            // TODO better location for these checks?
+            if (receiverType == null)
+                throw new InvalidRequestException("The fromJson() function cannot be used in a SELECT clause");
             return FromJsonFct.getInstance(receiverType);
+        }
+        else if (name.equalsIgnoreCase(ToJsonFct.NAME))
+        {
+            throw new InvalidRequestException("The toJson() function can only be used on columns in a SELECT clause");
         }
 
         List<Function> candidates = declared.get(name);

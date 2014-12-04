@@ -124,6 +124,8 @@ public class FunctionCall extends Term.NonTerminal
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
             Function fun = Functions.get(keyspace, functionName, terms, receiver.ksName, receiver.cfName, receiver.type);
+            if (fun == null)
+                throw new InvalidRequestException(String.format("Unknown function %s", functionName));
 
             List<Term> parameters = new ArrayList<Term>(terms.size());
             boolean allTerminal = true;
