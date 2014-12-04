@@ -265,7 +265,12 @@ public class TupleType extends AbstractType<ByteBuffer>
         {
             if (i > 0)
                 sb.append(", ");
-            sb.append(types.get(i).toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+
+            ByteBuffer value = CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION);
+            if (value == null)
+                sb.append("null");
+            else
+                sb.append(types.get(i).toJSONString(value));
         }
         return sb.append("]").toString();
     }

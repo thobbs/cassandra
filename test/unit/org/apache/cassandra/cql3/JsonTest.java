@@ -37,6 +37,7 @@ public class JsonTest extends CQLTester
     @Test
     public void testFromJsonFct() throws Throwable
     {
+        String typeName = createType("CREATE TYPE %s (a int, b uuid, c set<text>)");
         createTable("CREATE TABLE %s (" +
                 "k int PRIMARY KEY, " +
                 "asciival ascii, " +
@@ -57,7 +58,8 @@ public class JsonTest extends CQLTester
                 "listval list<int>, " +
                 "setval set<uuid>, " +
                 "mapval map<ascii, int>," +
-                "tupleval frozen<tuple<int, ascii, uuid>>)");
+                "tupleval frozen<tuple<int, ascii, uuid>>," +
+                "udtval frozen<" + typeName + ">)");
 
         // fails JSON parsing
         assertInvalidMessage("Could not decode JSON string '\u038E\u0394\u03B4\u03E0'",
@@ -324,11 +326,40 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Expected an int value, but got a String",
                 "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
                 0, "[\"not an int\", \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
+
+        // ================ UDTs ================
+        execute("INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"a\": 1, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"c\": [\"foo\", \"bar\"]}");
+        assertRows(execute("SELECT k, udtval.a, udtval.b, udtval.c FROM %s WHERE k = ?", 0),
+                row(0, 1, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"), set("bar", "foo"))
+        );
+
+        // order of fields shouldn't matter
+        execute("INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"a\": 1, \"c\": [\"foo\", \"bar\"]}");
+        assertRows(execute("SELECT k, udtval.a, udtval.b, udtval.c FROM %s WHERE k = ?", 0),
+                row(0, 1, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"), set("bar", "foo"))
+        );
+
+        // test nulls
+        execute("INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"a\": null, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"c\": [\"foo\", \"bar\"]}");
+        assertRows(execute("SELECT k, udtval.a, udtval.b, udtval.c FROM %s WHERE k = ?", 0),
+                row(0, null, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"), set("bar", "foo"))
+        );
+
+        // test missing fields
+        execute("INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"a\": 1, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\"}");
+        assertRows(execute("SELECT k, udtval.a, udtval.b, udtval.c FROM %s WHERE k = ?", 0),
+                row(0, 1, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"), null)
+        );
+
+        assertInvalidMessage("Unknown field", "INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"xxx\": 1}");
+        assertInvalidMessage("Expected an int value, but got a String",
+                "INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"a\": \"foobar\"}");
     }
 
     @Test
     public void testToJsonFct() throws Throwable
     {
+        String typeName = createType("CREATE TYPE %s (a int, b uuid, c set<text>)");
         createTable("CREATE TABLE %s (" +
                 "k int PRIMARY KEY, " +
                 "asciival ascii, " +
@@ -349,7 +380,8 @@ public class JsonTest extends CQLTester
                 "listval list<int>, " +
                 "setval set<uuid>, " +
                 "mapval map<ascii, int>, " +
-                "tupleval frozen<tuple<int, ascii, uuid>>)");
+                "tupleval frozen<tuple<int, ascii, uuid>>," +
+                "udtval frozen<" + typeName + ">)");
 
         // ================ ascii ================
         execute("INSERT INTO %s (k, asciival) VALUES (?, ?)", 0, "ascii text");
@@ -471,6 +503,22 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, tupleval) VALUES (?, ?)", 0, tuple(1, "foobar", UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")));
         assertRows(execute("SELECT k, toJson(tupleval) FROM %s WHERE k = ?", 0),
             row(0, "[1, \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]")
+        );
+
+        execute("INSERT INTO %s (k, tupleval) VALUES (?, ?)", 0, tuple(1, "foobar", null));
+        assertRows(execute("SELECT k, toJson(tupleval) FROM %s WHERE k = ?", 0),
+                row(0, "[1, \"foobar\", null]")
+        );
+
+        // ================ UDTs ================
+        execute("INSERT INTO %s (k, udtval) VALUES (?, {a: ?, b: ?, c: ?})", 0, 1, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"), set("foo", "bar"));
+        assertRows(execute("SELECT k, toJson(udtval) FROM %s WHERE k = ?", 0),
+                row(0, "{\"a\": 1, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"c\": [\"foo\", \"bar\"]}")
+        );
+
+        execute("INSERT INTO %s (k, udtval) VALUES (?, {a: ?, b: ?})", 0, 1, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"));
+        assertRows(execute("SELECT k, toJson(udtval) FROM %s WHERE k = ?", 0),
+                row(0, "{\"a\": 1, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"c\": null}")
         );
     }
 }

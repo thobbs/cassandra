@@ -18,15 +18,15 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.util.*;
 
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
 import org.apache.cassandra.transport.Server;
@@ -43,6 +43,7 @@ public class UserType extends TupleType
     public final String keyspace;
     public final ByteBuffer name;
     private final List<ByteBuffer> fieldNames;
+    private final List<String> stringFieldNames;
 
     public UserType(String keyspace, ByteBuffer name, List<ByteBuffer> fieldNames, List<AbstractType<?>> fieldTypes)
     {
@@ -51,6 +52,18 @@ public class UserType extends TupleType
         this.keyspace = keyspace;
         this.name = name;
         this.fieldNames = fieldNames;
+        this.stringFieldNames = new ArrayList<>(fieldNames.size());
+        for (ByteBuffer fieldName : fieldNames)
+        {
+            try
+            {
+                stringFieldNames.add(ByteBufferUtil.string(fieldName, Charset.forName("UTF-8")));
+            }
+            catch (CharacterCodingException ex)
+            {
+                throw new AssertionError("Got non-UTF8 field name for user-defined type: " + ByteBufferUtil.bytesToHex(fieldName), ex);
+            }
+        }
     }
 
     public static UserType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
@@ -133,40 +146,66 @@ public class UserType extends TupleType
                     "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
         Map map = (Map) parsed;
-        List<ByteBuffer> buffers = new ArrayList<>(map.size() / 2);
+        List<ByteBuffer> buffers = new ArrayList<>(map.size());
 
+        Set keys = map.keySet();
+        assert keys.isEmpty() || keys.iterator().next() instanceof String;
+
+        int foundValues = 0;
         for (int i = 0; i < types.size(); i++)
         {
-            Object value = map.get(fieldNames.get(i))
+            Object value = map.get(stringFieldNames.get(i));
+            if (value == null)
+            {
+                buffers.add(null);
+            }
+            else
+            {
+                buffers.add(types.get(i).fromJSONObject(value));
+                foundValues += 1;
+            }
         }
-        for (Map.Entry<Object, Object> entry : map.entrySet())
+
+        // check for extra, unrecognized fields
+        if (foundValues != map.size())
         {
-            if (entry.getKey() == null)
-                throw new MarshalException("Invalid null field name in user-defined type");
-
-            if (entry.getValue() == null)
-                throw new MarshalException("Invalid null value in map");
-
-            buffers.add(UTF8Type.instance.fromJSONObject(entry.getKey()));
-            buffers.add(values.fromJSONObject(entry.getValue()));
+            for (Object fieldName : keys)
+            {
+                if (!stringFieldNames.contains((String) fieldName))
+                    throw new MarshalException(String.format(
+                            "Unknown field '%s' in value of user defined type %s", fieldName, getNameAsString()));
+            }
         }
-        return CollectionSerializer.pack(buffers, map.size(), Server.CURRENT_VERSION);
+
+        int size = 0;
+        for (ByteBuffer bb : buffers)
+            size += CollectionSerializer.sizeOfValue(bb, Server.CURRENT_VERSION);
+
+        ByteBuffer result = ByteBuffer.allocate(size);
+        for (ByteBuffer bb : buffers)
+            CollectionSerializer.writeValue(result, bb, Server.CURRENT_VERSION);
+        return (ByteBuffer)result.flip();
     }
 
     @Override
     public String toJSONString(ByteBuffer buffer)
     {
         // TODO we cannot assume the current protocol version here, since the collection gets serialized prior to function execution
+        ByteBuffer[] buffers = split(buffer);
         StringBuilder sb = new StringBuilder("{");
-        int size = CollectionSerializer.readCollectionSize(buffer, Server.CURRENT_VERSION);
-        for (int i = 0; i < size; i++)
+        for (int i = 0; i < types.size(); i++)
         {
             if (i > 0)
                 sb.append(", ");
 
-            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+            sb.append(UTF8Type.instance.toJSONString(fieldName(i)));
             sb.append(": ");
-            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+
+            ByteBuffer valueBuffer = buffers[i];
+            if (valueBuffer == null)
+                sb.append("null");
+            else
+                sb.append(types.get(i).toJSONString(valueBuffer));
         }
         return sb.append("}").toString();
     }
