@@ -77,7 +77,7 @@ public class CounterColumnType extends AbstractType<Long>
     @Override
     public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        throw new UnsupportedOperationException();
+        return CounterSerializer.instance.deserialize(buffer).toString();
     }
 
     public CQL3Type asCQL3Type()
