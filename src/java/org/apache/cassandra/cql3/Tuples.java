@@ -110,21 +110,21 @@ public class Tuples
 
                 Term.Raw value = elements.get(i);
                 ColumnSpecification spec = componentSpecOf(receiver, i);
-                if (!value.testAssignment(keyspace, spec).isAssignable())
+                if (!value.isAssignableTo(keyspace, spec))
                     throw new InvalidRequestException(String.format("Invalid tuple literal for %s: component %d is not of type %s", receiver.name, i, spec.type.asCQL3Type()));
             }
         }
 
-        public TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
             try
             {
                 validateAssignableTo(keyspace, receiver);
-                return TestResult.WEAKLY_ASSIGNABLE;
+                return true;
             }
             catch (InvalidRequestException e)
             {
-                return TestResult.NOT_ASSIGNABLE;
+                return false;
             }
         }
 

@@ -17,13 +17,12 @@
  */
 package org.apache.cassandra.cql3.functions;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.collect.ArrayListMultimap;
 
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.AssignmentTestable;
+import org.apache.cassandra.cql3.AssignementTestable;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.CQL3Type;
@@ -77,7 +76,7 @@ public abstract class Functions
                 fun.argTypes().get(i));
     }
 
-    public static Function get(String keyspace, String name, List<? extends AssignmentTestable> providedArgs,
+    public static Function get(String keyspace, String name, List<? extends AssignementTestable> providedArgs,
                                String receiverKs, String receiverCf)
             throws InvalidRequestException
     {
@@ -86,7 +85,7 @@ public abstract class Functions
 
     public static Function get(String keyspace,
                                String name,
-                               List<? extends AssignmentTestable> providedArgs,
+                               List<? extends AssignementTestable> providedArgs,
                                String receiverKs,
                                String receiverCf,
                                AbstractType receiverType)
@@ -115,39 +114,51 @@ public abstract class Functions
             return fun;
         }
 
-        List<Function> compatibles = null;
+        Function candidate = null;
         for (Function toTest : candidates)
         {
-            AssignmentTestable.TestResult r = matchAguments(keyspace, toTest, providedArgs, receiverKs, receiverCf);
-            switch (r)
-            {
-                case EXACT_MATCH:
-                    // We always favor exact matches
-                    return toTest;
-                case WEAKLY_ASSIGNABLE:
-                    if (compatibles == null)
-                        compatibles = new ArrayList<>();
-                    compatibles.add(toTest);
-                    break;
-            }
+            if (!isValidType(keyspace, toTest, providedArgs, receiverKs, receiverCf, receiverType))
+                continue;
+            if (candidate == null)
+                candidate = toTest;
+            else
+                throw new InvalidRequestException(String.format("Ambiguous call to function %s (can match both type signature %s and %s): use type casts to disambiguate", name, signature(candidate), signature(toTest)));
         }
+        if (candidate == null)
+            throw new InvalidRequestException(String.format("Invalid call to function %s, none of its type signature matches (known type signatures: %s)", name, signatures(candidates)));
+        return candidate;
+    }
 
-        if (compatibles == null || compatibles.isEmpty())
-            throw new InvalidRequestException(String.format("Invalid call to function %s, none of its type signatures match (known type signatures: %s)",
-                    name, toString(candidates)));
 
-        if (compatibles.size() > 1)
-            throw new InvalidRequestException(String.format("Ambiguous call to function %s (can be matched by following signatures: %s): use type casts to disambiguate",
-                    name, toString(compatibles)));
+    private static boolean isValidType(String keyspace, Function fun, List<? extends AssignementTestable> providedArgs, String receiverKs, String receiverCf, AbstractType<?> receiverType) throws InvalidRequestException
+    {
+        if (!receiverType.isValueCompatibleWith(fun.returnType()))
+            return false;
 
-        return compatibles.get(0);
+        if (providedArgs.size() != fun.argTypes().size())
+            return false;
+
+        for (int i = 0; i < providedArgs.size(); i++)
+        {
+            AssignementTestable provided = providedArgs.get(i);
+
+            // If the concrete argument is a bind variables, it can have any type.
+            // We'll validate the actually provided value at execution time.
+            if (provided == null)
+                continue;
+
+            ColumnSpecification expected = makeArgSpec(receiverKs, receiverCf, fun, i);
+            if (!provided.isAssignableTo(keyspace, expected))
+                return false;
+        }
+        return true;
     }
 
     // This method and matchArguments are somewhat duplicate, but this method allows us to provide more precise errors in the common
     // case where there is no override for a given function. This is thus probably worth the minor code duplication.
     private static void validateTypes(String keyspace,
                                       Function fun,
-                                      List<? extends AssignmentTestable> providedArgs,
+                                      List<? extends AssignementTestable> providedArgs,
                                       String receiverKs,
                                       String receiverCf)
             throws InvalidRequestException
@@ -157,7 +168,7 @@ public abstract class Functions
 
         for (int i = 0; i < providedArgs.size(); i++)
         {
-            AssignmentTestable provided = providedArgs.get(i);
+            AssignementTestable provided = providedArgs.get(i);
 
             // If the concrete argument is a bind variables, it can have any type.
             // We'll validate the actually provided value at execution time.
@@ -165,48 +176,34 @@ public abstract class Functions
                 continue;
 
             ColumnSpecification expected = makeArgSpec(receiverKs, receiverCf, fun, i);
-            if (!provided.testAssignment(keyspace, expected).isAssignable())
+            if (!provided.isAssignableTo(keyspace, expected))
                 throw new InvalidRequestException(String.format("Type error: %s cannot be passed as argument %d of function %s of type %s", provided, i, fun.name(), expected.type.asCQL3Type()));
         }
     }
 
-    private static AssignmentTestable.TestResult matchAguments(String keyspace,
-                                                               Function fun,
-                                                               List<? extends AssignmentTestable> providedArgs,
-                                                               String receiverKs,
-                                                               String receiverCf)
+    private static String signature(Function fun)
     {
-        if (providedArgs.size() != fun.argTypes().size())
-            return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
-
-        // It's an exact match if all are exact match, but is not assignable as soon as any is non assignable.
-        AssignmentTestable.TestResult res = AssignmentTestable.TestResult.EXACT_MATCH;
-        for (int i = 0; i < providedArgs.size(); i++)
-        {
-            AssignmentTestable provided = providedArgs.get(i);
-            if (provided == null)
-            {
-                res = AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-                continue;
-            }
-
-            ColumnSpecification expected = makeArgSpec(receiverKs, receiverCf, fun, i);
-            AssignmentTestable.TestResult argRes = provided.testAssignment(keyspace, expected);
-            if (argRes == AssignmentTestable.TestResult.NOT_ASSIGNABLE)
-                return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
-            if (argRes == AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE)
-                res = AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-        }
-        return res;
-    }
-
-    private static String toString(List<Function> funs)
-    {
+        List<AbstractType<?>> args = fun.argTypes();
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < funs.size(); i++)
+        sb.append("(");
+        for (int i = 0; i < args.size(); i++)
         {
             if (i > 0) sb.append(", ");
-            sb.append(funs.get(i));
+            sb.append(args.get(i).asCQL3Type());
+        }
+        sb.append(") -> ");
+        sb.append(fun.returnType().asCQL3Type());
+        return sb.toString();
+    }
+
+    private static String signatures(List<Function> functions)
+    {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < functions.size(); i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+            sb.append(signature(functions.get(i)));
         }
         return sb.toString();
     }

@@ -154,25 +154,21 @@ public class FunctionCall extends Term.NonTerminal
             return executeInternal(fun, buffers);
         }
 
-        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
-            // Note: Functions.get() will return null if the function doesn't exist, or throw is no function matching
-            // the arguments can be found. We may get one of those if an undefined/wrong function is used as argument
-            // of another, existing, function. In that case, we return true here because we'll throw a proper exception
-            // later with a more helpful error message that if we were to return false here.
             try
             {
-                Function fun = Functions.get(keyspace, functionName, terms, receiver.ksName, receiver.cfName);
-                if (fun != null && receiver.type.equals(fun.returnType()))
-                    return AssignmentTestable.TestResult.EXACT_MATCH;
-                else if (fun == null || receiver.type.isValueCompatibleWith(fun.returnType()))
-                    return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-                else
-                    return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+                Function function = Functions.get(keyspace, functionName, terms, receiver.ksName, receiver.cfName, receiver.type);
+                AbstractType<?> returnType = function.returnType();
+                return receiver.type.isValueCompatibleWith(returnType);
             }
             catch (InvalidRequestException e)
             {
-                return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+                // The function doesn't exist. We may get this if an undefined function
+                // is used as argument of another, existing, function. In that case, we return true here because we'll catch
+                // the fact that the method is undefined latter anyway and with a more helpful error message that if we were
+                // to return false here.
+                return true;
             }
         }
 
