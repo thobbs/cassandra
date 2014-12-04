@@ -36,7 +36,6 @@ public abstract class Functions
     private static final String TOKEN_FUNCTION_NAME = "token";
 
     // If we ever allow this to be populated at runtime, this will need to be thread safe.
-    // private static final ArrayListMultimap<String, Function.Factory> declared = ArrayListMultimap.create();
     private static final ArrayListMultimap<String, Function> declared = ArrayListMultimap.create();
 
     static
@@ -70,10 +69,8 @@ public abstract class Functions
 
     public static ColumnSpecification makeArgSpec(String receiverKs, String receiverCf, Function fun, int i)
     {
-        return new ColumnSpecification(receiverKs,
-                receiverCf,
-                new ColumnIdentifier("arg" + i +  "(" + fun.name().toLowerCase() + ")", true),
-                fun.argTypes().get(i));
+        ColumnIdentifier id = new ColumnIdentifier("arg" + i +  "(" + fun.name().toLowerCase() + ")", true);
+        return new ColumnSpecification(receiverKs, receiverCf, id, fun.argTypes().get(i));
     }
 
     public static Function get(String keyspace, String name, List<? extends AssignementTestable> providedArgs,
@@ -154,8 +151,6 @@ public abstract class Functions
         return true;
     }
 
-    // This method and matchArguments are somewhat duplicate, but this method allows us to provide more precise errors in the common
-    // case where there is no override for a given function. This is thus probably worth the minor code duplication.
     private static void validateTypes(String keyspace,
                                       Function fun,
                                       List<? extends AssignementTestable> providedArgs,

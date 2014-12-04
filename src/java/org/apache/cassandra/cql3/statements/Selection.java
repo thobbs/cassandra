@@ -161,7 +161,6 @@ public abstract class Selection
             for (Selectable rawArg : withFun.args)
                 args.add(makeSelector(cfm, new RawSelector(rawArg, null), defs, null));
 
-            // TODO need special check for toJson
             Function fun;
             if (withFun.functionName.equals(ToJsonFct.NAME))
             {

@@ -68,5 +68,5 @@ public abstract class AbstractFunction implements Function
                 return fun;
             }
         };
-    };
+    }
 }
