@@ -15,14 +15,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db;
+package org.apache.cassandra.cql3;
 
-import org.apache.cassandra.thrift.InvalidRequestException;
+import org.junit.Test;
 
-public class ColumnFamilyNotDefinedException extends InvalidRequestException
+public class TimestampTest extends CQLTester
 {
-    public ColumnFamilyNotDefinedException(String message)
+    @Test
+    public void testNegativeTimestamps() throws Throwable
     {
-        super(message);
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+
+        execute("INSERT INTO %s (k, v) VALUES (?, ?) USING TIMESTAMP ?", 1, 1, -42L);
+        assertRows(execute("SELECT writetime(v) FROM %s WHERE k = ?", 1),
+            row(-42L)
+        );
+
+        assertInvalid("INSERT INTO %s (k, v) VALUES (?, ?) USING TIMESTAMP ?", 2, 2, Long.MIN_VALUE);
     }
 }

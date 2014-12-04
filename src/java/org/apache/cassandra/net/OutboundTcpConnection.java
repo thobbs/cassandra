@@ -48,6 +48,7 @@ import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.UUIDGen;
 import org.xerial.snappy.SnappyOutputStream;
 
@@ -64,7 +65,7 @@ public class OutboundTcpConnection extends Thread
     private volatile boolean isStopped = false;
 
     private static final int OPEN_RETRY_DELAY = 100; // ms between retries
-    private static final int WAIT_FOR_VERSION_MAX_TIME = 5000;
+    public static final int WAIT_FOR_VERSION_MAX_TIME = 5000;
     private static final int NO_VERSION = Integer.MIN_VALUE;
 
     static final int LZ4_HASH_SEED = 0x9747b28c;
@@ -168,6 +169,7 @@ public class OutboundTcpConnection extends Thread
                 }
                 catch (Exception e)
                 {
+                    JVMStabilityInspector.inspectThrowable(e);
                     // really shouldn't get here, as exception handling in writeConnected() is reasonably robust
                     // but we want to catch anything bad we don't drop the messages in the current batch
                     logger.error("error processing a message intended for {}", poolReference.endPoint(), e);

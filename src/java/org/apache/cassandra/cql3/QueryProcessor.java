@@ -18,28 +18,40 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
 import com.googlecode.concurrentlinkedhashmap.EntryWeigher;
 import com.googlecode.concurrentlinkedhashmap.EvictionListener;
-import org.antlr.runtime.*;
-import org.github.jamm.MemoryMeter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ScheduledExecutors;
+import org.antlr.runtime.*;
 import org.apache.cassandra.cql3.statements.*;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.composites.*;
+import org.apache.cassandra.db.composites.CType;
+import org.apache.cassandra.db.composites.CellName;
+import org.apache.cassandra.db.composites.CellNameType;
+import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.metrics.CQLMetrics;
-import org.apache.cassandra.service.*;
+import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.IMigrationListener;
+import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.service.pager.QueryPagers;
 import org.apache.cassandra.thrift.ThriftClientState;
@@ -48,6 +60,7 @@ import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.SemanticVersion;
+import org.github.jamm.MemoryMeter;
 
 public class QueryProcessor implements QueryHandler
 {
@@ -56,7 +69,7 @@ public class QueryProcessor implements QueryHandler
     public static final QueryProcessor instance = new QueryProcessor();
 
     private static final Logger logger = LoggerFactory.getLogger(QueryProcessor.class);
-    private static final MemoryMeter meter = new MemoryMeter().withGuessing(MemoryMeter.Guess.FALLBACK_BEST);
+    private static final MemoryMeter meter = new MemoryMeter().withGuessing(MemoryMeter.Guess.FALLBACK_BEST).ignoreKnownSingletons();
     private static final long MAX_CACHE_PREPARED_MEMORY = Runtime.getRuntime().maxMemory() / 256;
 
     private static EntryWeigher<MD5Digest, ParsedStatement.Prepared> cqlMemoryUsageWeigher = new EntryWeigher<MD5Digest, ParsedStatement.Prepared>()
@@ -84,11 +97,11 @@ public class QueryProcessor implements QueryHandler
     // bother with expiration on those.
     private static final ConcurrentMap<String, ParsedStatement.Prepared> internalStatements = new ConcurrentHashMap<>();
 
-    @VisibleForTesting
+    // Direct calls to processStatement do not increment the preparedStatementsExecuted/regularStatementsExecuted
+    // counters. Callers of processStatement are responsible for correctly notifying metrics
     public static final CQLMetrics metrics = new CQLMetrics();
 
     private static final AtomicInteger lastMinuteEvictionsCount = new AtomicInteger(0);
-    private static final ScheduledExecutorService evictionCheckTimer = Executors.newScheduledThreadPool(1);
 
     static
     {
@@ -117,7 +130,7 @@ public class QueryProcessor implements QueryHandler
                                    })
                                    .build();
 
-        evictionCheckTimer.scheduleAtFixedRate(new Runnable()
+        ScheduledExecutors.scheduledTasks.scheduleAtFixedRate(new Runnable()
         {
             public void run()
             {
@@ -214,9 +227,7 @@ public class QueryProcessor implements QueryHandler
                                                             Cell.MAX_NAME_LENGTH));
     }
 
-    private static ResultMessage processStatement(CQLStatement statement,
-                                                  QueryState queryState,
-                                                  QueryOptions options)
+    public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
@@ -544,9 +555,7 @@ public class QueryProcessor implements QueryHandler
 
     private static long measure(Object key)
     {
-        return key instanceof MeasurableForPreparedCache
-             ? ((MeasurableForPreparedCache)key).measureForPreparedCache(meter)
-             : meter.measureDeep(key);
+        return meter.measureDeep(key);
     }
 
     private static class MigrationSubscriber implements IMigrationListener

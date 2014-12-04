@@ -178,6 +178,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             }
             catch (Exception e)
             {
+                JVMStabilityInspector.inspectThrowable(e);
                 logger.error("Gossip error", e);
             }
             finally
@@ -384,7 +385,29 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
      */
     private void quarantineEndpoint(InetAddress endpoint)
     {
-        justRemovedEndpoints.put(endpoint, System.currentTimeMillis());
+        quarantineEndpoint(endpoint, System.currentTimeMillis());
+    }
+
+    /**
+     * Quarantines the endpoint until quarantineExpiration + QUARANTINE_DELAY
+     *
+     * @param endpoint
+     * @param quarantineExpiration
+     */
+    private void quarantineEndpoint(InetAddress endpoint, long quarantineExpiration)
+    {
+        justRemovedEndpoints.put(endpoint, quarantineExpiration);
+    }
+
+    /**
+     * Quarantine endpoint specifically for replacement purposes.
+     * @param endpoint
+     */
+    public void replacementQuarantine(InetAddress endpoint)
+    {
+        // remember, quarantineEndpoint will effectively already add QUARANTINE_DELAY, so this is 2x
+        logger.debug("");
+        quarantineEndpoint(endpoint, System.currentTimeMillis() + QUARANTINE_DELAY);
     }
 
     /**
@@ -397,6 +420,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     {
         removeEndpoint(endpoint);
         evictFromMembership(endpoint);
+        replacementQuarantine(endpoint);
     }
 
     /**
@@ -987,7 +1011,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 if (logger.isTraceEnabled())
                     logger.trace(ep + "local generation " + localGeneration + ", remote generation " + remoteGeneration);
 
-                if (remoteGeneration > localGeneration + MAX_GENERATION_DIFFERENCE)
+                if (localGeneration != 0 && remoteGeneration > localGeneration + MAX_GENERATION_DIFFERENCE)
                 {
                     // assume some peer has corrupted memory and is broadcasting an unbelievable generation about another peer (or itself)
                     logger.warn("received an invalid gossip generation for peer {}; local generation = {}, received generation = {}", ep, localGeneration, remoteGeneration);

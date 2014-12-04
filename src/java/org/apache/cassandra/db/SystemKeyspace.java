@@ -114,17 +114,18 @@ public class SystemKeyspace
         migrateIndexInterval();
         migrateCachingOption();
         // add entries to system schema columnfamilies for the hardcoded system definitions
-        for (String ksname : Schema.systemKeyspaceNames)
-        {
-            KSMetaData ksmd = Schema.instance.getKSMetaData(ksname);
+        KSMetaData ksmd = Schema.instance.getKSMetaData(Keyspace.SYSTEM_KS);
 
-            // delete old, possibly obsolete entries in schema columnfamilies
-            for (String cfname : Arrays.asList(SystemKeyspace.SCHEMA_KEYSPACES_CF, SystemKeyspace.SCHEMA_COLUMNFAMILIES_CF, SystemKeyspace.SCHEMA_COLUMNS_CF))
-                executeOnceInternal(String.format("DELETE FROM system.%s WHERE keyspace_name = ?", cfname), ksmd.name);
+        // delete old, possibly obsolete entries in schema columnfamilies
+        for (String cfname : Arrays.asList(SystemKeyspace.SCHEMA_KEYSPACES_CF,
+                                           SystemKeyspace.SCHEMA_COLUMNFAMILIES_CF,
+                                           SystemKeyspace.SCHEMA_COLUMNS_CF,
+                                           SystemKeyspace.SCHEMA_TRIGGERS_CF,
+                                           SystemKeyspace.SCHEMA_USER_TYPES_CF))
+            executeOnceInternal(String.format("DELETE FROM system.%s WHERE keyspace_name = ?", cfname), ksmd.name);
 
-            // (+1 to timestamp to make sure we don't get shadowed by the tombstones we just added)
-            ksmd.toSchema(FBUtilities.timestampMicros() + 1).apply();
-        }
+        // (+1 to timestamp to make sure we don't get shadowed by the tombstones we just added)
+        ksmd.toSchema(FBUtilities.timestampMicros() + 1).apply();
     }
 
     private static void setupVersion()
@@ -508,13 +509,19 @@ public class SystemKeyspace
         return hostIdMap;
     }
 
+    /**
+     * Get preferred IP for given endpoint if it is known. Otherwise this returns given endpoint itself.
+     *
+     * @param ep endpoint address to check
+     * @return Preferred IP for given endpoint if present, otherwise returns given ep
+     */
     public static InetAddress getPreferredIP(InetAddress ep)
     {
         String req = "SELECT preferred_ip FROM system.%s WHERE peer=?";
         UntypedResultSet result = executeInternal(String.format(req, PEERS_CF), ep);
         if (!result.isEmpty() && result.one().has("preferred_ip"))
             return result.one().getInetAddress("preferred_ip");
-        return null;
+        return ep;
     }
 
     /**

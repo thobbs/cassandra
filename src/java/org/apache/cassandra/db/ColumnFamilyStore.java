@@ -33,15 +33,13 @@ import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
-import org.apache.cassandra.io.FSWriteError;
+
 import org.json.simple.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.*;
-import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
-import org.apache.cassandra.concurrent.NamedThreadFactory;
-import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.*;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.config.CFMetaData.SpeculativeRetry;
 import org.apache.cassandra.db.commitlog.CommitLog;
@@ -61,6 +59,7 @@ import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.compress.CompressionParameters;
 import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -86,18 +85,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                                                                           new LinkedBlockingQueue<Runnable>(),
                                                                                           new NamedThreadFactory("MemtableFlushWriter"),
                                                                                           "internal");
+
     // post-flush executor is single threaded to provide guarantee that any flush Future on a CF will never return until prior flushes have completed
-    public static final ExecutorService postFlushExecutor = new JMXEnabledThreadPoolExecutor(1,
-                                                                                             StageManager.KEEPALIVE,
-                                                                                             TimeUnit.SECONDS,
-                                                                                             new LinkedBlockingQueue<Runnable>(),
-                                                                                             new NamedThreadFactory("MemtablePostFlush"),
-                                                                                             "internal");
-    public static final ExecutorService reclaimExecutor = new JMXEnabledThreadPoolExecutor(1, StageManager.KEEPALIVE,
-                                                                                           TimeUnit.SECONDS,
-                                                                                           new LinkedBlockingQueue<Runnable>(),
-                                                                                           new NamedThreadFactory("MemtableReclaimMemory"),
-                                                                                           "internal");
+    private static final ExecutorService postFlushExecutor = new JMXEnabledThreadPoolExecutor(1,
+                                                                                              StageManager.KEEPALIVE,
+                                                                                              TimeUnit.SECONDS,
+                                                                                              new LinkedBlockingQueue<Runnable>(),
+                                                                                              new NamedThreadFactory("MemtablePostFlush"),
+                                                                                              "internal");
+
+    private static final ExecutorService reclaimExecutor = new JMXEnabledThreadPoolExecutor(1,
+                                                                                            StageManager.KEEPALIVE,
+                                                                                            TimeUnit.SECONDS,
+                                                                                            new LinkedBlockingQueue<Runnable>(),
+                                                                                            new NamedThreadFactory("MemtableReclaimMemory"),
+                                                                                            "internal");
 
     public final Keyspace keyspace;
     public final String name;
@@ -127,12 +129,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     /* These are locally held copies to be changed from the config during runtime */
     private volatile DefaultInteger minCompactionThreshold;
     private volatile DefaultInteger maxCompactionThreshold;
-    private volatile AbstractCompactionStrategy compactionStrategy;
+    private final WrappingCompactionStrategy compactionStrategyWrapper;
 
     public final Directories directories;
 
     public final ColumnFamilyMetrics metric;
     public volatile long sampleLatencyNanos;
+    private final ScheduledFuture<?> latencyCalculator;
+
+    public static void shutdownPostFlushExecutor() throws InterruptedException
+    {
+        postFlushExecutor.shutdown();
+        postFlushExecutor.awaitTermination(60, TimeUnit.SECONDS);
+    }
 
     public void reload()
     {
@@ -146,7 +155,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             for (ColumnFamilyStore cfs : concatWithIndexes())
                 cfs.maxCompactionThreshold = new DefaultInteger(metadata.getMaxCompactionThreshold());
 
-        maybeReloadCompactionStrategy();
+        compactionStrategyWrapper.maybeReloadCompactionStrategy(metadata);
 
         scheduleFlush();
 
@@ -156,22 +165,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         // because the old one still aliases the previous comparator.
         if (data.getView().getCurrentMemtable().initialComparator != metadata.comparator)
             switchMemtable();
-    }
-
-    private void maybeReloadCompactionStrategy()
-    {
-        // Check if there is a need for reloading
-        if (metadata.compactionStrategyClass.equals(compactionStrategy.getClass()) && metadata.compactionStrategyOptions.equals(compactionStrategy.options))
-            return;
-
-        // synchronize vs runWithCompactionsDisabled calling pause/resume.  otherwise, letting old compactions
-        // finish should be harmless and possibly useful.
-        synchronized (this)
-        {
-            compactionStrategy.shutdown();
-            compactionStrategy = metadata.createCompactionStrategyInstance(this);
-            compactionStrategy.startup();
-        }
     }
 
     void scheduleFlush()
@@ -204,7 +197,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     }
                 }
             };
-            StorageService.scheduledTasks.schedule(runnable, period, TimeUnit.MILLISECONDS);
+            ScheduledExecutors.scheduledTasks.schedule(runnable, period, TimeUnit.MILLISECONDS);
         }
     }
 
@@ -213,7 +206,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         try
         {
             metadata.compactionStrategyClass = CFMetaData.createCompactionStrategy(compactionStrategyClass);
-            maybeReloadCompactionStrategy();
+            compactionStrategyWrapper.maybeReloadCompactionStrategy(metadata);
         }
         catch (ConfigurationException e)
         {
@@ -297,13 +290,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             CacheService.instance.keyCache.loadSaved(this);
 
         // compaction strategy should be created after the CFS has been prepared
-        this.compactionStrategy = metadata.createCompactionStrategyInstance(this);
-        this.compactionStrategy.startup();
+        this.compactionStrategyWrapper = new WrappingCompactionStrategy(this);
 
         if (maxCompactionThreshold.value() <= 0 || minCompactionThreshold.value() <=0)
         {
             logger.warn("Disabling compaction strategy by setting compaction thresholds to 0 is deprecated, set the compaction option 'enabled' to 'false' instead.");
-            this.compactionStrategy.disable();
+            this.compactionStrategyWrapper.disable();
         }
 
         // create the private ColumnFamilyStores for the secondary column indexes
@@ -327,7 +319,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             throw new RuntimeException(e);
         }
         logger.debug("retryPolicy for {} is {}", name, this.metadata.getSpeculativeRetry());
-        StorageService.optionalTasks.scheduleWithFixedDelay(new Runnable()
+        latencyCalculator = ScheduledExecutors.optionalTasks.scheduleWithFixedDelay(new Runnable()
         {
             public void run()
             {
@@ -362,12 +354,13 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         }
         catch (Exception e)
         {
+            JVMStabilityInspector.inspectThrowable(e);
             // this shouldn't block anything.
             logger.warn("Failed unregistering mbean: {}", mbeanName, e);
         }
 
-        compactionStrategy.shutdown();
-
+        latencyCalculator.cancel(false);
+        compactionStrategyWrapper.shutdown();
         SystemKeyspace.removeTruncationRecord(metadata.cfId);
         data.unreferenceSSTables();
         indexManager.invalidate();
@@ -1139,9 +1132,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         long start = System.nanoTime();
 
         Memtable mt = data.getMemtableFor(opGroup);
-        mt.put(key, columnFamily, indexer, opGroup, replayPosition);
+        final long timeDelta = mt.put(key, columnFamily, indexer, opGroup, replayPosition);
         maybeUpdateRowCache(key);
         metric.writeLatency.addNano(System.nanoTime() - start);
+        if(timeDelta < Long.MAX_VALUE)
+            metric.colUpdateTimeDeltaHistogram.update(timeDelta);
     }
 
     /**
@@ -1367,7 +1362,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     void replaceFlushed(Memtable memtable, SSTableReader sstable)
     {
-        compactionStrategy.replaceFlushed(memtable, sstable);
+        compactionStrategyWrapper.replaceFlushed(memtable, sstable);
     }
 
     public boolean isValid()
@@ -1807,7 +1802,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         {
             public List<SSTableReader> apply(DataTracker.View view)
             {
-                return compactionStrategy.filterSSTablesForReads(view.intervalTree.search(key));
+                return compactionStrategyWrapper.filterSSTablesForReads(view.intervalTree.search(key));
             }
         };
     }
@@ -1822,7 +1817,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         {
             public List<SSTableReader> apply(DataTracker.View view)
             {
-                return compactionStrategy.filterSSTablesForReads(view.sstablesInBounds(rowBounds));
+                return compactionStrategyWrapper.filterSSTablesForReads(view.sstablesInBounds(rowBounds));
             }
         };
     }
@@ -2246,11 +2241,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return directories.getSnapshotDetails();
     }
 
-    public boolean hasUnreclaimedSpace()
-    {
-        return getLiveDiskSpaceUsed() < getTotalDiskSpaceUsed();
-    }
-
     public long getTotalDiskSpaceUsed()
     {
         return metric.totalDiskSpaceUsed.count();
@@ -2571,6 +2561,21 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return metric.bloomFilterDiskSpaceUsed.value();
     }
 
+    public long getBloomFilterOffHeapMemoryUsed()
+    {
+        return metric.bloomFilterOffHeapMemoryUsed.value();
+    }
+
+    public long getIndexSummaryOffHeapMemoryUsed()
+    {
+        return metric.indexSummaryOffHeapMemoryUsed.value();
+    }
+
+    public long getCompressionMetadataOffHeapMemoryUsed()
+    {
+        return metric.compressionMetadataOffHeapMemoryUsed.value();
+    }
+
     @Override
     public String toString()
     {
@@ -2584,7 +2589,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         // we don't use CompactionStrategy.pause since we don't want users flipping that on and off
         // during runWithCompactionsDisabled
-        this.compactionStrategy.disable();
+        this.compactionStrategyWrapper.disable();
     }
 
     public void enableAutoCompaction()
@@ -2599,7 +2604,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     @VisibleForTesting
     public void enableAutoCompaction(boolean waitForFutures)
     {
-        this.compactionStrategy.enable();
+        this.compactionStrategyWrapper.enable();
         List<Future<?>> futures = CompactionManager.instance.submitBackground(this);
         if (waitForFutures)
             FBUtilities.waitOnFutures(futures);
@@ -2607,7 +2612,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public boolean isAutoCompactionDisabled()
     {
-        return !this.compactionStrategy.isEnabled();
+        return !this.compactionStrategyWrapper.isEnabled();
     }
 
     /*
@@ -2621,8 +2626,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public AbstractCompactionStrategy getCompactionStrategy()
     {
-        assert compactionStrategy != null : "No compaction strategy set yet";
-        return compactionStrategy;
+        return compactionStrategyWrapper;
     }
 
     public void setCompactionThresholds(int minThreshold, int maxThreshold)
@@ -2631,10 +2635,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         minCompactionThreshold.set(minThreshold);
         maxCompactionThreshold.set(maxThreshold);
-
-        // this is called as part of CompactionStrategy constructor; avoid circular dependency by checking for null
-        if (compactionStrategy != null)
-            CompactionManager.instance.submitBackground(this);
+        CompactionManager.instance.submitBackground(this);
     }
 
     public int getMinimumCompactionThreshold()
@@ -2722,16 +2723,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public int getUnleveledSSTables()
     {
-        return this.compactionStrategy instanceof LeveledCompactionStrategy
-               ? ((LeveledCompactionStrategy) this.compactionStrategy).getLevelSize(0)
-               : 0;
+        return this.compactionStrategyWrapper.getUnleveledSSTables();
     }
 
     public int[] getSSTableCountPerLevel()
     {
-        return compactionStrategy instanceof LeveledCompactionStrategy
-               ? ((LeveledCompactionStrategy) compactionStrategy).getAllLevelSize()
-               : null;
+        return compactionStrategyWrapper.getSSTableCountPerLevel();
     }
 
     public static class ViewFragment

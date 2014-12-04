@@ -21,29 +21,13 @@ import java.io.DataInput;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.SortedSet;
-import java.util.TreeSet;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
-import com.google.common.collect.AbstractIterator;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.MapDifference;
-import com.google.common.collect.Maps;
+import com.google.common.collect.*;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -56,42 +40,12 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.CFStatement;
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
-import org.apache.cassandra.db.AbstractCell;
-import org.apache.cassandra.db.AtomDeserializer;
-import org.apache.cassandra.db.CFRowAdder;
-import org.apache.cassandra.db.ColumnFamily;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.ColumnFamilyType;
-import org.apache.cassandra.db.ColumnSerializer;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.OnDiskAtom;
-import org.apache.cassandra.db.RangeTombstone;
-import org.apache.cassandra.db.Row;
-import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
-import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
-import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
-import org.apache.cassandra.db.composites.CType;
-import org.apache.cassandra.db.composites.CellName;
-import org.apache.cassandra.db.composites.CellNameType;
-import org.apache.cassandra.db.composites.CellNames;
-import org.apache.cassandra.db.composites.Composite;
-import org.apache.cassandra.db.composites.CompoundCType;
-import org.apache.cassandra.db.composites.SimpleCType;
+import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.compaction.*;
+import org.apache.cassandra.db.composites.*;
 import org.apache.cassandra.db.index.SecondaryIndex;
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.db.marshal.CounterColumnType;
-import org.apache.cassandra.db.marshal.LongType;
-import org.apache.cassandra.db.marshal.TypeParser;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.io.compress.CompressionParameters;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -103,6 +57,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
+import org.github.jamm.Unmetered;
 
 import static org.apache.cassandra.utils.FBUtilities.fromJsonList;
 import static org.apache.cassandra.utils.FBUtilities.fromJsonMap;
@@ -111,6 +66,7 @@ import static org.apache.cassandra.utils.FBUtilities.json;
 /**
  * This class can be tricky to modify. Please read http://wiki.apache.org/cassandra/ConfigurationNotes for how to do so safely.
  */
+@Unmetered
 public final class CFMetaData
 {
     private static final Logger logger = LoggerFactory.getLogger(CFMetaData.class);
@@ -268,7 +224,7 @@ public final class CFMetaData
                                                              + "started_at timestamp,"
                                                              + "parameters map<text, text>,"
                                                              + "duration int"
-                                                             + ") WITH COMMENT='traced sessions'",
+                                                             + ") WITH COMMENT='traced sessions' AND default_time_to_live=86400",
                                                              Tracing.TRACE_KS);
 
     public static final CFMetaData TraceEventsCf = compile("CREATE TABLE " + Tracing.EVENTS_CF + " ("
@@ -279,7 +235,7 @@ public final class CFMetaData
                                                            + "activity text,"
                                                            + "source_elapsed int,"
                                                            + "PRIMARY KEY (session_id, event_id)"
-                                                           + ")",
+                                                           + ") WITH default_time_to_live=86400",
                                                            Tracing.TRACE_KS);
 
     public static final CFMetaData BatchlogCf = compile("CREATE TABLE " + SystemKeyspace.BATCHLOG_CF + " ("
@@ -1296,6 +1252,8 @@ public final class CFMetaData
     {
         className = className.contains(".") ? className : "org.apache.cassandra.db.compaction." + className;
         Class<AbstractCompactionStrategy> strategyClass = FBUtilities.classForName(className, "compaction strategy");
+        if (className.equals(WrappingCompactionStrategy.class.getName()))
+            throw new ConfigurationException("You can't set WrappingCompactionStrategy as the compaction strategy!");
         if (!AbstractCompactionStrategy.class.isAssignableFrom(strategyClass))
             throw new ConfigurationException(String.format("Specified compaction strategy class (%s) is not derived from AbstractReplicationStrategy", className));
 
@@ -1306,10 +1264,8 @@ public final class CFMetaData
     {
         try
         {
-            Constructor<? extends AbstractCompactionStrategy> constructor = compactionStrategyClass.getConstructor(new Class[] {
-                ColumnFamilyStore.class,
-                Map.class // options
-            });
+            Constructor<? extends AbstractCompactionStrategy> constructor =
+                compactionStrategyClass.getConstructor(ColumnFamilyStore.class, Map.class);
             return constructor.newInstance(cfs, compactionStrategyOptions);
         }
         catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException | InstantiationException e)
@@ -1540,7 +1496,7 @@ public final class CFMetaData
 
                 if (c.getIndexType() == IndexType.CUSTOM)
                 {
-                    if (c.getIndexOptions() == null || !c.getIndexOptions().containsKey(SecondaryIndex.CUSTOM_INDEX_OPTION_NAME))
+                    if (c.getIndexOptions() == null || !c.hasIndexOption(SecondaryIndex.CUSTOM_INDEX_OPTION_NAME))
                         throw new ConfigurationException("Required index option missing: " + SecondaryIndex.CUSTOM_INDEX_OPTION_NAME);
                 }
 

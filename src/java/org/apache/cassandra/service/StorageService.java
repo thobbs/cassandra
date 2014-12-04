@@ -54,7 +54,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.cassandra.auth.Auth;
-import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
@@ -82,6 +82,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ResponseVerbHandler;
 import org.apache.cassandra.repair.RepairFuture;
 import org.apache.cassandra.repair.RepairMessageVerbHandler;
+import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
 import org.apache.cassandra.service.paxos.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.ProposeVerbHandler;
@@ -119,24 +120,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
             return 30 * 1000;
-    }
-
-    /**
-     * This pool is used for periodic short (sub-second) tasks.
-     */
-     public static final DebuggableScheduledThreadPoolExecutor scheduledTasks = new DebuggableScheduledThreadPoolExecutor("ScheduledTasks");
-
-    /**
-     * This pool is used by tasks that can have longer execution times, and usually are non periodic.
-     */
-    public static final DebuggableScheduledThreadPoolExecutor tasks = new DebuggableScheduledThreadPoolExecutor("NonPeriodicTasks");
-    /**
-     * tasks that do not need to be waited for on shutdown/drain
-     */
-    public static final DebuggableScheduledThreadPoolExecutor optionalTasks = new DebuggableScheduledThreadPoolExecutor("OptionalTasks");
-    static
-    {
-        tasks.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
     }
 
     /* This abstraction maintains the token/endpoint metadata information */
@@ -303,6 +286,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             Gossiper.instance.start((int) (System.currentTimeMillis() / 1000));
             initialized = true;
         }
+    }
+
+    // should only be called via JMX
+    public boolean isGossipRunning()
+    {
+        return Gossiper.instance.isEnabled();
     }
 
     // should only be called via JMX
@@ -591,7 +580,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
                 if (daemon != null)
                 	shutdownClientServers();
-                optionalTasks.shutdown();
+                ScheduledExecutors.optionalTasks.shutdown();
                 Gossiper.instance.stop();
 
                 // In-progress writes originating here could generate hints to be written, so shut down MessagingService
@@ -627,8 +616,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 CommitLog.instance.shutdownBlocking();
 
                 // wait for miscellaneous tasks like sstable and commitlog segment deletion
-                tasks.shutdown();
-                if (!tasks.awaitTermination(1, TimeUnit.MINUTES))
+                ScheduledExecutors.nonPeriodicTasks.shutdown();
+                if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
                     logger.warn("Miscellaneous task executor still busy after one minute; proceeding with shutdown");
             }
         }, "StorageServiceShutdownHook");
@@ -1650,7 +1639,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         tokenMetadata.updateNormalTokens(tokensToUpdateInMetadata, endpoint);
         for (InetAddress ep : endpointsToRemove)
+        {
             removeEndpoint(ep);
+            if (DatabaseDescriptor.isReplacing() && DatabaseDescriptor.getReplaceAddress().equals(ep))
+                Gossiper.instance.replacementQuarantine(ep); // quarantine locally longer than normally; see CASSANDRA-8260
+        }
         if (!tokensToUpdateInSystemKeyspace.isEmpty())
             SystemKeyspace.updateTokens(endpoint, tokensToUpdateInSystemKeyspace);
         if (!localTokensToRemove.isEmpty())
@@ -1664,6 +1657,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
                     subscriber.onMove(endpoint);
+            }
+        }
+        else
+        {
+            if (!isClientMode)
+            {
+                for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
+                    subscriber.onJoinCluster(endpoint);
             }
         }
 
@@ -1939,10 +1940,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : rangesToFetch.get(keyspaceName))
             {
                 InetAddress source = entry.getKey();
+                InetAddress preferred = SystemKeyspace.getPreferredIP(source);
                 Collection<Range<Token>> ranges = entry.getValue();
                 if (logger.isDebugEnabled())
                     logger.debug("Requesting from {} ranges {}", source, StringUtils.join(ranges, ", "));
-                stream.requestRanges(source, keyspaceName, ranges);
+                stream.requestRanges(source, preferred, keyspaceName, ranges);
             }
         }
         StreamResultFuture future = stream.execute();
@@ -2028,11 +2030,6 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             HintedHandOffManager.instance.scheduleHintDelivery(endpoint, true);
             for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
                 subscriber.onUp(endpoint);
-        }
-        else
-        {
-            for (IEndpointLifecycleSubscriber subscriber : lifecycleSubscribers)
-                subscriber.onJoinCluster(endpoint);
         }
     }
 
@@ -2499,6 +2496,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int forceRepairAsync(String keyspace, boolean isSequential, Collection<String> dataCenters, Collection<String> hosts, boolean primaryRange, boolean fullRepair, String... columnFamilies) throws IOException
     {
+        return forceRepairAsync(keyspace, isSequential ? RepairParallelism.SEQUENTIAL : RepairParallelism.PARALLEL, dataCenters, hosts, primaryRange, fullRepair, columnFamilies);
+    }
+
+    public int forceRepairAsync(String keyspace, RepairParallelism parallelismDegree, Collection<String> dataCenters, Collection<String> hosts, boolean primaryRange, boolean fullRepair, String... columnFamilies)
+    {
         Collection<Range<Token>> ranges;
         if (primaryRange)
         {
@@ -2516,10 +2518,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
              ranges = getLocalRanges(keyspace);
         }
 
-        return forceRepairAsync(keyspace, isSequential, dataCenters, hosts, ranges, fullRepair, columnFamilies);
+        return forceRepairAsync(keyspace, parallelismDegree, dataCenters, hosts, ranges, fullRepair, columnFamilies);
     }
 
     public int forceRepairAsync(String keyspace, boolean isSequential, Collection<String> dataCenters, Collection<String> hosts, Collection<Range<Token>> ranges, boolean fullRepair, String... columnFamilies)
+    {
+        return forceRepairAsync(keyspace, isSequential ? RepairParallelism.SEQUENTIAL : RepairParallelism.PARALLEL, dataCenters, hosts, ranges, fullRepair, columnFamilies);
+    }
+
+    public int forceRepairAsync(String keyspace, RepairParallelism parallelismDegree, Collection<String> dataCenters, Collection<String> hosts, Collection<Range<Token>> ranges, boolean fullRepair, String... columnFamilies)
     {
         if (ranges.isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
             return 0;
@@ -2527,12 +2534,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         int cmd = nextRepairCommand.incrementAndGet();
         if (ranges.size() > 0)
         {
-            if (!FBUtilities.isUnix() && isSequential)
+            if (!FBUtilities.isUnix() && parallelismDegree != RepairParallelism.PARALLEL)
             {
                 logger.warn("Snapshot-based repair is not yet supported on Windows.  Reverting to parallel repair.");
-                isSequential = false;
+                parallelismDegree = RepairParallelism.PARALLEL;
             }
-            new Thread(createRepairTask(cmd, keyspace, ranges, isSequential, dataCenters, hosts, fullRepair, columnFamilies)).start();
+            new Thread(createRepairTask(cmd, keyspace, ranges, parallelismDegree, dataCenters, hosts, fullRepair, columnFamilies)).start();
         }
         return cmd;
     }
@@ -2554,26 +2561,36 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int forceRepairAsync(String keyspace, boolean isSequential, boolean isLocal, Collection<Range<Token>> ranges, boolean fullRepair, String... columnFamilies)
     {
+        return forceRepairAsync(keyspace, isSequential ? RepairParallelism.SEQUENTIAL : RepairParallelism.PARALLEL, isLocal, ranges, fullRepair, columnFamilies);
+    }
+
+    public int forceRepairAsync(String keyspace, RepairParallelism parallelismDegree, boolean isLocal, Collection<Range<Token>> ranges, boolean fullRepair, String... columnFamilies)
+    {
         if (ranges.isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor() < 2)
             return 0;
 
         int cmd = nextRepairCommand.incrementAndGet();
-        if (!FBUtilities.isUnix() && isSequential)
+        if (!FBUtilities.isUnix() && parallelismDegree != RepairParallelism.PARALLEL)
         {
             logger.warn("Snapshot-based repair is not yet supported on Windows.  Reverting to parallel repair.");
-            isSequential = false;
+            parallelismDegree = RepairParallelism.PARALLEL;
         }
-        new Thread(createRepairTask(cmd, keyspace, ranges, isSequential, isLocal, fullRepair, columnFamilies)).start();
+        new Thread(createRepairTask(cmd, keyspace, ranges, parallelismDegree, isLocal, fullRepair, columnFamilies)).start();
         return cmd;
     }
 
     public int forceRepairRangeAsync(String beginToken, String endToken, String keyspaceName, boolean isSequential, Collection<String> dataCenters, Collection<String> hosts, boolean fullRepair, String... columnFamilies) throws IOException
     {
+        return forceRepairRangeAsync(beginToken, endToken, keyspaceName, isSequential ? RepairParallelism.SEQUENTIAL : RepairParallelism.PARALLEL, dataCenters, hosts, fullRepair, columnFamilies);
+    }
+
+    public int forceRepairRangeAsync(String beginToken, String endToken, String keyspaceName, RepairParallelism parallelismDegree, Collection<String> dataCenters, Collection<String> hosts, boolean fullRepair, String... columnFamilies)
+    {
         Collection<Range<Token>> repairingRange = createRepairRangeFrom(beginToken, endToken);
 
         logger.info("starting user-requested repair of range {} for keyspace {} and column families {}",
                            repairingRange, keyspaceName, columnFamilies);
-        return forceRepairAsync(keyspaceName, isSequential, dataCenters, hosts, repairingRange, fullRepair, columnFamilies);
+        return forceRepairAsync(keyspaceName, parallelismDegree, dataCenters, hosts, repairingRange, fullRepair, columnFamilies);
     }
 
     public int forceRepairRangeAsync(String beginToken, String endToken, String keyspaceName, boolean isSequential, boolean isLocal, boolean fullRepair, String... columnFamilies)
@@ -2627,7 +2644,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private FutureTask<Object> createRepairTask(int cmd,
                                                 String keyspace,
                                                 Collection<Range<Token>> ranges,
-                                                boolean isSequential,
+                                                RepairParallelism parallelismDegree,
                                                 boolean isLocal,
                                                 boolean fullRepair,
                                                 String... columnFamilies)
@@ -2637,13 +2654,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             dataCenters = Sets.newHashSet(DatabaseDescriptor.getLocalDataCenter());
         }
-        return createRepairTask(cmd, keyspace, ranges, isSequential, dataCenters, null, fullRepair, columnFamilies);
+        return createRepairTask(cmd, keyspace, ranges, parallelismDegree, dataCenters, null, fullRepair, columnFamilies);
     }
 
     private FutureTask<Object> createRepairTask(final int cmd,
                                                 final String keyspace,
                                                 final Collection<Range<Token>> ranges,
-                                                final boolean isSequential,
+                                                final RepairParallelism parallelismDegree,
                                                 final Collection<String> dataCenters,
                                                 final Collection<String> hosts,
                                                 final boolean fullRepair,
@@ -2658,11 +2675,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             protected void runMayThrow() throws Exception
             {
-                String message = String.format("Starting repair command #%d, repairing %d ranges for keyspace %s (seq=%b, full=%b)", cmd, ranges.size(), keyspace, isSequential, fullRepair);
+                String message = String.format("Starting repair command #%d, repairing %d ranges for keyspace %s (parallelism=%s, full=%b)", cmd, ranges.size(), keyspace, parallelismDegree, fullRepair);
                 logger.info(message);
                 sendNotification("repair", message, new int[]{cmd, ActiveRepairService.Status.STARTED.ordinal()});
 
-                if (isSequential && !fullRepair)
+                if (parallelismDegree != RepairParallelism.PARALLEL && !fullRepair)
                 {
                     message = "It is not possible to mix sequential repair and incremental repairs.";
                     logger.error(message);
@@ -2722,7 +2739,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 }
                 for (Range<Token> range : ranges)
                 {
-                    RepairFuture future = ActiveRepairService.instance.submitRepairSession(parentSession, range, keyspace, isSequential, rangeToNeighbors.get(range), cfnames);
+                    RepairFuture future = ActiveRepairService.instance.submitRepairSession(parentSession, range, keyspace, parallelismDegree, rangeToNeighbors.get(range), cfnames);
                     if (future == null)
                         continue;
                     futures.add(future);
@@ -3062,8 +3079,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (logger.isDebugEnabled())
             logger.debug("DECOMMISSIONING");
         startLeaving();
-        setMode(Mode.LEAVING, "sleeping " + RING_DELAY + " ms for pending range setup", true);
-        Thread.sleep(RING_DELAY);
+        long timeout = Math.max(RING_DELAY, BatchlogManager.instance.getBatchlogTimeout());
+        setMode(Mode.LEAVING, "sleeping " + timeout + " ms for batch processing and pending range setup", true);
+        Thread.sleep(timeout);
 
         Runnable finishLeaving = new Runnable()
         {
@@ -3106,13 +3124,29 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             rangesToStream.put(keyspaceName, rangesMM);
         }
 
-        setMode(Mode.LEAVING, "streaming data to other nodes", true);
+        setMode(Mode.LEAVING, "replaying batch log and streaming data to other nodes", true);
 
+        // Start with BatchLog replay, which may create hints but no writes since this is no longer a valid endpoint.
+        Future<?> batchlogReplay = BatchlogManager.instance.startBatchlogReplay();
         Future<StreamState> streamSuccess = streamRanges(rangesToStream);
+
+        // Wait for batch log to complete before streaming hints.
+        logger.debug("waiting for batch log processing.");
+        try
+        {
+            batchlogReplay.get();
+        }
+        catch (ExecutionException | InterruptedException e)
+        {
+            throw new RuntimeException(e);
+        }
+
+        setMode(Mode.LEAVING, "streaming hints to other nodes", true);
+
         Future<StreamState> hintsSuccess = streamHints();
 
         // wait for the transfer runnables to signal the latch.
-        logger.debug("waiting for stream aks.");
+        logger.debug("waiting for stream acks.");
         try
         {
             streamSuccess.get();
@@ -3153,12 +3187,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             // stream to the closest peer as chosen by the snitch
             DatabaseDescriptor.getEndpointSnitch().sortByProximity(FBUtilities.getBroadcastAddress(), candidates);
             InetAddress hintsDestinationHost = candidates.get(0);
+            InetAddress preferred = SystemKeyspace.getPreferredIP(hintsDestinationHost);
 
             // stream all hints -- range list will be a singleton of "the entire ring"
             Token token = StorageService.getPartitioner().getMinimumToken();
             List<Range<Token>> ranges = Collections.singletonList(new Range<>(token, token));
 
             return new StreamPlan("Hints").transferRanges(hintsDestinationHost,
+                                                          preferred,
                                                                       Keyspace.SYSTEM_KS,
                                                                       ranges,
                                                                       SystemKeyspace.HINTS_CF)
@@ -3359,19 +3395,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     for (InetAddress address : endpointRanges.keySet())
                     {
                         logger.debug("Will stream range {} of keyspace {} to endpoint {}", endpointRanges.get(address), keyspace, address);
-                        streamPlan.transferRanges(address, keyspace, endpointRanges.get(address));
+                        InetAddress preferred = SystemKeyspace.getPreferredIP(address);
+                        streamPlan.transferRanges(address, preferred, keyspace, endpointRanges.get(address));
                     }
 
                     // stream requests
-                    Multimap<InetAddress, Range<Token>> workMap = RangeStreamer.getWorkMap(rangesToFetchWithPreferredEndpoints);
+                    Multimap<InetAddress, Range<Token>> workMap = RangeStreamer.getWorkMap(rangesToFetchWithPreferredEndpoints, keyspace);
                     for (InetAddress address : workMap.keySet())
                     {
                         logger.debug("Will request range {} of keyspace {} from endpoint {}", workMap.get(address), keyspace, address);
-                        streamPlan.requestRanges(address, keyspace, workMap.get(address));
+                        InetAddress preferred = SystemKeyspace.getPreferredIP(address);
+                        streamPlan.requestRanges(address, preferred, keyspace, workMap.get(address));
                     }
 
-                    if (logger.isDebugEnabled())
-                        logger.debug("Keyspace {}: work map {}.", keyspace, workMap);
+                    logger.debug("Keyspace {}: work map {}.", keyspace, workMap);
                 }
             }
         }
@@ -3525,29 +3562,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return isClientMode;
     }
 
-    public synchronized void requestGC()
-    {
-        if (hasUnreclaimedSpace())
-        {
-            logger.info("requesting GC to free disk space");
-            System.gc();
-            Uninterruptibles.sleepUninterruptibly(1, TimeUnit.SECONDS);
-        }
-    }
-
-    private boolean hasUnreclaimedSpace()
-    {
-        for (ColumnFamilyStore cfs : ColumnFamilyStore.all())
-        {
-            if (cfs.hasUnreclaimedSpace())
-                return true;
-        }
-        return false;
-    }
-
     public String getOperationMode()
     {
         return operationMode.toString();
+    }
+
+    public boolean isStarting()
+    {
+        return operationMode == Mode.STARTING;
     }
 
     public String getDrainProgress()
@@ -3572,7 +3594,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         setMode(Mode.DRAINING, "starting drain process", true);
         shutdownClientServers();
-        optionalTasks.shutdown();
+        ScheduledExecutors.optionalTasks.shutdown();
         Gossiper.instance.stop();
 
         setMode(Mode.DRAINING, "shutting down MessageService", false);
@@ -3617,21 +3639,19 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         FBUtilities.waitOnFutures(flushes);
 
-        BatchlogManager.batchlogTasks.shutdown();
-        BatchlogManager.batchlogTasks.awaitTermination(60, TimeUnit.SECONDS);
+        BatchlogManager.shutdown();
 
         // whilst we've flushed all the CFs, which will have recycled all completed segments, we want to ensure
         // there are no segments to replay, so we force the recycling of any remaining (should be at most one)
         CommitLog.instance.forceRecycleAllSegments();
 
-        ColumnFamilyStore.postFlushExecutor.shutdown();
-        ColumnFamilyStore.postFlushExecutor.awaitTermination(60, TimeUnit.SECONDS);
+        ColumnFamilyStore.shutdownPostFlushExecutor();
 
         CommitLog.instance.shutdownBlocking();
 
         // wait for miscellaneous tasks like sstable and commitlog segment deletion
-        tasks.shutdown();
-        if (!tasks.awaitTermination(1, TimeUnit.MINUTES))
+        ScheduledExecutors.nonPeriodicTasks.shutdown();
+        if (!ScheduledExecutors.nonPeriodicTasks.awaitTermination(1, TimeUnit.MINUTES))
             logger.warn("Miscellaneous task executor still busy after one minute; proceeding with shutdown");
 
         setMode(Mode.DRAINED, true);
@@ -3853,9 +3873,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             {
                 List<Range<Token>> ranges = rangesEntry.getValue();
                 InetAddress newEndpoint = rangesEntry.getKey();
+                InetAddress preferred = SystemKeyspace.getPreferredIP(newEndpoint);
 
                 // TODO each call to transferRanges re-flushes, this is potentially a lot of waste
-                streamPlan.transferRanges(newEndpoint, keyspaceName, ranges);
+                streamPlan.transferRanges(newEndpoint, preferred, keyspaceName, ranges);
             }
         }
         return streamPlan.execute();

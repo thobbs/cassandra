@@ -34,6 +34,7 @@ import org.apache.cassandra.hadoop.cql3.CqlConfigHelper;
 import org.apache.cassandra.thrift.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.hadoop.mapreduce.*;
 import org.apache.pig.Expression;
 import org.apache.pig.Expression.OpType;
@@ -147,9 +148,9 @@ public class CqlStorage extends AbstractCassandraStorage
         }
         AbstractType elementValidator;
         if (validator instanceof SetType)
-            elementValidator = ((SetType<?>) validator).elements;
+            elementValidator = ((SetType<?>) validator).getElementsType();
         else if (validator instanceof ListType)
-            elementValidator = ((ListType<?>) validator).elements;
+            elementValidator = ((ListType<?>) validator).getElementsType();
         else 
             return;
         
@@ -166,8 +167,8 @@ public class CqlStorage extends AbstractCassandraStorage
     /** set the values of set/list at and after the position of the tuple */
     private void setMapTupleValues(Tuple tuple, int position, Object value, AbstractType<?> validator) throws ExecException
     {
-        AbstractType<?> keyValidator = ((MapType<?, ?>) validator).keys;
-        AbstractType<?> valueValidator = ((MapType<?, ?>) validator).values;
+        AbstractType<?> keyValidator = ((MapType<?, ?>) validator).getKeysType();
+        AbstractType<?> valueValidator = ((MapType<?, ?>) validator).getValuesType();
         
         int i = 0;
         Tuple innerTuple = TupleFactory.getInstance().newTuple(((Map<?,?>) value).size());
@@ -602,6 +603,7 @@ public class CqlStorage extends AbstractCassandraStorage
                 }
                 catch (Exception e)
                 {
+                    JVMStabilityInspector.inspectThrowable(e);
                     // no compact column at value_alias
                 }
             }

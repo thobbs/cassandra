@@ -64,6 +64,7 @@ import org.apache.cassandra.io.util.SegmentedFile;
 import org.apache.cassandra.io.util.SequentialWriter;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.Pair;
@@ -123,7 +124,7 @@ public class SSTableWriter extends SSTable
                          long keyCount,
                          long repairedAt,
                          CFMetaData metadata,
-                         IPartitioner<?> partitioner,
+                         IPartitioner partitioner,
                          MetadataCollector sstableMetadataCollector)
     {
         super(Descriptor.fromFilename(filename),
@@ -212,6 +213,14 @@ public class SSTableWriter extends SSTable
 
     public void append(DecoratedKey decoratedKey, ColumnFamily cf)
     {
+        if (decoratedKey.getKey().remaining() > FBUtilities.MAX_UNSIGNED_SHORT)
+        {
+            logger.error("Key size {} exceeds maximum of {}, skipping row",
+                         decoratedKey.getKey().remaining(),
+                         FBUtilities.MAX_UNSIGNED_SHORT);
+            return;
+        }
+
         long startPosition = beforeAppend(decoratedKey);
         try
         {
@@ -244,9 +253,9 @@ public class SSTableWriter extends SSTable
     {
         long currentPosition = beforeAppend(key);
 
-        ColumnStats.MaxTracker<Long> maxTimestampTracker = new ColumnStats.MaxTracker<>(Long.MAX_VALUE);
-        ColumnStats.MinTracker<Long> minTimestampTracker = new ColumnStats.MinTracker<>(Long.MIN_VALUE);
-        ColumnStats.MaxTracker<Integer> maxDeletionTimeTracker = new ColumnStats.MaxTracker<>(Integer.MAX_VALUE);
+        ColumnStats.MaxLongTracker maxTimestampTracker = new ColumnStats.MaxLongTracker(Long.MAX_VALUE);
+        ColumnStats.MinLongTracker minTimestampTracker = new ColumnStats.MinLongTracker(Long.MIN_VALUE);
+        ColumnStats.MaxIntTracker maxDeletionTimeTracker = new ColumnStats.MaxIntTracker(Integer.MAX_VALUE);
         List<ByteBuffer> minColumnNames = Collections.emptyList();
         List<ByteBuffer> maxColumnNames = Collections.emptyList();
         StreamingHistogram tombstones = new StreamingHistogram(TOMBSTONE_HISTOGRAM_BIN_SIZE);

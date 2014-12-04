@@ -116,9 +116,9 @@ public class ActiveRepairService
      *
      * @return Future for asynchronous call or null if there is no need to repair
      */
-    public RepairFuture submitRepairSession(UUID parentRepairSession, Range<Token> range, String keyspace, boolean isSequential, Set<InetAddress> endpoints, String... cfnames)
+    public RepairFuture submitRepairSession(UUID parentRepairSession, Range<Token> range, String keyspace, RepairParallelism parallelismDegree, Set<InetAddress> endpoints, String... cfnames)
     {
-        RepairSession session = new RepairSession(parentRepairSession, range, keyspace, isSequential, endpoints, cfnames);
+        RepairSession session = new RepairSession(parentRepairSession, range, keyspace, parallelismDegree, endpoints, cfnames);
         if (session.endpoints.isEmpty())
             return null;
         RepairFuture futureTask = new RepairFuture(session);
@@ -154,7 +154,7 @@ public class ActiveRepairService
     {
         Set<InetAddress> neighbours = new HashSet<>();
         neighbours.addAll(ActiveRepairService.getNeighbors(desc.keyspace, desc.range, null, null));
-        RepairSession session = new RepairSession(desc.parentSessionId, desc.sessionId, desc.range, desc.keyspace, false, neighbours, new String[]{desc.columnFamily});
+        RepairSession session = new RepairSession(desc.parentSessionId, desc.sessionId, desc.range, desc.keyspace, RepairParallelism.PARALLEL, neighbours, new String[]{desc.columnFamily});
         sessions.put(session.getId(), session);
         RepairFuture futureTask = new RepairFuture(session);
         executor.execute(futureTask);
@@ -247,6 +247,7 @@ public class ActiveRepairService
         registerParentRepairSession(parentRepairSession, columnFamilyStores, ranges);
         final CountDownLatch prepareLatch = new CountDownLatch(endpoints.size());
         final AtomicBoolean status = new AtomicBoolean(true);
+        final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
         IAsyncCallbackWithFailure callback = new IAsyncCallbackWithFailure()
         {
             public void response(MessageIn msg)
@@ -262,6 +263,7 @@ public class ActiveRepairService
             public void onFailure(InetAddress from)
             {
                 status.set(false);
+                failedNodes.add(from.getHostAddress());
                 prepareLatch.countDown();
             }
         };
@@ -283,13 +285,13 @@ public class ActiveRepairService
         catch (InterruptedException e)
         {
             parentRepairSessions.remove(parentRepairSession);
-            throw new RuntimeException("Did not get replies from all endpoints.", e);
+            throw new RuntimeException("Did not get replies from all endpoints. List of failed endpoint(s): " + failedNodes.toString(), e);
         }
 
         if (!status.get())
         {
             parentRepairSessions.remove(parentRepairSession);
-            throw new RuntimeException("Did not get positive replies from all endpoints.");
+            throw new RuntimeException("Did not get positive replies from all endpoints. List of failed endpoint(s): " + failedNodes.toString());
         }
 
         return parentRepairSession;
@@ -341,6 +343,11 @@ public class ActiveRepairService
     public ParentRepairSession getParentRepairSession(UUID parentSessionId)
     {
         return parentRepairSessions.get(parentSessionId);
+    }
+
+    public ParentRepairSession removeParentRepairSession(UUID parentSessionId)
+    {
+        return parentRepairSessions.remove(parentSessionId);
     }
 
     public List<Future<?>> doAntiCompaction(UUID parentRepairSession) throws InterruptedException, ExecutionException, IOException

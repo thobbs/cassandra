@@ -102,11 +102,11 @@ public class CompactionTask extends AbstractCompactionTask
      * which are properly serialized.
      * Caller is in charge of marking/unmarking the sstables as compacting.
      */
-    protected void runWith(File sstableDirectory) throws Exception
+    protected void runMayThrow() throws Exception
     {
         // The collection of sstables passed may be empty (but not null); even if
         // it is not empty, it may compact down to nothing if all rows are deleted.
-        assert sstables != null && sstableDirectory != null;
+        assert sstables != null;
 
         if (sstables.size() == 0)
             return;
@@ -152,7 +152,7 @@ public class CompactionTask extends AbstractCompactionTask
             {
                 AbstractCompactionIterable ci = new CompactionIterable(compactionType, scanners.scanners, controller);
                 Iterator<AbstractCompactedRow> iter = ci.iterator();
-
+                List<SSTableReader> newSStables;
                 // we can't preheat until the tracker has been set. This doesn't happen until we tell the cfs to
                 // replace the old entries.  Track entries to preheat here until then.
                 long minRepairedAt = getMinRepairedAt(actuallyCompact);
@@ -161,7 +161,7 @@ public class CompactionTask extends AbstractCompactionTask
                 if (collector != null)
                     collector.beginCompaction(ci);
                 long lastCheckObsoletion = start;
-                SSTableRewriter writer = new SSTableRewriter(cfs, sstables, maxAge, compactionType, offline);
+                SSTableRewriter writer = new SSTableRewriter(cfs, sstables, maxAge, offline);
                 try
                 {
                     if (!iter.hasNext())
@@ -173,7 +173,7 @@ public class CompactionTask extends AbstractCompactionTask
                         return;
                     }
 
-                    writer.switchWriter(createCompactionWriter(sstableDirectory, keysPerSSTable, minRepairedAt));
+                    writer.switchWriter(createCompactionWriter(cfs.directories.getLocationForDisk(getWriteDirectory(estimatedTotalKeys/estimatedSSTables)), keysPerSSTable, minRepairedAt));
                     while (iter.hasNext())
                     {
                         if (ci.isStopRequested())
@@ -185,7 +185,7 @@ public class CompactionTask extends AbstractCompactionTask
                             totalKeysWritten++;
                             if (newSSTableSegmentThresholdReached(writer.currentWriter()))
                             {
-                                writer.switchWriter(createCompactionWriter(sstableDirectory, keysPerSSTable, minRepairedAt));
+                                writer.switchWriter(createCompactionWriter(cfs.directories.getLocationForDisk(getWriteDirectory(estimatedTotalKeys/estimatedSSTables)), keysPerSSTable, minRepairedAt));
                             }
                         }
 
@@ -197,7 +197,7 @@ public class CompactionTask extends AbstractCompactionTask
                     }
 
                     // don't replace old sstables yet, as we need to mark the compaction finished in the system table
-                    writer.finish(false);
+                    newSStables = writer.finish();
                 }
                 catch (Throwable t)
                 {
@@ -206,7 +206,6 @@ public class CompactionTask extends AbstractCompactionTask
                 }
                 finally
                 {
-
                     // point of no return -- the new sstables are live on disk; next we'll start deleting the old ones
                     // (in replaceCompactedSSTables)
                     if (taskId != null)
@@ -217,7 +216,6 @@ public class CompactionTask extends AbstractCompactionTask
                 }
 
                 Collection<SSTableReader> oldSStables = this.sstables;
-                List<SSTableReader> newSStables = writer.finished();
                 if (!offline)
                     cfs.getDataTracker().markCompactedSSTablesReplaced(oldSStables, newSStables, compactionType);
 
@@ -269,6 +267,7 @@ public class CompactionTask extends AbstractCompactionTask
 
     private SSTableWriter createCompactionWriter(File sstableDirectory, long keysPerSSTable, long repairedAt)
     {
+        assert sstableDirectory != null;
         return new SSTableWriter(cfs.getTempSSTablePath(sstableDirectory),
                                  keysPerSSTable,
                                  repairedAt,

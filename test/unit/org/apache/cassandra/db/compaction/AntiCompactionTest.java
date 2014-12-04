@@ -23,6 +23,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThat;
 import static org.junit.Assert.assertTrue;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -31,6 +32,7 @@ import java.util.concurrent.ExecutionException;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
+import org.apache.cassandra.db.ArrayBackedSortedColumns;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -41,6 +43,9 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.sstable.SSTableIdentityIterator;
 import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.sstable.SSTableScanner;
+import org.apache.cassandra.io.sstable.SSTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.junit.After;
 import org.junit.Test;
@@ -70,26 +75,74 @@ public class AntiCompactionTest extends SchemaLoader
         int nonRepairedKeys = 0;
         for (SSTableReader sstable : store.getSSTables())
         {
-            SSTableScanner scanner = sstable.getScanner();
-            while (scanner.hasNext())
+            try (SSTableScanner scanner = sstable.getScanner())
             {
-                SSTableIdentityIterator row = (SSTableIdentityIterator) scanner.next();
-                if (sstable.isRepaired())
+                while (scanner.hasNext())
                 {
-                    assertTrue(range.contains(row.getKey().getToken()));
-                    repairedKeys++;
-                }
-                else
-                {
-                    assertFalse(range.contains(row.getKey().getToken()));
-                    nonRepairedKeys++;
+                    SSTableIdentityIterator row = (SSTableIdentityIterator) scanner.next();
+                    if (sstable.isRepaired())
+                    {
+                        assertTrue(range.contains(row.getKey().getToken()));
+                        repairedKeys++;
+                    }
+                    else
+                    {
+                        assertFalse(range.contains(row.getKey().getToken()));
+                        nonRepairedKeys++;
+                    }
                 }
             }
         }
+        for (SSTableReader sstable : store.getSSTables())
+        {
+            assertFalse(sstable.isMarkedCompacted());
+            assertEquals(1, sstable.referenceCount());
+        }
+        assertEquals(0, store.getDataTracker().getCompacting().size());
         assertEquals(repairedKeys, 4);
         assertEquals(nonRepairedKeys, 6);
     }
-    
+    @Test
+    public void antiCompactionSizeTest() throws ExecutionException, InterruptedException, IOException
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE1);
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+        cfs.disableAutoCompaction();
+        SSTableReader s = writeFile(cfs, 1000);
+        cfs.addSSTable(s);
+        long origSize = s.bytesOnDisk();
+        Range<Token> range = new Range<Token>(new BytesToken(ByteBufferUtil.bytes(0)), new BytesToken(ByteBufferUtil.bytes(500)));
+        Collection<SSTableReader> sstables = cfs.getSSTables();
+        SSTableReader.acquireReferences(sstables);
+        CompactionManager.instance.performAnticompaction(cfs, Arrays.asList(range), sstables, 12345);
+        long sum = 0;
+        for (SSTableReader x : cfs.getSSTables())
+            sum += x.bytesOnDisk();
+        assertEquals(sum, cfs.metric.liveDiskSpaceUsed.count());
+        assertEquals(origSize, cfs.metric.liveDiskSpaceUsed.count(), 100000);
+
+    }
+
+    private SSTableReader writeFile(ColumnFamilyStore cfs, int count)
+    {
+        ArrayBackedSortedColumns cf = ArrayBackedSortedColumns.factory.create(cfs.metadata);
+        for (int i = 0; i < count; i++)
+            cf.addColumn(Util.column(String.valueOf(i), "a", 1));
+        File dir = cfs.directories.getDirectoryForNewSSTables();
+        String filename = cfs.getTempSSTablePath(dir);
+
+        SSTableWriter writer = new SSTableWriter(filename,
+                0,
+                0,
+                cfs.metadata,
+                StorageService.getPartitioner(),
+                new MetadataCollector(cfs.metadata.comparator));
+
+        for (int i = 0; i < count * 5; i++)
+            writer.append(StorageService.getPartitioner().decorateKey(ByteBufferUtil.bytes(i)), cf);
+        return writer.closeAndOpenReader();
+    }
+
     @Test
     public void shouldSkipAntiCompactionForNonIntersectingRange() throws InterruptedException, ExecutionException, IOException
     {
@@ -100,16 +153,38 @@ public class AntiCompactionTest extends SchemaLoader
         List<Range<Token>> ranges = Arrays.asList(range);
 
         SSTableReader.acquireReferences(sstables);
-        CompactionManager.instance.performAnticompaction(store, ranges, sstables, 0);
+        CompactionManager.instance.performAnticompaction(store, ranges, sstables, 1);
 
         assertThat(store.getSSTables().size(), is(1));
         assertThat(Iterables.get(store.getSSTables(), 0).isRepaired(), is(false));
+        assertThat(Iterables.get(store.getSSTables(), 0).referenceCount(), is(1));
+        assertThat(store.getDataTracker().getCompacting().size(), is(0));
     }
+
+    @Test
+    public void shouldMutateRepairedAt() throws InterruptedException, ExecutionException, IOException
+    {
+        ColumnFamilyStore store = prepareColumnFamilyStore();
+        Collection<SSTableReader> sstables = store.getUnrepairedSSTables();
+        assertEquals(store.getSSTables().size(), sstables.size());
+        Range<Token> range = new Range<Token>(new BytesToken("0".getBytes()), new BytesToken("9999".getBytes()));
+        List<Range<Token>> ranges = Arrays.asList(range);
+
+        SSTableReader.acquireReferences(sstables);
+        CompactionManager.instance.performAnticompaction(store, ranges, sstables, 1);
+
+        assertThat(store.getSSTables().size(), is(1));
+        assertThat(Iterables.get(store.getSSTables(), 0).isRepaired(), is(true));
+        assertThat(Iterables.get(store.getSSTables(), 0).referenceCount(), is(1));
+        assertThat(store.getDataTracker().getCompacting().size(), is(0));
+    }
+
 
     private ColumnFamilyStore prepareColumnFamilyStore()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(CF);
+        store.truncateBlocking();
         store.disableAutoCompaction();
         long timestamp = System.currentTimeMillis();
         for (int i = 0; i < 10; i++)

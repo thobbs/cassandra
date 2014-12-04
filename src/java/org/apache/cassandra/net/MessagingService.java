@@ -37,6 +37,8 @@ import com.google.common.collect.Lists;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.concurrent.TracingAwareExecutorService;
@@ -329,7 +331,7 @@ public final class MessagingService implements MessagingServiceMBean
                 logDroppedMessages();
             }
         };
-        StorageService.scheduledTasks.scheduleWithFixedDelay(logDropped, LOG_DROPPED_INTERVAL_IN_MS, LOG_DROPPED_INTERVAL_IN_MS, TimeUnit.MILLISECONDS);
+        ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(logDropped, LOG_DROPPED_INTERVAL_IN_MS, LOG_DROPPED_INTERVAL_IN_MS, TimeUnit.MILLISECONDS);
 
         Function<Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo>>, ?> timeoutReporter = new Function<Pair<Integer, ExpiringMap.CacheableObject<CallbackInfo>>, Object>()
         {
@@ -918,6 +920,7 @@ public final class MessagingService implements MessagingServiceMBean
                     }
 
                     socket.setKeepAlive(true);
+                    socket.setSoTimeout(2 * OutboundTcpConnection.WAIT_FOR_VERSION_MAX_TIME);
                     // determine the connection type to decide whether to buffer
                     DataInputStream in = new DataInputStream(socket.getInputStream());
                     MessagingService.validateMagic(in.readInt());
@@ -925,6 +928,7 @@ public final class MessagingService implements MessagingServiceMBean
                     boolean isStream = MessagingService.getBits(header, 3, 1) == 1;
                     int version = MessagingService.getBits(header, 15, 8);
                     logger.debug("Connection version {} from {}", version, socket.getInetAddress());
+                    socket.setSoTimeout(0);
 
                     Thread thread = isStream
                                   ? new IncomingStreamingConnection(version, socket)

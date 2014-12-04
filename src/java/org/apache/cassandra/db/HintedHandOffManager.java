@@ -40,6 +40,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
@@ -65,6 +66,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.UUIDGen;
 import org.cliffc.high_scale_lib.NonBlockingHashSet;
 
@@ -175,7 +177,7 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                 metrics.log();
             }
         };
-        StorageService.optionalTasks.scheduleWithFixedDelay(runnable, 10, 10, TimeUnit.MINUTES);
+        ScheduledExecutors.optionalTasks.scheduleWithFixedDelay(runnable, 10, 10, TimeUnit.MINUTES);
     }
 
     private static void deleteHint(ByteBuffer tokenBytes, CellName columnName, long timestamp)
@@ -222,11 +224,12 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                 }
                 catch (Exception e)
                 {
+                    JVMStabilityInspector.inspectThrowable(e);
                     logger.warn("Could not delete hints for {}: {}", endpoint, e);
                 }
             }
         };
-        StorageService.optionalTasks.submit(runnable);
+        ScheduledExecutors.optionalTasks.submit(runnable);
     }
 
     //foobar
@@ -247,7 +250,7 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                 }
             }
         };
-        StorageService.optionalTasks.submit(runnable).get();
+        ScheduledExecutors.optionalTasks.submit(runnable).get();
 
     }
 
@@ -257,6 +260,9 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
         ArrayList<Descriptor> descriptors = new ArrayList<>();
         for (SSTable sstable : hintStore.getDataTracker().getUncompactingSSTables())
             descriptors.add(sstable.descriptor);
+
+        if (descriptors.isEmpty())
+            return;
 
         try
         {
@@ -589,7 +595,7 @@ public class HintedHandOffManager implements HintedHandOffManagerMBean
                                                           columnCount);
 
         // From keys "" to ""...
-        IPartitioner<?> partitioner = StorageService.getPartitioner();
+        IPartitioner partitioner = StorageService.getPartitioner();
         RowPosition minPos = partitioner.getMinimumToken().minKeyBound();
         Range<RowPosition> range = new Range<RowPosition>(minPos, minPos);
 

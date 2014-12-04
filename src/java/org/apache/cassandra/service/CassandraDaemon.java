@@ -24,6 +24,7 @@ import java.lang.management.MemoryPoolMXBean;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -38,6 +39,7 @@ import org.slf4j.LoggerFactory;
 
 import com.addthis.metrics.reporter.config.ReporterConfig;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
@@ -72,6 +74,13 @@ public class CassandraDaemon
 
     private static final CassandraDaemon instance = new CassandraDaemon();
 
+    /**
+     * The earliest legit timestamp a casandra instance could have ever launched.
+     * Date roughly taken from http://perspectives.mvdirona.com/2008/07/12/FacebookReleasesCassandraAsOpenSource.aspx
+     * We use this to ensure the system clock is at least somewhat correct at startup.
+     */
+    private static final long EARLIEST_LAUNCH_DATE = 1215820800000L;
+
     public Server thriftServer;
     public Server nativeServer;
 
@@ -92,6 +101,14 @@ public class CassandraDaemon
         {
             logger.info("Could not resolve local host");
         }
+
+        long now = System.currentTimeMillis();
+        if (now < EARLIEST_LAUNCH_DATE)
+        {
+            logger.error("current machine time is {}, but that is seemingly incorrect. exiting now.", new Date(now));
+            System.exit(3);
+        }
+
         // log warnings for different kinds of sub-optimal JVMs.  tldr use 64-bit Oracle >= 1.6u32
         if (!DatabaseDescriptor.hasLargeAddressSpace())
             logger.info("32bit JVM detected.  It is recommended to run Cassandra on a 64bit JVM for better performance.");
@@ -313,7 +330,7 @@ public class CassandraDaemon
                 }
             }
         };
-        StorageService.optionalTasks.schedule(runnable, 5 * 60, TimeUnit.SECONDS);
+        ScheduledExecutors.optionalTasks.schedule(runnable, 5 * 60, TimeUnit.SECONDS);
 
         SystemKeyspace.finishStartup();
 
@@ -401,15 +418,20 @@ public class CassandraDaemon
     /**
      * Stop the daemon, ideally in an idempotent manner.
      *
-     * Hook for JSVC
+     * Hook for JSVC / Procrun
      */
     public void stop()
     {
-        // this doesn't entirely shut down Cassandra, just the RPC server.
+        // On linux, this doesn't entirely shut down Cassandra, just the RPC server.
         // jsvc takes care of taking the rest down
         logger.info("Cassandra shutting down...");
         thriftServer.stop();
         nativeServer.stop();
+
+        // On windows, we need to stop the entire system as prunsrv doesn't have the jsvc hooks
+        // We rely on the shutdown hook to drain the node
+        if (!FBUtilities.isUnix())
+            System.exit(0);
     }
 
 

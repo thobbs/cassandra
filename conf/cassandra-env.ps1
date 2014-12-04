@@ -269,6 +269,11 @@ Function SetCassandraEnvironment
     SetCassandraHome
     $env:CASSANDRA_CONF = "$env:CASSANDRA_HOME\conf"
     $env:CASSANDRA_PARAMS="-Dcassandra -Dlogback.configurationFile=logback.xml"
+
+    $logdir = "$env:CASSANDRA_HOME\logs"
+    $storagedir = "$env:CASSANDRA_HOME\data"
+    $env:CASSANDRA_PARAMS = $env:CASSANDRA_PARAMS + " -Dcassandra.logdir=""$logdir"" -Dcassandra.storagedir=""$storagedir"""
+
     SetCassandraMain
     BuildClassPath
 
@@ -296,7 +301,7 @@ Function SetCassandraEnvironment
     if (($env:JVM_VENDOR -ne "OpenJDK") -or ($env:JVM_VERSION.CompareTo("1.6.0") -eq 1) -or
         (($env:JVM_VERSION -eq "1.6.0") -and ($env:JVM_PATCH_VERSION.CompareTo("22") -eq 1)))
     {
-        $env:JVM_OPTS = "$env:JVM_OPTS -javaagent:""$env:CASSANDRA_HOME\lib\jamm-0.2.6.jar"""
+        $env:JVM_OPTS = "$env:JVM_OPTS -javaagent:""$env:CASSANDRA_HOME\lib\jamm-0.3.0.jar"""
     }
 
     # enable assertions.  disabling this in production will give a modest
@@ -306,6 +311,9 @@ Function SetCassandraEnvironment
     # Specifies the default port over which Cassandra will be available for
     # JMX connections.
     $JMX_PORT="7199"
+
+    # store in env to check if it's avail in verification
+    $env:JMX_PORT=$JMX_PORT
 
     $env:JVM_OPTS = "$env:JVM_OPTS -Dlog4j.defaultInitOverride=true"
 
@@ -400,3 +408,5 @@ Function SetCassandraEnvironment
 
     $env:JVM_OPTS = "$env:JVM_OPTS -Dlog4j.configuration=log4j-server.properties"
 }
+
+

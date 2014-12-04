@@ -35,6 +35,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.SSTableReader;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 
 /**
  * Pluggable compaction strategy determines how SSTables get merged.
@@ -289,6 +290,20 @@ public abstract class AbstractCompactionStrategy
         return new ScannerList(scanners);
     }
 
+    public boolean shouldDefragment()
+    {
+        return false;
+    }
+
+    public String getName()
+    {
+        return getClass().getSimpleName();
+    }
+
+    public abstract void addSSTable(SSTableReader added);
+
+    public abstract void removeSSTable(SSTableReader sstable);
+
     public static class ScannerList implements AutoCloseable
     {
         public final List<ICompactionScanner> scanners;
@@ -308,6 +323,7 @@ public abstract class AbstractCompactionStrategy
                 }
                 catch (Throwable t2)
                 {
+                    JVMStabilityInspector.inspectThrowable(t2);
                     if (t == null)
                         t = t2;
                     else

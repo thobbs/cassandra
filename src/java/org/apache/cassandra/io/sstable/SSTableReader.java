@@ -59,6 +59,7 @@ import org.apache.cassandra.cache.CachingOptions;
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.concurrent.DebuggableThreadPoolExecutor;
+import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Config;
@@ -201,6 +202,7 @@ public class SSTableReader extends SSTable
     private Object replaceLock = new Object();
     private SSTableReader replacedBy;
     private SSTableReader replaces;
+    private SSTableReader sharesBfWith;
     private SSTableDeletingTask deletingTask;
     private Runnable runOnClose;
 
@@ -240,6 +242,7 @@ public class SSTableReader extends SSTable
                 try
                 {
                     CompactionMetadata metadata = (CompactionMetadata) sstable.descriptor.getMetadataSerializer().deserialize(sstable.descriptor, MetadataType.COMPACTION);
+                    assert metadata != null : sstable.getFilename();
                     if (cardinality == null)
                         cardinality = metadata.cardinalityEstimator;
                     else
@@ -592,6 +595,14 @@ public class SSTableReader extends SSTable
                 deleteFiles &= !dfile.path.equals(replaces.dfile.path);
             }
 
+            if (sharesBfWith != null)
+            {
+                closeBf &= sharesBfWith.bf != bf;
+                closeSummary &= sharesBfWith.indexSummary != indexSummary;
+                closeFiles &= sharesBfWith.dfile != dfile;
+                deleteFiles &= !dfile.path.equals(sharesBfWith.dfile.path);
+            }
+
             boolean deleteAll = false;
             if (release && isCompacted.get())
             {
@@ -634,7 +645,7 @@ public class SSTableReader extends SSTable
         else
             barrier = null;
 
-        StorageService.tasks.execute(new Runnable()
+        ScheduledExecutors.nonPeriodicTasks.execute(new Runnable()
         {
             public void run()
             {
@@ -926,6 +937,19 @@ public class SSTableReader extends SSTable
         }
     }
 
+    /**
+     * this is used to avoid closing the bloom filter multiple times when finishing an SSTableRewriter
+     *
+     * note that the reason we don't use replacedBy is that we are not yet actually replaced
+     *
+     * @param newReader
+     */
+    public void sharesBfWith(SSTableReader newReader)
+    {
+        assert openReason.equals(OpenReason.EARLY);
+        this.sharesBfWith = newReader;
+    }
+
     public SSTableReader cloneWithNewStart(DecoratedKey newStart, final Runnable runOnClose)
     {
         synchronized (replaceLock)
@@ -1144,6 +1168,18 @@ public class SSTableReader extends SSTable
     }
 
     /**
+     * Returns the amount of memory in bytes used off heap by the compression meta-data.
+     * @return the amount of memory in bytes used off heap by the compression meta-data
+     */
+    public long getCompressionMetadataOffHeapSize()
+    {
+        if (!compression)
+            return 0;
+
+        return getCompressionMetadata().offHeapSize();
+    }
+
+    /**
      * For testing purposes only.
      */
     public void forceFilterFailures()
@@ -1159,6 +1195,15 @@ public class SSTableReader extends SSTable
     public long getBloomFilterSerializedSize()
     {
         return bf.serializedSize();
+    }
+
+    /**
+     * Returns the amount of memory in bytes used off heap by the bloom filter.
+     * @return the amount of memory in bytes used off heap by the bloom filter
+     */
+    public long getBloomFilterOffHeapSize()
+    {
+        return bf.offHeapSize();
     }
 
     /**
@@ -1599,6 +1644,12 @@ public class SSTableReader extends SSTable
         }
     }
 
+    @VisibleForTesting
+    public int referenceCount()
+    {
+        return references.get();
+    }
+
     /**
      * Release reference to this SSTableReader.
      * If there is no one referring to this SSTable, and is marked as compacted,
@@ -1627,7 +1678,7 @@ public class SSTableReader extends SSTable
 
         synchronized (replaceLock)
         {
-            assert replacedBy == null;
+            assert replacedBy == null : getFilename();
         }
         return !isCompacted.getAndSet(true);
     }

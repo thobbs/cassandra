@@ -20,6 +20,7 @@ package org.apache.cassandra.service;
 import java.net.SocketAddress;
 import java.util.*;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
@@ -40,6 +41,7 @@ import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.SemanticVersion;
 
@@ -84,6 +86,7 @@ public class ClientState
             }
             catch (Exception e)
             {
+                JVMStabilityInspector.inspectThrowable(e);
                 logger.info("Cannot use class {} as query handler ({}), ignoring by defaulting on normal query handling", customHandlerClass, e.getMessage());
             }
         }
@@ -96,6 +99,9 @@ public class ClientState
 
     // The remote address of the client - null for internal clients.
     private final SocketAddress remoteAddress;
+
+    // The biggest timestamp that was returned by getTimestamp/assigned to a query
+    private final AtomicLong lastTimestampMicros = new AtomicLong(0);
 
     /**
      * Construct a new, empty ClientState for internal calls.
@@ -128,6 +134,38 @@ public class ClientState
     public static ClientState forExternalCalls(SocketAddress remoteAddress)
     {
         return new ClientState(remoteAddress);
+    }
+
+    /**
+     * This clock guarantees that updates for the same ClientState will be ordered
+     * in the sequence seen, even if multiple updates happen in the same millisecond.
+     */
+    public long getTimestamp()
+    {
+        while (true)
+        {
+            long current = System.currentTimeMillis() * 1000;
+            long last = lastTimestampMicros.get();
+            long tstamp = last >= current ? last + 1 : current;
+            if (lastTimestampMicros.compareAndSet(last, tstamp))
+                return tstamp;
+        }
+    }
+
+    /**
+     * Can be use when a timestamp has been assigned by a query, but that timestamp is
+     * not directly one returned by getTimestamp() (see SP.beginAndRepairPaxos()).
+     * This ensure following calls to getTimestamp() will return a timestamp strictly
+     * greated than the one provided to this method.
+     */
+    public void updateLastTimestamp(long tstampMicros)
+    {
+        while (true)
+        {
+            long last = lastTimestampMicros.get();
+            if (tstampMicros <= last || lastTimestampMicros.compareAndSet(last, tstampMicros))
+                return;
+        }
     }
 
     public static QueryHandler getCQLQueryHandler()

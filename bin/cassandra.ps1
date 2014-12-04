@@ -13,33 +13,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-param (
-    [switch]$install,
-    [switch]$uninstall,
-    [switch]$help,
-    [switch]$v,
-    [switch]$s,
-    [switch]$f,
-    [string]$p,
-    [string]$H,
-    [string]$E
-)
-
-$pidfile = "pid.txt"
-
-#-----------------------------------------------------------------------------
-Function ValidateArguments
-{
-    if ($install -and $uninstall)
-    {
-        exit
-    }
-    if ($help)
-    {
-        PrintUsage
-    }
-}
-
 #-----------------------------------------------------------------------------
 Function PrintUsage
 {
@@ -92,10 +65,6 @@ Function Main
     }
     $pidfile = "$env:CASSANDRA_HOME\$pidfile"
 
-    $logdir = "$env:CASSANDRA_HOME/logs"
-    $storagedir = "$env:CASSANDRA_HOME/data"
-    $env:CASSANDRA_PARAMS = $env:CASSANDRA_PARAMS + " -Dcassandra.logdir=""$logdir"" -Dcassandra.storagedir=""$storagedir"""
-
     # Other command line params
     if ($H)
     {
@@ -111,13 +80,12 @@ Function Main
         $env:CASSANDRA_PARAMS = $env:CASSANDRA_PARAMS + ' -Dcassandra-pidfile="' + "$pidfile" + '"'
     }
 
-    # Parse -D JVM_OPTS
+    # Parse -D and -X JVM_OPTS
     for ($i = 0; $i -lt $script:args.Length; ++$i)
     {
-        if ($script:args[$i].Substring(0,2) -eq "-D")
+        if ($script:args[$i].StartsWith("-D") -Or $script:args[$i].StartsWith("-X"))
         {
-            $param = $script:args[$i].Substring(2)
-            $env:JVM_OPTS = "$env:JVM_OPTS -D$param"
+            $env:JVM_OPTS = "$env:JVM_OPTS " + $script:args[$i]
         }
     }
 
@@ -127,6 +95,7 @@ Function Main
     }
     else
     {
+        VerifyPortsAreAvailable
         RunCassandra($f)
     }
 }
@@ -176,23 +145,29 @@ Function HandleInstallation
     echo "Setting launch parameters for [$SERVICE_JVM]"
     Start-Sleep -s 2
 
-    # Change delim from " -" to ";-" in JVM_OPTS for prunsrv
-    $env:JVM_OPTS = $env:JVM_OPTS -replace " -", ";-"
-    $env:JVM_OPTS = $env:JVM_OPTS -replace " -", ";-"
-
-    # Strip off leading ; if it's there
-    $env:JVM_OPTS = $env:JVM_OPTS.TrimStart(";")
-
-    # Broken multi-line for convenience - glued back together in a bit
     $args = @"
 //US//$SERVICE_JVM
  --Jvm=auto --StdOutput auto --StdError auto
  --Classpath=$env:CLASSPATH
  --StartMode=jvm --StartClass=$env:CASSANDRA_MAIN --StartMethod=main
  --StopMode=jvm --StopClass=$env:CASSANDRA_MAIN  --StopMethod=stop
- ++JvmOptions=$env:JVM_OPTS ++JvmOptions=-DCassandra
  --PidFile "$pidfile"
 "@
+
+    # Include cassandra params
+    $prunArgs = "$env:CASSANDRA_PARAMS $env:JVM_OPTS"
+
+    # Change to semicolon delim as we can't split on space due to potential spaces in directory names
+    $prunArgs = $prunArgs -replace " -", ";-"
+
+    # JvmOptions w/multiple semicolon delimited items isn't working correctly.  storagedir and logdir were
+    # both being ignored / failing to parse on startup.  See CASSANDRA-8115
+    $split_opts = $prunArgs.Split(";")
+    foreach ($arg in $split_opts)
+    {
+        $args += " ++JvmOptions=$arg"
+    }
+
     $args = $args -replace [Environment]::NewLine, ""
     $proc = Start-Process -FilePath "$env:PRUNSRV" -ArgumentList $args -PassThru -WindowStyle Hidden
 
@@ -237,7 +212,7 @@ $env:JAVA_BIN
         echo "Running cassandra with: [$cmd $arg1 $arg2 $arg3 $arg4]"
     }
 
-    if ($foreground -ne "False")
+    if ($foreground)
     {
         $cygwin = $false
         try
@@ -305,4 +280,150 @@ WARNING! Failed to write pidfile to $pidfile.  stop-server.bat and
 }
 
 #-----------------------------------------------------------------------------
+Function VerifyPortsAreAvailable
+{
+    # Need to confirm 5 different ports are available or die if any are currently bound
+    # From cassandra.yaml:
+    #   storage_port
+    #   ssl_storage_port
+    #   native_transport_port
+    #   rpc_port, which we'll match to rpc_address
+    # and from env: JMX_PORT which we cache in our environment during SetCassandraEnvironment for this check
+    $toMatch = @("storage_port:","ssl_storage_port:","native_transport_port:","rpc_port")
+    $yaml = Get-Content "$env:CASSANDRA_CONF\cassandra.yaml"
+
+    $listenAddress = "unknown"
+    $rpcAddress = "unknown"
+    foreach ($line in $yaml)
+    {
+        if ($line -match "^listen_address:")
+        {
+            $args = $line -Split ":"
+            $listenAddress = $args[1] -replace " ", ""
+        }
+        if ($line -match "^rpc_address:")
+        {
+            $args = $line -Split ":"
+            $rpcAddress = $args[1] -replace " ", ""
+        }
+    }
+    if ($listenAddress -eq "unknown")
+    {
+        echo "Failed to parse listen_address from cassandra.yaml to check open ports.  Aborting startup."
+        Exit
+    }
+    if ($rpcAddress -eq "unknown")
+    {
+        echo "Failed to parse rpc_address from cassandra.yaml to check open ports.  Aborting startup."
+        Exit
+    }
+
+    foreach ($line in $yaml)
+    {
+        foreach ($match in $toMatch)
+        {
+            if ($line -match "^$match")
+            {
+                if ($line.contains("rpc"))
+                {
+                    CheckPort $rpcAddress $line
+                }
+                else
+                {
+                    CheckPort $listenAddress $line
+                }
+            }
+        }
+    }
+    CheckPort $listenAddress "jmx_port: $env:JMX_PORT"
+}
+
+#-----------------------------------------------------------------------------
+Function CheckPort([string]$listenAddress, [string]$configLine)
+{
+    $split = $configLine -Split ":"
+    if ($split.Length -ne 2)
+    {
+        echo "Invalid cassandra.yaml config line parsed while checking for available ports:"
+        echo "$configLine"
+        echo "Aborting startup"
+        Exit
+    }
+    else
+    {
+        $port = $split[1] -replace " ", ""
+
+        # start an async connect to the ip/port combo, give it 25ms, and error out if it succeeded
+        $tcpobject = new-Object system.Net.Sockets.TcpClient
+        $connect = $tcpobject.BeginConnect($listenAddress, $port, $null, $null)
+        $wait = $connect.AsyncWaitHandle.WaitOne(25, $false)
+
+        if (!$wait)
+        {
+            # still trying to connect, if it's not serviced in 25ms we'll assume it's not open
+            $tcpobject.Close()
+        }
+        else
+        {
+            $tcpobject.EndConnect($connect) | out-Null
+            echo "Cassandra port already in use ($configLine).  Aborting"
+            Exit
+        }
+    }
+}
+
+#-----------------------------------------------------------------------------
+Function ValidateArguments
+{
+    if ($install -and $uninstall)
+    {
+        echo "Cannot install and uninstall"
+        exit
+    }
+    if ($help)
+    {
+        PrintUsage
+    }
+}
+
+Function CheckEmptyParam($param)
+{
+    if ([String]::IsNullOrEmpty($param))
+    {
+        echo "Invalid parameter: empty value"
+        PrintUsage
+    }
+}
+
+for ($i = 0; $i -lt $args.count; $i++)
+{
+    # Skip JVM args
+    if ($args[$i].StartsWith("-D") -Or $args[$i].StartsWith("-X"))
+    {
+        continue;
+    }
+    Switch($args[$i])
+    {
+        "-install"          { $install = $True }
+        "-uninstall"        { $uninstall = $True }
+        "-help"             { PrintUsage }
+        "-v"                { $v = $True }
+        "-f"                { $f = $True }
+        "-s"                { $s = $True }
+        "-p"                { $p = $args[++$i]; CheckEmptyParam($p) }
+        "-H"                { $H = $args[++$i]; CheckEmptyParam($H) }
+        "-E"                { $E = $args[++$i]; CheckEmptyParam($E) }
+        default
+        {
+            "Invalid argument: " + $args[$i];
+            if (-Not $args[$i].startsWith("-"))
+            {
+                echo "Note: All options require -"
+            }
+            exit
+        }
+    }
+}
+$pidfile = "pid.txt"
+
 Main

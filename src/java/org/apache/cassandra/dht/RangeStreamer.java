@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IFailureDetector;
@@ -137,11 +138,11 @@ public class RangeStreamer
                 logger.debug(String.format("%s: range %s exists on %s", description, entry.getKey(), entry.getValue()));
         }
 
-        for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : getRangeFetchMap(rangesForKeyspace, sourceFilters).asMap().entrySet())
+        for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : getRangeFetchMap(rangesForKeyspace, sourceFilters, keyspaceName).asMap().entrySet())
         {
             if (logger.isDebugEnabled())
             {
-                for (Range r : entry.getValue())
+                for (Range<Token> r : entry.getValue())
                     logger.debug(String.format("%s: range %s from source %s for keyspace %s", description, r, entry.getKey(), keyspaceName));
             }
             toFetch.put(keyspaceName, entry);
@@ -253,7 +254,7 @@ public class RangeStreamer
      * @return
      */
     private static Multimap<InetAddress, Range<Token>> getRangeFetchMap(Multimap<Range<Token>, InetAddress> rangesWithSources,
-                                                                        Collection<ISourceFilter> sourceFilters)
+                                                                        Collection<ISourceFilter> sourceFilters, String keyspace)
     {
         Multimap<InetAddress, Range<Token>> rangeFetchMapMap = HashMultimap.create();
         for (Range<Token> range : rangesWithSources.keySet())
@@ -282,15 +283,15 @@ public class RangeStreamer
             }
 
             if (!foundSource)
-                throw new IllegalStateException("unable to find sufficient sources for streaming range " + range);
+                throw new IllegalStateException("unable to find sufficient sources for streaming range " + range + " in keyspace " + keyspace);
         }
 
         return rangeFetchMapMap;
     }
 
-    public static Multimap<InetAddress, Range<Token>> getWorkMap(Multimap<Range<Token>, InetAddress> rangesWithSourceTarget)
+    public static Multimap<InetAddress, Range<Token>> getWorkMap(Multimap<Range<Token>, InetAddress> rangesWithSourceTarget, String keyspace)
     {
-        return getRangeFetchMap(rangesWithSourceTarget, Collections.<ISourceFilter>singleton(new FailureDetectorSourceFilter(FailureDetector.instance)));
+        return getRangeFetchMap(rangesWithSourceTarget, Collections.<ISourceFilter>singleton(new FailureDetectorSourceFilter(FailureDetector.instance)), keyspace);
     }
 
     // For testing purposes
@@ -305,11 +306,12 @@ public class RangeStreamer
         {
             String keyspace = entry.getKey();
             InetAddress source = entry.getValue().getKey();
+            InetAddress preferred = SystemKeyspace.getPreferredIP(source);
             Collection<Range<Token>> ranges = entry.getValue().getValue();
             /* Send messages to respective folks to stream data over to me */
             if (logger.isDebugEnabled())
                 logger.debug("{}ing from {} ranges {}", description, source, StringUtils.join(ranges, ", "));
-            streamPlan.requestRanges(source, keyspace, ranges);
+            streamPlan.requestRanges(source, preferred, keyspace, ranges);
         }
 
         return streamPlan.execute();
