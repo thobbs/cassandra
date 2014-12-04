@@ -85,9 +85,15 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
-        return baseType.fromJSONObject(parsed);
+        return baseType.fromJSONObject(parsed, protocolVersion);
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return baseType.toJSONString(buffer, protocolVersion);
     }
 
     @Override

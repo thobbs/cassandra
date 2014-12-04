@@ -69,7 +69,7 @@ public class LongType extends AbstractType<Long>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         try
         {
@@ -83,7 +83,7 @@ public class LongType extends AbstractType<Long>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
         return getSerializer().deserialize(buffer).toString();
     }

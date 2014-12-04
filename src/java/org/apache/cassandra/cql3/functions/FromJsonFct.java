@@ -48,7 +48,7 @@ public class FromJsonFct extends AbstractFunction
         super(NAME, returnType, UTF8Type.instance);
     }
 
-    public ByteBuffer execute(List<ByteBuffer> parameters) throws InvalidRequestException
+    public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion) throws InvalidRequestException
     {
         assert parameters.size() == 1 : "Unexpectedly got " + parameters.size() + " arguments for fromJson()";
         ByteBuffer argument = parameters.get(0);
@@ -58,7 +58,7 @@ public class FromJsonFct extends AbstractFunction
             Object object = JSONValue.parseWithException(jsonArg);
             if (object == null)
                 return null;
-            return returnType.fromJSONObject(object);
+            return returnType.fromJSONObject(object, protocolVersion);
         }
         catch (ParseException exc)
         {

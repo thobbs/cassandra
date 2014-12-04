@@ -66,7 +66,7 @@ public class Int32Type extends AbstractType<Integer>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         try
         {
@@ -80,7 +80,7 @@ public class Int32Type extends AbstractType<Integer>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
         return getSerializer().deserialize(buffer).toString();
     }

@@ -137,7 +137,7 @@ public final class IntegerType extends AbstractType<BigInteger>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         try
         {

@@ -256,7 +256,7 @@ public abstract class Selection
         }
     }
 
-    protected abstract List<ByteBuffer> handleRow(ResultSetBuilder rs) throws InvalidRequestException;
+    protected abstract List<ByteBuffer> handleRow(ResultSetBuilder rs, int protocolVersion) throws InvalidRequestException;
 
     /**
      * @return the list of CQL3 columns value this SelectionClause needs.
@@ -329,18 +329,18 @@ public abstract class Selection
             return c == null || !c.isLive(now);
         }
 
-        public void newRow() throws InvalidRequestException
+        public void newRow(int protocolVersion) throws InvalidRequestException
         {
             if (current != null)
-                resultSet.addRow(handleRow(this));
+                resultSet.addRow(handleRow(this, protocolVersion));
             current = new ArrayList<ByteBuffer>(columns.size());
         }
 
-        public ResultSet build() throws InvalidRequestException
+        public ResultSet build(int protocolVersion) throws InvalidRequestException
         {
             if (current != null)
             {
-                resultSet.addRow(handleRow(this));
+                resultSet.addRow(handleRow(this, protocolVersion));
                 current = null;
             }
             return resultSet;
@@ -368,7 +368,7 @@ public abstract class Selection
             this.isWildcard = isWildcard;
         }
 
-        protected List<ByteBuffer> handleRow(ResultSetBuilder rs)
+        protected List<ByteBuffer> handleRow(ResultSetBuilder rs, int protocolVersion)
         {
             return rs.current;
         }
@@ -382,7 +382,7 @@ public abstract class Selection
 
     private static abstract class Selector implements AssignementTestable
     {
-        public abstract ByteBuffer compute(ResultSetBuilder rs) throws InvalidRequestException;
+        public abstract ByteBuffer compute(ResultSetBuilder rs, int protocolVersion) throws InvalidRequestException;
         public abstract AbstractType<?> getType();
 
         public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
@@ -404,7 +404,7 @@ public abstract class Selection
             this.type = type;
         }
 
-        public ByteBuffer compute(ResultSetBuilder rs)
+        public ByteBuffer compute(ResultSetBuilder rs, int protocolVersion)
         {
             return rs.current.get(idx);
         }
@@ -432,13 +432,13 @@ public abstract class Selection
             this.argSelectors = argSelectors;
         }
 
-        public ByteBuffer compute(ResultSetBuilder rs) throws InvalidRequestException
+        public ByteBuffer compute(ResultSetBuilder rs, int protocolVersion) throws InvalidRequestException
         {
             List<ByteBuffer> args = new ArrayList<ByteBuffer>(argSelectors.size());
             for (Selector s : argSelectors)
-                args.add(s.compute(rs));
+                args.add(s.compute(rs, protocolVersion));
 
-            return fun.execute(args);
+            return fun.execute(args, protocolVersion);
         }
 
         public AbstractType<?> getType()
@@ -474,9 +474,9 @@ public abstract class Selection
             this.selected = selected;
         }
 
-        public ByteBuffer compute(ResultSetBuilder rs) throws InvalidRequestException
+        public ByteBuffer compute(ResultSetBuilder rs, int protocolVersion) throws InvalidRequestException
         {
-            ByteBuffer value = selected.compute(rs);
+            ByteBuffer value = selected.compute(rs, protocolVersion);
             if (value == null)
                 return null;
             ByteBuffer[] buffers = type.split(value);
@@ -508,7 +508,7 @@ public abstract class Selection
             this.isWritetime = isWritetime;
         }
 
-        public ByteBuffer compute(ResultSetBuilder rs)
+        public ByteBuffer compute(ResultSetBuilder rs, int protocolVersion)
         {
             if (isWritetime)
             {
@@ -542,12 +542,12 @@ public abstract class Selection
             this.selectors = selectors;
         }
 
-        protected List<ByteBuffer> handleRow(ResultSetBuilder rs) throws InvalidRequestException
+        protected List<ByteBuffer> handleRow(ResultSetBuilder rs, int protocolVersion) throws InvalidRequestException
         {
             List<ByteBuffer> result = new ArrayList<ByteBuffer>();
             for (Selector selector : selectors)
             {
-                result.add(selector.compute(rs));
+                result.add(selector.compute(rs, protocolVersion));
             }
             return result;
         }

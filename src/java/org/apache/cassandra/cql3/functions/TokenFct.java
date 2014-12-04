@@ -59,7 +59,7 @@ public class TokenFct extends AbstractFunction
         return types;
     }
 
-    public ByteBuffer execute(List<ByteBuffer> parameters) throws InvalidRequestException
+    public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion) throws InvalidRequestException
     {
         CBuilder builder = cfm.getKeyValidatorAsCType().builder();
         for (int i = 0; i < parameters.size(); i++)

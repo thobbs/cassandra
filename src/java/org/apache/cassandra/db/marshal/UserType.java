@@ -139,7 +139,7 @@ public class UserType extends TupleType
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         if (!(parsed instanceof Map))
             throw new MarshalException(String.format(
@@ -161,7 +161,7 @@ public class UserType extends TupleType
             }
             else
             {
-                buffers.add(types.get(i).fromJSONObject(value));
+                buffers.add(types.get(i).fromJSONObject(value, protocolVersion));
                 foundValues += 1;
             }
         }
@@ -179,18 +179,17 @@ public class UserType extends TupleType
 
         int size = 0;
         for (ByteBuffer bb : buffers)
-            size += CollectionSerializer.sizeOfValue(bb, Server.CURRENT_VERSION);
+            size += CollectionSerializer.sizeOfValue(bb, protocolVersion);
 
         ByteBuffer result = ByteBuffer.allocate(size);
         for (ByteBuffer bb : buffers)
-            CollectionSerializer.writeValue(result, bb, Server.CURRENT_VERSION);
+            CollectionSerializer.writeValue(result, bb, protocolVersion);
         return (ByteBuffer)result.flip();
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        // TODO we cannot assume the current protocol version here, since the collection gets serialized prior to function execution
         ByteBuffer[] buffers = split(buffer);
         StringBuilder sb = new StringBuilder("{");
         for (int i = 0; i < types.size(); i++)
@@ -198,14 +197,14 @@ public class UserType extends TupleType
             if (i > 0)
                 sb.append(", ");
 
-            sb.append(UTF8Type.instance.toJSONString(fieldName(i)));
+            sb.append(UTF8Type.instance.toJSONString(fieldName(i), protocolVersion));
             sb.append(": ");
 
             ByteBuffer valueBuffer = buffers[i];
             if (valueBuffer == null)
                 sb.append("null");
             else
-                sb.append(types.get(i).toJSONString(valueBuffer));
+                sb.append(types.get(i).toJSONString(valueBuffer, protocolVersion));
         }
         return sb.append("}").toString();
     }

@@ -104,7 +104,7 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
@@ -116,18 +116,18 @@ public class SetType<T> extends CollectionType<Set<T>>
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in set");
-            buffers.add(elements.fromJSONObject(element));
+            buffers.add(elements.fromJSONObject(element, protocolVersion));
         }
 
         if (buffers.size() != list.size())
             throw new MarshalException("List representation of set contained duplicate elements");
 
-        return CollectionSerializer.pack(buffers, buffers.size(), Server.CURRENT_VERSION);
+        return CollectionSerializer.pack(buffers, buffers.size(), protocolVersion);
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        return ListType.setOrListToJsonString(buffer, elements);
+        return ListType.setOrListToJsonString(buffer, elements, protocolVersion);
     }
 }

@@ -50,7 +50,7 @@ public class BytesType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         try
         {
@@ -67,7 +67,7 @@ public class BytesType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
         return '"' + ByteBufferUtil.bytesToHex(buffer) + '"';
     }

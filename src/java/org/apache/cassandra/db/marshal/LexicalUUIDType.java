@@ -59,7 +59,7 @@ public class LexicalUUIDType extends AbstractType<UUID>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         try
         {

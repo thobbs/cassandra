@@ -122,7 +122,7 @@ public class ListType<T> extends CollectionType<List<T>>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
@@ -134,28 +134,27 @@ public class ListType<T> extends CollectionType<List<T>>
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in list");
-            buffers.add(elements.fromJSONObject(element));
+            buffers.add(elements.fromJSONObject(element, protocolVersion));
         }
-        return CollectionSerializer.pack(buffers, list.size(), Server.CURRENT_VERSION);
+        return CollectionSerializer.pack(buffers, list.size(), protocolVersion);
     }
 
-    public static String setOrListToJsonString(ByteBuffer buffer, AbstractType elementsType)
+    public static String setOrListToJsonString(ByteBuffer buffer, AbstractType elementsType, int protocolVersion)
     {
-        // TODO we cannot assume the current protocol version here, since the collection gets serialized prior to function execution
         StringBuilder sb = new StringBuilder("[");
-        int size = CollectionSerializer.readCollectionSize(buffer, Server.CURRENT_VERSION);
+        int size = CollectionSerializer.readCollectionSize(buffer, protocolVersion);
         for (int i = 0; i < size; i++)
         {
             if (i > 0)
                 sb.append(", ");
-            sb.append(elementsType.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+            sb.append(elementsType.toJSONString(CollectionSerializer.readValue(buffer, protocolVersion), protocolVersion));
         }
         return sb.append("]").toString();
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        return setOrListToJsonString(buffer, elements);
+        return setOrListToJsonString(buffer, elements, protocolVersion);
     }
 }

@@ -68,7 +68,7 @@ public class AsciiType extends AbstractType<String>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         try
         {
@@ -82,7 +82,7 @@ public class AsciiType extends AbstractType<String>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
         try
         {

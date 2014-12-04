@@ -28,7 +28,7 @@ public abstract class UuidFcts
 {
     public static final Function uuidFct = new AbstractFunction("uuid", UUIDType.instance)
     {
-        public ByteBuffer execute(List<ByteBuffer> parameters)
+        public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion)
         {
             return UUIDSerializer.instance.serialize(UUID.randomUUID());
         }

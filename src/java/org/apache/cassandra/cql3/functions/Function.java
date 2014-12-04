@@ -29,7 +29,7 @@ public interface Function
     public List<AbstractType<?>> argTypes();
     public AbstractType<?> returnType();
 
-    public ByteBuffer execute(List<ByteBuffer> parameters) throws InvalidRequestException;
+    public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion) throws InvalidRequestException;
 
     // Whether the function is a pure function (as in doesn't depend on, nor produce side effects).
     public boolean isPure();

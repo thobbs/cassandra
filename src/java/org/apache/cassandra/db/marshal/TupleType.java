@@ -224,7 +224,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
@@ -244,21 +244,21 @@ public class TupleType extends AbstractType<ByteBuffer>
             // TODO actually, we support nulls in tuples
             if (element == null)
                 throw new MarshalException("Invalid null element in tuple");
-            buffers.add(typeIterator.next().fromJSONObject(element));
+            buffers.add(typeIterator.next().fromJSONObject(element, protocolVersion));
         }
 
         int size = 0;
         for (ByteBuffer bb : buffers)
-            size += CollectionSerializer.sizeOfValue(bb, Server.CURRENT_VERSION);
+            size += CollectionSerializer.sizeOfValue(bb, protocolVersion);
 
         ByteBuffer result = ByteBuffer.allocate(size);
         for (ByteBuffer bb : buffers)
-            CollectionSerializer.writeValue(result, bb, Server.CURRENT_VERSION);
+            CollectionSerializer.writeValue(result, bb, protocolVersion);
         return (ByteBuffer)result.flip();
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < types.size(); i++)
@@ -266,11 +266,11 @@ public class TupleType extends AbstractType<ByteBuffer>
             if (i > 0)
                 sb.append(", ");
 
-            ByteBuffer value = CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION);
+            ByteBuffer value = CollectionSerializer.readValue(buffer, protocolVersion);
             if (value == null)
                 sb.append("null");
             else
-                sb.append(types.get(i).toJSONString(value));
+                sb.append(types.get(i).toJSONString(value, protocolVersion));
         }
         return sb.append("]").toString();
     }

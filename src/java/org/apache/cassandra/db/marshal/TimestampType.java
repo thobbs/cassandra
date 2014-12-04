@@ -58,7 +58,7 @@ public class TimestampType extends AbstractType<Date>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         if (parsed instanceof Long)
             return ByteBufferUtil.bytes((Long) parsed);
@@ -76,7 +76,7 @@ public class TimestampType extends AbstractType<Date>
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
         return '"' + TimestampSerializer.TO_JSON_FORMAT.format(TimestampSerializer.instance.deserialize(buffer)) + '"';
     }

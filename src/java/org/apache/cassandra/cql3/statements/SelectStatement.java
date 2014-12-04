@@ -1159,7 +1159,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             processColumnFamily(row.key.getKey(), row.cf, options, now, result);
         }
 
-        ResultSet cqlRows = result.build();
+        ResultSet cqlRows = result.build(options.getProtocolVersion());
 
         orderResults(cqlRows);
 
@@ -1191,6 +1191,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         if (sliceRestriction != null)
             cells = applySliceRestriction(cells, options);
 
+        int protocolVersion = options.getProtocolVersion();
         CQL3Row.RowIterator iter = cfm.comparator.CQL3RowBuilder(cfm, now).group(cells);
 
         // If there is static columns but there is no non-static row, then provided the select was a full
@@ -1199,7 +1200,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
         CQL3Row staticRow = iter.getStaticRow();
         if (staticRow != null && !iter.hasNext() && !usesSecondaryIndexing && hasNoClusteringColumnsRestriction())
         {
-            result.newRow();
+            result.newRow(protocolVersion);
             for (ColumnDefinition def : selection.getColumns())
             {
                 switch (def.kind)
@@ -1222,7 +1223,7 @@ public class SelectStatement implements CQLStatement, MeasurableForPreparedCache
             CQL3Row cql3Row = iter.next();
 
             // Respect requested order
-            result.newRow();
+            result.newRow(protocolVersion);
             // Respect selection order
             for (ColumnDefinition def : selection.getColumns())
             {

@@ -28,6 +28,7 @@ import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.SetType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.serializers.MarshalException;
 
@@ -65,12 +66,12 @@ public class FunctionCall extends Term.NonTerminal
                 throw new InvalidRequestException(String.format("Invalid null value for argument to %s", fun));
             buffers.add(val);
         }
-        return executeInternal(fun, buffers);
+        return executeInternal(fun, buffers, options.getProtocolVersion());
     }
 
-    private static ByteBuffer executeInternal(Function fun, List<ByteBuffer> params) throws InvalidRequestException
+    private static ByteBuffer executeInternal(Function fun, List<ByteBuffer> params, int protocolVersion) throws InvalidRequestException
     {
-        ByteBuffer result = fun.execute(params);
+        ByteBuffer result = fun.execute(params, protocolVersion);
         try
         {
             // Check the method didn't lied on it's declared return type
@@ -151,7 +152,7 @@ public class FunctionCall extends Term.NonTerminal
                 buffers.add(((Term.Terminal)t).get(QueryOptions.DEFAULT));
             }
 
-            return executeInternal(fun, buffers);
+            return executeInternal(fun, buffers, Server.CURRENT_VERSION);
         }
 
         public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)

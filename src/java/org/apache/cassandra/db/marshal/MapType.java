@@ -138,7 +138,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         if (!(parsed instanceof Map))
             throw new MarshalException(String.format(
@@ -154,26 +154,25 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             if (entry.getValue() == null)
                 throw new MarshalException("Invalid null value in map");
 
-            buffers.add(keys.fromJSONObject(entry.getKey()));
-            buffers.add(values.fromJSONObject(entry.getValue()));
+            buffers.add(keys.fromJSONObject(entry.getKey(), protocolVersion));
+            buffers.add(values.fromJSONObject(entry.getValue(), protocolVersion));
         }
-        return CollectionSerializer.pack(buffers, map.size(), Server.CURRENT_VERSION);
+        return CollectionSerializer.pack(buffers, map.size(), protocolVersion);
     }
 
     @Override
-    public String toJSONString(ByteBuffer buffer)
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        // TODO we cannot assume the current protocol version here, since the collection gets serialized prior to function execution
         StringBuilder sb = new StringBuilder("{");
-        int size = CollectionSerializer.readCollectionSize(buffer, Server.CURRENT_VERSION);
+        int size = CollectionSerializer.readCollectionSize(buffer, protocolVersion);
         for (int i = 0; i < size; i++)
         {
             if (i > 0)
                 sb.append(", ");
 
-            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, protocolVersion), protocolVersion));
             sb.append(": ");
-            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, Server.CURRENT_VERSION)));
+            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, protocolVersion), protocolVersion));
         }
         return sb.append("}").toString();
     }

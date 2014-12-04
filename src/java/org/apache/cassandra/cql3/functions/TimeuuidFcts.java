@@ -31,7 +31,7 @@ public abstract class TimeuuidFcts
 {
     public static final Function nowFct = new AbstractFunction("now", TimeUUIDType.instance)
     {
-        public ByteBuffer execute(List<ByteBuffer> parameters)
+        public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion)
         {
             return ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes());
         }
@@ -45,7 +45,7 @@ public abstract class TimeuuidFcts
 
     public static final Function minTimeuuidFct = new AbstractFunction("mintimeuuid", TimeUUIDType.instance, TimestampType.instance)
     {
-        public ByteBuffer execute(List<ByteBuffer> parameters)
+        public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion)
         {
             ByteBuffer bb = parameters.get(0);
             if (bb == null)
@@ -57,7 +57,7 @@ public abstract class TimeuuidFcts
 
     public static final Function maxTimeuuidFct = new AbstractFunction("maxtimeuuid", TimeUUIDType.instance, TimestampType.instance)
     {
-        public ByteBuffer execute(List<ByteBuffer> parameters)
+        public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion)
         {
             ByteBuffer bb = parameters.get(0);
             if (bb == null)
@@ -69,7 +69,7 @@ public abstract class TimeuuidFcts
 
     public static final Function dateOfFct = new AbstractFunction("dateof", TimestampType.instance, TimeUUIDType.instance)
     {
-        public ByteBuffer execute(List<ByteBuffer> parameters)
+        public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion)
         {
             ByteBuffer bb = parameters.get(0);
             if (bb == null)
@@ -81,7 +81,7 @@ public abstract class TimeuuidFcts
 
     public static final Function unixTimestampOfFct = new AbstractFunction("unixtimestampof", LongType.instance, TimeUUIDType.instance)
     {
-        public ByteBuffer execute(List<ByteBuffer> parameters)
+        public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion)
         {
             ByteBuffer bb = parameters.get(0);
             if (bb == null)

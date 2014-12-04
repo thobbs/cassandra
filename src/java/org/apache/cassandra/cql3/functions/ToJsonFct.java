@@ -49,13 +49,13 @@ public class ToJsonFct extends AbstractFunction
         super(NAME, UTF8Type.instance, returnType);
     }
 
-    public ByteBuffer execute(List<ByteBuffer> parameters) throws InvalidRequestException
+    public ByteBuffer execute(List<ByteBuffer> parameters, int protocolVersion) throws InvalidRequestException
     {
         assert parameters.size() == 1 : "Expected 1 argument for toJson(), but got " + parameters.size();
         ByteBuffer parameter = parameters.get(0);
         if (parameter == null)
             return ByteBufferUtil.bytes("null");
 
-        return ByteBufferUtil.bytes(argsType.get(0).toJSONString(parameter));
+        return ByteBufferUtil.bytes(argsType.get(0).toJSONString(parameter, protocolVersion));
     }
 }

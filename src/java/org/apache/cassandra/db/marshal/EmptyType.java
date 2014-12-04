@@ -53,7 +53,7 @@ public class EmptyType extends AbstractType<Void>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed) throws MarshalException
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
         if (!(parsed instanceof String))
             throw new MarshalException(String.format("Expected an empty string, but got: %s", parsed));
