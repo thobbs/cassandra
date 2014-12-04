@@ -215,6 +215,31 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             buffers.add(keys.fromJSONObject(entry.getKey(), protocolVersion));
             buffers.add(values.fromJSONObject(entry.getValue(), protocolVersion));
         }
+
+        if (!isMultiCell)
+        {
+            // the map keys may not be sorted, so we need to sort them here
+            List<Pair<ByteBuffer, ByteBuffer>> sortableValues = new ArrayList<>(buffers.size() / 2);
+            for (int i = 0; i < buffers.size(); i += 2)
+                sortableValues.add(Pair.create(buffers.get(i), buffers.get(i + 1)));
+
+            Collections.sort(sortableValues, new Comparator<Pair<ByteBuffer, ByteBuffer>>()
+            {
+                @Override
+                public int compare(Pair<ByteBuffer, ByteBuffer> o1, Pair<ByteBuffer, ByteBuffer> o2)
+                {
+                    return keys.compare(o1.left, o2.left);
+                }
+            });
+
+            for (int i = 0; i < buffers.size(); i += 2)
+            {
+                Pair<ByteBuffer, ByteBuffer> buffer = sortableValues.get(i / 2);
+                buffers.set(i, buffer.left);
+                buffers.set(i + 1, buffer.right);
+            }
+        }
+
         return CollectionSerializer.pack(buffers, map.size(), protocolVersion);
     }
 

@@ -56,8 +56,11 @@ public class JsonTest extends CQLTester
                 "varcharval varchar, " +
                 "varintval varint, " +
                 "listval list<int>, " +
+                "frozenlistval frozen<list<int>>, " +
                 "setval set<uuid>, " +
+                "frozensetval frozen<set<uuid>>, " +
                 "mapval map<ascii, int>," +
+                "frozenmapval frozen<map<ascii, int>>," +
                 "tupleval frozen<tuple<int, ascii, uuid>>," +
                 "udtval frozen<" + typeName + ">)");
 
@@ -266,6 +269,10 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Invalid null element in list",
                 "INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "[null]");
 
+        // frozen
+        execute("INSERT INTO %s (k, frozenlistval) VALUES (?, fromJson(?))", 0, "[1, 2, 3]");
+        assertRows(execute("SELECT k, frozenlistval FROM %s WHERE k = ?", 0), row(0, list(1, 2, 3)));
+
         // ================ sets ================
         execute("INSERT INTO %s (k, setval) VALUES (?, fromJson(?))",
                 0, "[\"6bddc89a-5644-11e4-97fc-56847afe9798\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
@@ -289,6 +296,19 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Invalid null element in set",
                 "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "[null]");
 
+        // frozen
+        execute("INSERT INTO %s (k, frozensetval) VALUES (?, fromJson(?))",
+                0, "[\"6bddc89a-5644-11e4-97fc-56847afe9798\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
+        assertRows(execute("SELECT k, frozensetval FROM %s WHERE k = ?", 0),
+                row(0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))))
+        );
+
+        execute("INSERT INTO %s (k, frozensetval) VALUES (?, fromJson(?))",
+                0, "[\"6bddc89a-5644-11e4-97fc-56847afe9799\", \"6bddc89a-5644-11e4-97fc-56847afe9798\"]");
+        assertRows(execute("SELECT k, frozensetval FROM %s WHERE k = ?", 0),
+                row(0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))))
+        );
+
         // ================ maps ================
         execute("INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{\"a\": 1, \"b\": 2}");
         assertRows(execute("SELECT k, mapval FROM %s WHERE k = ?", 0), row(0, map("a", 1, "b", 2)));
@@ -304,6 +324,13 @@ public class JsonTest extends CQLTester
 
         assertInvalidMessage("Invalid null value in map",
                 "INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{\"a\": null}");
+
+        // frozen
+        execute("INSERT INTO %s (k, frozenmapval) VALUES (?, fromJson(?))", 0, "{\"a\": 1, \"b\": 2}");
+        assertRows(execute("SELECT k, frozenmapval FROM %s WHERE k = ?", 0), row(0, map("a", 1, "b", 2)));
+
+        execute("INSERT INTO %s (k, frozenmapval) VALUES (?, fromJson(?))", 0, "{\"b\": 2, \"a\": 1}");
+        assertRows(execute("SELECT k, frozenmapval FROM %s WHERE k = ?", 0), row(0, map("a", 1, "b", 2)));
 
         // ================ tuples ================
         execute("INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))", 0, "[1, \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
@@ -378,8 +405,11 @@ public class JsonTest extends CQLTester
                 "varcharval varchar, " +
                 "varintval varint, " +
                 "listval list<int>, " +
+                "frozenlistval frozen<list<int>>, " +
                 "setval set<uuid>, " +
+                "frozensetval frozen<set<uuid>>, " +
                 "mapval map<ascii, int>, " +
+                "frozenmapval frozen<map<ascii, int>>, " +
                 "tupleval frozen<tuple<int, ascii, uuid>>," +
                 "udtval frozen<" + typeName + ">)");
 
@@ -482,6 +512,10 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, listval) VALUES (?, ?)", 0, list());
         assertRows(execute("SELECT k, toJson(listval) FROM %s WHERE k = ?", 0), row(0, "null"));
 
+        // frozen
+        execute("INSERT INTO %s (k, frozenlistval) VALUES (?, ?)", 0, list(1, 2, 3));
+        assertRows(execute("SELECT k, toJson(frozenlistval) FROM %s WHERE k = ?", 0), row(0, "[1, 2, 3]"));
+
         // ================ sets ================
         execute("INSERT INTO %s (k, setval) VALUES (?, ?)",
                 0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))));
@@ -492,12 +526,23 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, setval) VALUES (?, ?)", 0, set());
         assertRows(execute("SELECT k, toJson(setval) FROM %s WHERE k = ?", 0), row(0, "null"));
 
+        // frozen
+        execute("INSERT INTO %s (k, frozensetval) VALUES (?, ?)",
+                0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))));
+        assertRows(execute("SELECT k, toJson(frozensetval) FROM %s WHERE k = ?", 0),
+                row(0, "[\"6bddc89a-5644-11e4-97fc-56847afe9798\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]")
+        );
+
         // ================ maps ================
         execute("INSERT INTO %s (k, mapval) VALUES (?, ?)", 0, map("a", 1, "b", 2));
         assertRows(execute("SELECT k, toJson(mapval) FROM %s WHERE k = ?", 0), row(0, "{\"a\": 1, \"b\": 2}"));
 
         execute("INSERT INTO %s (k, mapval) VALUES (?, ?)", 0, map());
         assertRows(execute("SELECT k, toJson(mapval) FROM %s WHERE k = ?", 0), row(0, "null"));
+
+        // frozen
+        execute("INSERT INTO %s (k, frozenmapval) VALUES (?, ?)", 0, map("a", 1, "b", 2));
+        assertRows(execute("SELECT k, toJson(frozenmapval) FROM %s WHERE k = ?", 0), row(0, "{\"a\": 1, \"b\": 2}"));
 
         // ================ tuples ================
         execute("INSERT INTO %s (k, tupleval) VALUES (?, ?)", 0, tuple(1, "foobar", UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")));
@@ -513,7 +558,7 @@ public class JsonTest extends CQLTester
         // ================ UDTs ================
         execute("INSERT INTO %s (k, udtval) VALUES (?, {a: ?, b: ?, c: ?})", 0, 1, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"), set("foo", "bar"));
         assertRows(execute("SELECT k, toJson(udtval) FROM %s WHERE k = ?", 0),
-                row(0, "{\"a\": 1, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"c\": [\"foo\", \"bar\"]}")
+                row(0, "{\"a\": 1, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"c\": [\"bar\", \"foo\"]}")
         );
 
         execute("INSERT INTO %s (k, udtval) VALUES (?, {a: ?, b: ?})", 0, 1, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"));
