@@ -26,6 +26,7 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.UTF8Serializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.json.simple.JSONValue;
 
 public class UTF8Type extends AbstractType<String>
 {
@@ -63,7 +64,7 @@ public class UTF8Type extends AbstractType<String>
     {
         try
         {
-            return '"' + ByteBufferUtil.string(buffer, Charset.forName("UTF-8")) + '"';
+            return '"' + JSONValue.escape(ByteBufferUtil.string(buffer, Charset.forName("UTF-8"))) + '"';
         }
         catch (CharacterCodingException exc)
         {
