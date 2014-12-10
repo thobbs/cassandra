@@ -462,7 +462,7 @@ public abstract class Selection
 
         public ResultSet build(int protocolVersion) throws InvalidRequestException
         {
-            if (current != null)
+            if (haveSeenRow)
                 count++;
 
             current = Collections.singletonList(ByteBufferUtil.bytes(count));

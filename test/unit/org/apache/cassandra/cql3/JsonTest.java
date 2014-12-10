@@ -572,4 +572,55 @@ public class JsonTest extends CQLTester
                 row(0, "{\"a\": 1, \"b\": \"6bddc89a-5644-11e4-97fc-56847afe9799\", \"c\": null}")
         );
     }
+
+    @Test
+    public void testJsonSyntax() throws Throwable
+    {
+        // tests SELECT JSON statements
+        createTable("CREATE TABLE %s (k int primary key, v int)");
+        execute("INSERT INTO %s (k, v) VALUES (0, 0)");
+        execute("INSERT INTO %s (k, v) VALUES (1, 1)");
+
+        assertRows(execute("SELECT JSON * FROM %s"),
+                row("{\"k\": 0, \"v\": 0}"),
+                row("{\"k\": 1, \"v\": 1}")
+        );
+
+        assertRows(execute("SELECT JSON k, v FROM %s"),
+                row("{\"k\": 0, \"v\": 0}"),
+                row("{\"k\": 1, \"v\": 1}")
+        );
+
+        assertRows(execute("SELECT JSON v, k FROM %s"),
+                row("{\"v\": 0, \"k\": 0}"),
+                row("{\"v\": 1, \"k\": 1}")
+        );
+
+        assertRows(execute("SELECT JSON v as foo, k as bar FROM %s"),
+                row("{\"foo\": 0, \"bar\": 0}"),
+                row("{\"foo\": 1, \"bar\": 1}")
+        );
+
+        assertRows(execute("SELECT JSON ttl(v), k FROM %s"),
+                row("{\"ttl(v)\": null, \"k\": 0}"),
+                row("{\"ttl(v)\": null, \"k\": 1}")
+        );
+
+        assertRows(execute("SELECT JSON ttl(v) as foo, k FROM %s"),
+                row("{\"foo\": null, \"k\": 0}"),
+                row("{\"foo\": null, \"k\": 1}")
+        );
+
+        assertRows(execute("SELECT JSON count(*) FROM %s"),
+                row("{\"count\": 2}")
+        );
+
+        assertRows(execute("SELECT JSON count(*) as foo FROM %s"),
+                row("{\"foo\": 2}")
+        );
+
+        assertRows(execute("SELECT JSON toJson(blobAsInt(intAsBlob(v))) FROM %s LIMIT 1"),
+                row("{\"toJson(blobAsInt(intAsBlob(v)))\": \"0\"}")
+        );
+    }
 }

@@ -271,7 +271,6 @@ public class SelectStatement implements CQLStatement
     {
         // Even for count, we need to process the result as it'll group some column together in sparse column families
         ResultSet rset = process(rows, options, limit, now);
-        // rset = parameters.isCount ? rset.makeCountResult(parameters.countAlias) : rset;
         return new ResultMessage.Rows(rset);
     }
 
