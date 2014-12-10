@@ -96,7 +96,7 @@ public class SelectStatement implements CQLStatement
     private boolean selectsOnlyStaticColumns;
 
     // Used by forSelection below
-    private static final Parameters defaultParameters = new Parameters(Collections.<ColumnIdentifier.Raw, Boolean>emptyMap(), false, false, null, false);
+    private static final Parameters defaultParameters = new Parameters(Collections.<ColumnIdentifier.Raw, Boolean>emptyMap(), false, false, null, false, false);
 
     private static final Predicate<ColumnDefinition> isStaticFilter = new Predicate<ColumnDefinition>()
     {
@@ -155,9 +155,10 @@ public class SelectStatement implements CQLStatement
 
     public ResultSet.Metadata getResultMetadata()
     {
-        return parameters.isCount
-             ? ResultSet.makeCountMetadata(keyspace(), columnFamily(), parameters.countAlias)
-             : selection.getResultMetadata();
+        return selection.getResultMetadata();
+        // return parameters.isCount
+        //      ? ResultSet.makeCountMetadata(keyspace(), columnFamily(), parameters.countAlias)
+        //      : selection.getResultMetadata();
     }
 
     public int getBoundTerms()
@@ -259,12 +260,10 @@ public class SelectStatement implements CQLStatement
             int maxLimit = pager.maxRemaining();
             logger.debug("New maxLimit for paged count query is {}", maxLimit);
             ResultSet rset = process(pager.fetchPage(pageSize), options, maxLimit, now);
-            count += rset.rows.size();
+            count += rset.getCount();
         }
 
-        // We sometimes query one more result than the user limit asks to handle exclusive bounds with compact tables (see updateLimitForQuery).
-        // So do make sure the count is not greater than what the user asked for.
-        ResultSet result = ResultSet.makeCountResult(keyspace(), columnFamily(), Math.min(count, limit), parameters.countAlias);
+        ResultSet result = selection.makeCountResult(now, count, options.getProtocolVersion());
         return new ResultMessage.Rows(result);
     }
 
@@ -272,7 +271,7 @@ public class SelectStatement implements CQLStatement
     {
         // Even for count, we need to process the result as it'll group some column together in sparse column families
         ResultSet rset = process(rows, options, limit, now);
-        rset = parameters.isCount ? rset.makeCountResult(parameters.countAlias) : rset;
+        // rset = parameters.isCount ? rset.makeCountResult(parameters.countAlias) : rset;
         return new ResultMessage.Rows(rset);
     }
 
@@ -1414,9 +1413,14 @@ public class SelectStatement implements CQLStatement
             if (parameters.isCount && !selectClause.isEmpty())
                 throw new InvalidRequestException("Only COUNT(*) and COUNT(1) operations are currently supported.");
 
-            Selection selection = selectClause.isEmpty()
-                                ? Selection.wildcard(cfm)
-                                : Selection.fromSelectors(cfm, selectClause);
+
+            Selection selection;
+            if (parameters.isCount)
+                selection = Selection.forCount(cfm, parameters.countAlias, parameters.isJson);
+            else
+                selection = selectClause.isEmpty()
+                            ? Selection.wildcard(cfm, parameters.isJson)
+                            : Selection.fromSelectors(cfm, selectClause, parameters.isJson);
 
             SelectStatement stmt = new SelectStatement(cfm, boundNames.size(), parameters, selection, prepareLimit(boundNames));
 
@@ -2195,6 +2199,7 @@ public class SelectStatement implements CQLStatement
                           .add("whereClause", whereClause)
                           .add("isDistinct", parameters.isDistinct)
                           .add("isCount", parameters.isCount)
+                          .add("isJson", parameters.isJson)
                           .toString();
         }
     }
@@ -2206,18 +2211,21 @@ public class SelectStatement implements CQLStatement
         private final boolean isCount;
         private final ColumnIdentifier countAlias;
         private final boolean allowFiltering;
+        private final boolean isJson;
 
         public Parameters(Map<ColumnIdentifier.Raw, Boolean> orderings,
                           boolean isDistinct,
                           boolean isCount,
                           ColumnIdentifier countAlias,
-                          boolean allowFiltering)
+                          boolean allowFiltering,
+                          boolean isJson)
         {
             this.orderings = orderings;
             this.isDistinct = isDistinct;
             this.isCount = isCount;
             this.countAlias = countAlias;
             this.allowFiltering = allowFiltering;
+            this.isJson = isJson;
         }
     }
 

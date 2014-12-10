@@ -104,7 +104,7 @@ public abstract class Functions
             throw new InvalidRequestException("The toJson() function can only be used on columns in a SELECT clause");
         }
 
-        List<Function> candidates = declared.get(name);
+        List<Function> candidates = declared.get(name.toLowerCase());
         if (candidates.isEmpty())
             return null;
 

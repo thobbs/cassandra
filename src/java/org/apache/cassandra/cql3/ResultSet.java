@@ -37,10 +37,11 @@ import org.apache.cassandra.service.pager.PagingState;
 public class ResultSet
 {
     public static final Codec codec = new Codec();
-    private static final ColumnIdentifier COUNT_COLUMN = new ColumnIdentifier("count", false);
+    public static final ColumnIdentifier COUNT_COLUMN = new ColumnIdentifier("count", false);
 
     public final Metadata metadata;
     public final List<List<ByteBuffer>> rows;
+    public long count = -1;
 
     public ResultSet(List<ColumnSpecification> metadata)
     {
@@ -62,6 +63,11 @@ public class ResultSet
     {
         assert row.size() == metadata.valueCount();
         rows.add(row);
+    }
+
+    public void setCount(long count)
+    {
+        this.count = count;
     }
 
     public void addColumnValue(ByteBuffer value)
@@ -92,25 +98,10 @@ public class ResultSet
         }
     }
 
-    public ResultSet makeCountResult(ColumnIdentifier alias)
+    public long getCount()
     {
-        assert metadata.names != null;
-        String ksName = metadata.names.get(0).ksName;
-        String cfName = metadata.names.get(0).cfName;
-        long count = rows.size();
-        return makeCountResult(ksName, cfName, count, alias);
-    }
-
-    public static ResultSet.Metadata makeCountMetadata(String ksName, String cfName, ColumnIdentifier alias)
-    {
-        ColumnSpecification spec = new ColumnSpecification(ksName, cfName, alias == null ? COUNT_COLUMN : alias, LongType.instance);
-        return new Metadata(Collections.singletonList(spec));
-    }
-
-    public static ResultSet makeCountResult(String ksName, String cfName, long count, ColumnIdentifier alias)
-    {
-        List<List<ByteBuffer>> newRows = Collections.singletonList(Collections.singletonList(ByteBufferUtil.bytes(count)));
-        return new ResultSet(makeCountMetadata(ksName, cfName, alias), newRows);
+        assert count != -1 : "ResultSet.getCount() was called before setCount()";
+        return count;
     }
 
     public CqlResult toThriftResult()

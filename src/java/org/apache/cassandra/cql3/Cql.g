@@ -265,9 +265,12 @@ selectStatement returns [SelectStatement.RawStatement expr]
         Term.Raw limit = null;
         Map<ColumnIdentifier.Raw, Boolean> orderings = new LinkedHashMap<ColumnIdentifier.Raw, Boolean>();
         boolean allowFiltering = false;
+        boolean isJson = false;
     }
-    : K_SELECT ( ( K_DISTINCT { isDistinct = true; } )? sclause=selectClause
-               | (K_COUNT '(' sclause=selectCountClause ')' { isCount = true; } (K_AS c=ident { countAlias = c; })?) )
+    : K_SELECT
+      ( K_JSON { isJson = true; } )?
+      ( ( K_DISTINCT { isDistinct = true; } )?  sclause=selectClause
+      | (K_COUNT '(' sclause=selectCountClause ')' { isCount = true; } (K_AS c=ident { countAlias = c; })?) )
       K_FROM cf=columnFamilyName
       ( K_WHERE wclause=whereClause )?
       ( K_ORDER K_BY orderByClause[orderings] ( ',' orderByClause[orderings] )* )?
@@ -278,7 +281,8 @@ selectStatement returns [SelectStatement.RawStatement expr]
                                                                              isDistinct,
                                                                              isCount,
                                                                              countAlias,
-                                                                             allowFiltering);
+                                                                             allowFiltering,
+                                                                             isJson);
           $expr = new SelectStatement.RawStatement(cf, params, sclause, wclause, limit);
       }
     ;
@@ -1216,6 +1220,7 @@ basic_unreserved_keyword returns [String str]
         | K_DISTINCT
         | K_CONTAINS
         | K_STATIC
+        | K_JSON
         ) { $str = $k.text; }
     ;
 
@@ -1324,6 +1329,8 @@ K_TUPLE:       T U P L E;
 K_TRIGGER:     T R I G G E R;
 K_STATIC:      S T A T I C;
 K_FROZEN:      F R O Z E N;
+
+K_JSON:        J S O N;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');

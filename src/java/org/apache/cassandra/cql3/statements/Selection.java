@@ -18,9 +18,9 @@
 package org.apache.cassandra.cql3.statements;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
+import com.google.common.base.Objects;
 import com.google.common.collect.Iterators;
 
 import org.apache.cassandra.cql3.*;
@@ -40,20 +40,45 @@ import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.json.simple.JSONValue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class Selection
 {
+    private static final Logger logger = LoggerFactory.getLogger(Selection.class);
+
     private final List<ColumnDefinition> columns;
-    private final ResultSet.Metadata metadata;
+    protected final ResultSet.Metadata metadata;
     private final boolean collectTimestamps;
     private final boolean collectTTLs;
+    protected final boolean isCount;
+    protected final boolean isJson;
+    private final ResultSet.Metadata jsonMetadata;
 
-    protected Selection(List<ColumnDefinition> columns, List<ColumnSpecification> metadata, boolean collectTimestamps, boolean collectTTLs)
+    private static final ColumnIdentifier jsonId = new ColumnIdentifier("json", false);
+
+    protected Selection(List<ColumnDefinition> columns, List<ColumnSpecification> metadata,
+                        boolean collectTimestamps, boolean collectTTLs, boolean isCount, boolean isJson)
     {
         this.columns = columns;
         this.metadata = new ResultSet.Metadata(metadata);
         this.collectTimestamps = collectTimestamps;
         this.collectTTLs = collectTTLs;
+        this.isCount = isCount;
+        this.isJson = isJson;
+
+        if (isJson)
+        {
+            ColumnSpecification firstColumn = columns.get(0);
+            ColumnSpecification jsonSpec = new ColumnSpecification(firstColumn.ksName, firstColumn.cfName, jsonId, UTF8Type.instance);
+            jsonMetadata = new ResultSet.Metadata(Arrays.asList(jsonSpec));
+        }
+        else
+        {
+            jsonMetadata = null;
+        }
+
     }
 
     // Overriden by SimpleSelection when appropriate.
@@ -64,19 +89,32 @@ public abstract class Selection
 
     public ResultSet.Metadata getResultMetadata()
     {
-        return metadata;
+        return isJson ? jsonMetadata : metadata;
     }
 
-    public static Selection wildcard(CFMetaData cfm)
+    public static Selection wildcard(CFMetaData cfm, boolean json)
     {
         List<ColumnDefinition> all = new ArrayList<ColumnDefinition>(cfm.allColumns().size());
         Iterators.addAll(all, cfm.allColumnsInSelectOrder());
-        return new SimpleSelection(all, true);
+
+        return new SimpleSelection(all, true, false, json);
     }
 
-    public static Selection forColumns(List<ColumnDefinition> columns)
+    public static Selection forCount(CFMetaData cfm, ColumnIdentifier alias, boolean json)
     {
-        return new SimpleSelection(columns, false);
+        if (alias == null)
+            alias = ResultSet.COUNT_COLUMN;
+        ColumnSpecification spec = new ColumnSpecification(cfm.ksName, cfm.cfName, alias, LongType.instance);
+
+        List<ColumnDefinition> all = new ArrayList<>(cfm.allColumns().size());
+        Iterators.addAll(all, cfm.allColumnsInSelectOrder());
+
+        return new SimpleSelection(all, Arrays.asList(spec), true, true, json);
+    }
+
+    public static Selection forColumns(List<ColumnDefinition> columns, boolean json)
+    {
+        return new SimpleSelection(columns, false, false, json);
     }
 
     public int addColumnForOrdering(ColumnDefinition c)
@@ -223,7 +261,7 @@ public abstract class Selection
         return new ColumnSpecification(cfm.ksName, cfm.cfName, alias, type);
     }
 
-    public static Selection fromSelectors(CFMetaData cfm, List<RawSelector> rawSelectors) throws InvalidRequestException
+    public static Selection fromSelectors(CFMetaData cfm, List<RawSelector> rawSelectors, boolean json) throws InvalidRequestException
     {
         if (requiresProcessing(rawSelectors))
         {
@@ -236,13 +274,10 @@ public abstract class Selection
             {
                 Selector selector = makeSelector(cfm, rawSelector, defs, metadata);
                 selectors.add(selector);
-                if (selector instanceof WritetimeOrTTLSelector)
-                {
-                    collectTimestamps |= ((WritetimeOrTTLSelector)selector).isWritetime;
-                    collectTTLs |= !((WritetimeOrTTLSelector)selector).isWritetime;
-                }
+                collectTimestamps |= selector.usesTimestamps();
+                collectTTLs |= selector.usesTTLs();
             }
-            return new SelectionWithProcessing(defs, metadata, selectors, collectTimestamps, collectTTLs);
+            return new SelectionWithProcessing(defs, metadata, selectors, collectTimestamps, collectTTLs, false, json);
         }
         else
         {
@@ -258,7 +293,7 @@ public abstract class Selection
                 defs.add(def);
                 metadata.add(rawSelector.alias == null ? def : makeAliasSpec(cfm, def.type, rawSelector.alias));
             }
-            return new SimpleSelection(defs, metadata, false);
+            return new SimpleSelection(defs, metadata, false, false, json);
         }
     }
 
@@ -274,7 +309,7 @@ public abstract class Selection
 
     public ResultSetBuilder resultSetBuilder(long now)
     {
-        return new ResultSetBuilder(now);
+        return isCount ? new CountingResultSetBuilder(now) : new ResultSetBuilder(now);
     }
 
     private static ByteBuffer value(Cell c)
@@ -284,9 +319,43 @@ public abstract class Selection
             : c.value();
     }
 
+    protected List<ByteBuffer> rowToJson(List<ByteBuffer> row, int protocolVersion)
+    {
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < metadata.names.size(); i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            ColumnSpecification spec = metadata.names.get(i);
+            ByteBuffer buffer = row.get(i);
+            sb.append('"');
+            sb.append(JSONValue.escape(spec.name.toString()));
+            sb.append("\": ");
+            if (buffer == null)
+                sb.append("null");
+            else
+                sb.append(spec.type.toJSONString(buffer, protocolVersion));
+        }
+        sb.append("}");
+        return Arrays.asList(UTF8Type.instance.getSerializer().serialize(sb.toString()));
+    }
+
+    @Override
+    public String toString()
+    {
+        return Objects.toStringHelper(this)
+                .add("columns", columns)
+                .add("metadata", metadata)
+                .add("collectTimestamps", collectTimestamps)
+                .add("collectTTLs", collectTTLs)
+                .add("isJson", isJson)
+                .toString();
+    }
+
     public class ResultSetBuilder
     {
-        private final ResultSet resultSet;
+        protected final ResultSet resultSet;
 
         /*
          * We'll build CQL3 row one by one.
@@ -353,30 +422,85 @@ public abstract class Selection
         }
     }
 
+    /**
+     * In order to handle count() paging in 2.1 (especially in combination with JSON output formatting), this helper
+     * method allows a ResultSet to be created with a single row containing the given count.  Any result set
+     * manipulations, such as JSON formatting or column aliases, will be handled by this.
+     */
+    public ResultSet makeCountResult(long now, long count, int protocolVersion) throws InvalidRequestException
+    {
+        CountingResultSetBuilder builder = new CountingResultSetBuilder(now, count);
+        return builder.build(protocolVersion);
+    }
+
+    private class CountingResultSetBuilder extends ResultSetBuilder
+    {
+        private long count = 0;
+        private boolean haveSeenRow = false;
+
+        private CountingResultSetBuilder(long now)
+        {
+            super(now);
+        }
+
+        private CountingResultSetBuilder(long now, long count)
+        {
+            super(now);
+            this.count = count;
+        }
+
+        public void add(ByteBuffer v) { }
+
+        public void add(Cell c) { }
+
+        public void newRow(int protocolVersion) throws InvalidRequestException
+        {
+            if (haveSeenRow)
+                count++;
+            haveSeenRow = true;
+        }
+
+        public ResultSet build(int protocolVersion) throws InvalidRequestException
+        {
+            if (current != null)
+                count++;
+
+            current = Collections.singletonList(ByteBufferUtil.bytes(count));
+            resultSet.addRow(handleRow(this, protocolVersion));
+            resultSet.setCount(count);
+            current = null;
+            haveSeenRow = false;
+            return resultSet;
+        }
+    }
+
     // Special cased selection for when no function is used (this save some allocations).
     private static class SimpleSelection extends Selection
     {
         private final boolean isWildcard;
 
-        public SimpleSelection(List<ColumnDefinition> columns, boolean isWildcard)
+        public SimpleSelection(List<ColumnDefinition> columns, boolean isWildcard, boolean isCount, boolean json)
         {
-            this(columns, new ArrayList<ColumnSpecification>(columns), isWildcard);
+            this(columns, new ArrayList<ColumnSpecification>(columns), isWildcard, isCount, json);
         }
 
-        public SimpleSelection(List<ColumnDefinition> columns, List<ColumnSpecification> metadata, boolean isWildcard)
+        public SimpleSelection(List<ColumnDefinition> columns, List<ColumnSpecification> metadata, boolean isWildcard, boolean isCount, boolean json)
         {
             /*
              * In theory, even a simple selection could have multiple time the same column, so we
              * could filter those duplicate out of columns. But since we're very unlikely to
              * get much duplicate in practice, it's more efficient not to bother.
              */
-            super(columns, metadata, false, false);
+            super(columns, metadata, false, false, isCount, json);
             this.isWildcard = isWildcard;
         }
 
         protected List<ByteBuffer> handleRow(ResultSetBuilder rs, int protocolVersion)
         {
-            return rs.current;
+            if (!isJson)
+                return rs.current;
+            else
+                return rowToJson(rs.current, protocolVersion);
         }
 
         @Override
@@ -394,6 +518,16 @@ public abstract class Selection
         public boolean isAssignableTo(String keyspace, ColumnSpecification receiver)
         {
             return receiver.type.isValueCompatibleWith(getType());
+        }
+
+        public boolean usesTimestamps()
+        {
+            return false;
+        }
+
+        public boolean usesTTLs()
+        {
+            return false;
         }
     }
 
@@ -431,9 +565,10 @@ public abstract class Selection
     {
         private final List<Selector> selectors;
 
-        public SelectionWithProcessing(List<ColumnDefinition> columns, List<ColumnSpecification> metadata, List<Selector> selectors, boolean collectTimestamps, boolean collectTTLs)
+        public SelectionWithProcessing(List<ColumnDefinition> columns, List<ColumnSpecification> metadata, List<Selector> selectors,
+                                       boolean collectTimestamps, boolean collectTTLs, boolean isCount, boolean json)
         {
-            super(columns, metadata, collectTimestamps, collectTTLs);
+            super(columns, metadata, collectTimestamps, collectTTLs, isCount, json);
             this.selectors = selectors;
         }
 
@@ -442,7 +577,8 @@ public abstract class Selection
             List<ByteBuffer> result = new ArrayList<>();
             for (Selector selector : selectors)
                 result.add(selector.compute(rs, protocolVersion));
-            return result;
+            return isJson ? rowToJson(result, protocolVersion)
+                          : result;
         }
 
         @Override
@@ -477,6 +613,22 @@ public abstract class Selection
         public AbstractType<?> getType()
         {
             return fun.returnType();
+        }
+
+        public boolean usesTimestamps()
+        {
+            for (Selector s : argSelectors)
+                if (s.usesTimestamps())
+                    return true;
+            return false;
+        }
+
+        public boolean usesTTLs()
+        {
+            for (Selector s : argSelectors)
+                if (s.usesTTLs())
+                    return true;
+            return false;
         }
 
         @Override
@@ -556,6 +708,17 @@ public abstract class Selection
         public AbstractType<?> getType()
         {
             return isWritetime ? LongType.instance : Int32Type.instance;
+        }
+
+
+        public boolean usesTimestamps()
+        {
+            return isWritetime;
+        }
+
+        public boolean usesTTLs()
+        {
+            return !isWritetime;
         }
 
         @Override
