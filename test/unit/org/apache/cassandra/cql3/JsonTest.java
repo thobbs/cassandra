@@ -574,7 +574,7 @@ public class JsonTest extends CQLTester
     }
 
     @Test
-    public void testJsonSyntax() throws Throwable
+    public void testSelectJsonSyntax() throws Throwable
     {
         // tests SELECT JSON statements
         createTable("CREATE TABLE %s (k int primary key, v int)");
@@ -622,5 +622,42 @@ public class JsonTest extends CQLTester
         assertRows(execute("SELECT JSON toJson(blobAsInt(intAsBlob(v))) FROM %s LIMIT 1"),
                 row("{\"toJson(blobAsInt(intAsBlob(v)))\": \"0\"}")
         );
+    }
+
+    @Test
+    public void testInsertJsonSyntax() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int primary key, v int)");
+        execute("INSERT INTO %s (k, v) JSON ?", "{\"k\": 0, \"v\": 0}");
+        assertRows(execute("SELECT * FROM %s"),
+                row(0, 0)
+        );
+
+        execute("INSERT INTO %s (k, v) JSON ?", "{\"k\": 0, \"v\": null}");
+        assertRows(execute("SELECT * FROM %s"),
+                row(0, null)
+        );
+
+        execute("INSERT INTO %s (k, v) JSON ?", "{\"v\": 1, \"k\": 0}");
+        assertRows(execute("SELECT * FROM %s"),
+                row(0, 1)
+        );
+
+        execute("INSERT INTO %s (k, v) JSON ?", "{\"k\": 0}");
+        assertRows(execute("SELECT * FROM %s"),
+                row(0, null)
+        );
+
+        assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s (k, v) JSON ?", new Object[]{null});
+        assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s (k, v) JSON ?", "null");
+        assertInvalidMessage("Expected a map", "INSERT INTO %s (k, v) JSON ?", "\"notamap\"");
+        assertInvalidMessage("Expected a map", "INSERT INTO %s (k, v) JSON ?", "12.34");
+        assertInvalidMessage("JSON values map contains unrecognized column",
+                "INSERT INTO %s (k, v) JSON ?",
+                "{\"k\": 0, \"v\": 0, \"zzz\": 0}");
+
+        assertInvalidMessage("Expected an int value, but got a String",
+                "INSERT INTO %s (k, v) JSON ?",
+                "{\"k\": 0, \"v\": \"notanint\"}");
     }
 }

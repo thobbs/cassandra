@@ -94,6 +94,13 @@ options {
         return marker;
     }
 
+    public Json.Marker newJsonBindVariables(ColumnIdentifier name)
+    {
+        Json.Marker marker = new Json.Marker(bindVariables.size());
+        bindVariables.add(name);
+        return marker;
+    }
+
     public void addErrorListener(ErrorListener listener)
     {
         this.listeners.add(listener);
@@ -343,11 +350,14 @@ insertStatement returns [UpdateStatement.ParsedInsert expr]
         List<ColumnIdentifier.Raw> columnNames  = new ArrayList<ColumnIdentifier.Raw>();
         List<Term.Raw> values = new ArrayList<Term.Raw>();
         boolean ifNotExists = false;
+        boolean isJson = false;
     }
     : K_INSERT K_INTO cf=columnFamilyName
           '(' c1=cident { columnNames.add(c1); }  ( ',' cn=cident { columnNames.add(cn); } )* ')'
-        K_VALUES
-          '(' v1=term { values.add(v1); } ( ',' vn=term { values.add(vn); } )* ')'
+        ( K_VALUES
+           '(' v1=term { values.add(v1); } ( ',' vn=term { values.add(vn); } )* ')'
+        | K_JSON
+           v1=jsonValue { values.add(v1); isJson = true; })
 
         ( K_IF K_NOT K_EXISTS { ifNotExists = true; } )?
         ( usingClause[attrs] )?
@@ -356,8 +366,16 @@ insertStatement returns [UpdateStatement.ParsedInsert expr]
                                                    attrs,
                                                    columnNames,
                                                    values,
-                                                   ifNotExists);
+                                                   ifNotExists,
+                                                   isJson);
       }
+    ;
+
+jsonValue returns [Term.Raw value]
+    :
+    | s=STRING_LITERAL { $value = new Json.Literal($s.text); }
+    | ':' id=ident     { $value = newJsonBindVariables(id); }
+    | QMARK            { $value = newJsonBindVariables(null); }
     ;
 
 usingClause[Attributes.Raw attrs]
