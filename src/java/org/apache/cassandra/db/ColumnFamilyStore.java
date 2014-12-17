@@ -1782,7 +1782,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 }
 
                 rows.add(new Row(rawRow.key, data));
-                matched++;
+                if (data != null && data.getColumnCount() != 0)
+                    matched++;
 
                 if (data != null)
                     columnsCount += filter.lastCounted(data);

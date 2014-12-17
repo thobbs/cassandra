@@ -1652,11 +1652,10 @@ public class StorageProxy implements StorageProxyMBean
 
     private static List<Row> trim(AbstractRangeCommand command, List<Row> rows)
     {
-        // When maxIsColumns, we let the caller trim the result.
-        if (command.countCQL3Rows())
-            return rows;
-        else
+        if (command.shouldTrimRowsOnCoordinator())
             return rows.size() > command.limit() ? rows.subList(0, command.limit()) : rows;
+        else
+            return rows;
     }
 
     public Map<String, List<String>> getSchemaVersions()

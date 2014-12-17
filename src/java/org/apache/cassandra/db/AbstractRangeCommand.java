@@ -57,6 +57,7 @@ public abstract class AbstractRangeCommand implements IReadCommand
 
     public abstract int limit();
     public abstract boolean countCQL3Rows();
+    public abstract boolean shouldTrimRowsOnCoordinator();
     public abstract List<Row> executeLocally();
 
     public long getTimeout()

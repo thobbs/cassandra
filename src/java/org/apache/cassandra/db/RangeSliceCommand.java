@@ -29,6 +29,7 @@ import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.filter.ExtendedFilter;
 import org.apache.cassandra.db.filter.IDiskAtomFilter;
+import org.apache.cassandra.db.filter.SliceQueryFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -124,6 +125,19 @@ public class RangeSliceCommand extends AbstractRangeCommand implements Pageable
     public boolean countCQL3Rows()
     {
         return countCQL3Rows;
+    }
+
+    public boolean shouldTrimRowsOnCoordinator()
+    {
+        if (countCQL3Rows)
+            return false;
+
+        if (!(predicate instanceof SliceQueryFilter))
+            return false;
+
+        SliceQueryFilter filter = (SliceQueryFilter) predicate;
+        boolean isDistinctQuery = filter.count == 1 && filter.compositesToGroup == -1;
+        return !isDistinctQuery;
     }
 
     public List<Row> executeLocally()

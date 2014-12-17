@@ -108,6 +108,13 @@ public class PagedRangeCommand extends AbstractRangeCommand
         return filter.compositesToGroup >= 0 || filter.count != 1;
     }
 
+    public boolean shouldTrimRowsOnCoordinator()
+    {
+        SliceQueryFilter filter = (SliceQueryFilter)predicate;
+        boolean isDistinctQuery = filter.compositesToGroup == -1 && filter.count == 1;
+        return !(countCQL3Rows() || isDistinctQuery);
+    }
+
     public List<Row> executeLocally()
     {
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(columnFamily);
