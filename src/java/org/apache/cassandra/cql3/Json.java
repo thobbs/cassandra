@@ -7,9 +7,7 @@ import org.json.simple.JSONValue;
 import org.json.simple.parser.ParseException;
 
 import java.nio.ByteBuffer;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 /** Term-related classes for INSERT JSON support. */
 public class Json
@@ -154,6 +152,26 @@ public class Json
         }
     }
 
+    private static void handleCaseSensitivity(Map<String, Object> valueMap)
+    {
+        List<String> toLowercase = new ArrayList<>();
+        List<String> toDequote = new ArrayList<>();
+        for (String mapKey : valueMap.keySet())
+        {
+            String lowered = mapKey.toLowerCase(Locale.US);
+            if (mapKey.startsWith("\"") && mapKey.endsWith("\""))
+                toDequote.add(mapKey);
+            else if (!mapKey.equals(lowered))
+                toLowercase.add(mapKey);
+        }
+
+        for (String quoted : toDequote)
+            valueMap.put(quoted.substring(1, quoted.length() - 1), valueMap.remove(quoted));
+
+        for (String uppercase : toLowercase)
+            valueMap.put(uppercase.toLowerCase(Locale.US), valueMap.remove(uppercase));
+    }
+
     /** Represents a full set of JSON values in an INSERT JSON statement. */
     private static class AllValues extends Term.Terminal
     {
@@ -171,8 +189,8 @@ public class Json
                     throw new InvalidRequestException(String.format(
                             "Expected a map for INSERT JSON values, but got a %s: %s", object.getClass().getSimpleName(), object));
 
-                // TODO figure out some way to handle case sensitivity
                 Map<String, Object> valueMap = (Map<String, Object>)object;
+                handleCaseSensitivity(valueMap);
 
                 columnMap = new HashMap<>(expectedReceivers.size());
                 for (ColumnSpecification spec : expectedReceivers)

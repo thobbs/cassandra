@@ -660,4 +660,17 @@ public class JsonTest extends CQLTester
                 "INSERT INTO %s (k, v) JSON ?",
                 "{\"k\": 0, \"v\": \"notanint\"}");
     }
+
+    @Test
+    public void testCaseSensitivity() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int primary key, \"Foo\" int)");
+        execute("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"\\\"Foo\\\"\": 0}");
+        execute("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"\\\"k\\\"\": 0, \"\\\"Foo\\\"\": 0}");
+
+        assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"foo\": 0}");
+        assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"\\\"foo\\\"\": 0}");
+
+        // TODO assert column names on fetch after rebasing for trunk
+    }
 }
