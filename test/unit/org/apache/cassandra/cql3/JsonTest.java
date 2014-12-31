@@ -64,6 +64,10 @@ public class JsonTest extends CQLTester
                 "tupleval frozen<tuple<int, ascii, uuid>>," +
                 "udtval frozen<" + typeName + ">)");
 
+
+        // fromJson() can only be used when the receiver type is known
+        assertInvalidMessage("fromJson() cannot be used in the selection clause", "SELECT fromJson(asciival) FROM %s", 0, 0);
+
         // fails JSON parsing
         assertInvalidMessage("Could not decode JSON string '\u038E\u0394\u03B4\u03E0'",
                 "INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, "\u038E\u0394\u03B4\u03E0");
@@ -80,6 +84,11 @@ public class JsonTest extends CQLTester
 
         assertInvalidMessage("Expected an ascii string, but got a Long",
                 "INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, "123");
+
+        // test that we can use fromJson() in other valid places in queries
+        assertRows(execute("SELECT asciival FROM %s WHERE k = fromJson(?)", "0"), row("ascii \" text"));
+        execute("UPDATE %s SET asciival = fromJson(?) WHERE k = fromJson(?)", "\"ascii \\\" text\"", "0");
+        execute("DELETE FROM %s WHERE k = fromJson(?)", "0");
 
         // ================ bigint ================
         execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "123123123123");
@@ -418,6 +427,14 @@ public class JsonTest extends CQLTester
                 "frozenmapval frozen<map<ascii, int>>, " +
                 "tupleval frozen<tuple<int, ascii, uuid>>," +
                 "udtval frozen<" + typeName + ">)");
+
+        // toJson() can only be used in selections
+        assertInvalidMessage("toJson() may only be used within the selection clause",
+                "INSERT INTO %s (k, asciival) VALUES (?, toJson(?))", 0, 0);
+        assertInvalidMessage("toJson() may only be used within the selection clause",
+                "UPDATE %s SET asciival = toJson(?) WHERE k = ?", 0, 0);
+        assertInvalidMessage("toJson() may only be used within the selection clause",
+                "DELETE FROM %s WHERE k = fromJson(toJson(?))", 0);
 
         // ================ ascii ================
         execute("INSERT INTO %s (k, asciival) VALUES (?, ?)", 0, "ascii text");

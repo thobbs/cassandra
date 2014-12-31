@@ -132,7 +132,7 @@ public abstract class Functions
         if (name.equalsNativeFunction(FromJsonFct.NAME))
         {
             if (receiverType == null)
-                throw new InvalidRequestException("The fromJson() function cannot be used in a SELECT clause");
+                throw new InvalidRequestException("fromJson() cannot be used in the selection clause of a SELECT statement");
             return FromJsonFct.getInstance(receiverType);
         }
 
