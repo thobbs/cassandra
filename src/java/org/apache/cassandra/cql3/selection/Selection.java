@@ -18,10 +18,7 @@
 package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -32,12 +29,15 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.db.CounterCell;
 import org.apache.cassandra.db.ExpiringCell;
 import org.apache.cassandra.db.context.CounterContext;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import com.google.common.base.Predicate;
+import com.google.common.base.Objects;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
+import org.json.simple.JSONValue;
 
 public abstract class Selection
 {
@@ -52,23 +52,40 @@ public abstract class Selection
         }
     };
 
+    private static final ColumnIdentifier jsonId = new ColumnIdentifier("json", false);
+
     private final CFMetaData cfm;
     private final Collection<ColumnDefinition> columns;
     private final ResultSet.Metadata metadata;
     private final boolean collectTimestamps;
     private final boolean collectTTLs;
+    protected final boolean isJson;
+    protected final ResultSet.Metadata jsonMetadata;
 
     protected Selection(CFMetaData cfm,
                         Collection<ColumnDefinition> columns,
                         List<ColumnSpecification> metadata,
                         boolean collectTimestamps,
-                        boolean collectTTLs)
+                        boolean collectTTLs,
+                        boolean isJson)
     {
         this.cfm = cfm;
         this.columns = columns;
         this.metadata = new ResultSet.Metadata(metadata);
         this.collectTimestamps = collectTimestamps;
         this.collectTTLs = collectTTLs;
+        this.isJson = isJson;
+
+        if (isJson)
+        {
+            ColumnSpecification firstColumn = metadata.get(0);
+            ColumnSpecification jsonSpec = new ColumnSpecification(firstColumn.ksName, firstColumn.cfName, jsonId, UTF8Type.instance);
+            jsonMetadata = new ResultSet.Metadata(Arrays.asList(jsonSpec));
+        }
+        else
+        {
+            jsonMetadata = null;
+        }
     }
 
     // Overriden by SimpleSelection when appropriate.
@@ -149,19 +166,19 @@ public abstract class Selection
 
     public ResultSet.Metadata getResultMetadata()
     {
-        return metadata;
+        return isJson ? jsonMetadata : metadata;
     }
 
-    public static Selection wildcard(CFMetaData cfm)
+    public static Selection wildcard(CFMetaData cfm, boolean isJson)
     {
         List<ColumnDefinition> all = new ArrayList<ColumnDefinition>(cfm.allColumns().size());
         Iterators.addAll(all, cfm.allColumnsInSelectOrder());
-        return new SimpleSelection(cfm, all, true);
+        return new SimpleSelection(cfm, all, true, isJson);
     }
 
-    public static Selection forColumns(CFMetaData cfm, Collection<ColumnDefinition> columns)
+    public static Selection forColumns(CFMetaData cfm, Collection<ColumnDefinition> columns, boolean isJson)
     {
-        return new SimpleSelection(cfm, columns, false);
+        return new SimpleSelection(cfm, columns, false, isJson);
     }
 
     public int addColumnForOrdering(ColumnDefinition c)
@@ -186,7 +203,7 @@ public abstract class Selection
         return false;
     }
 
-    public static Selection fromSelectors(CFMetaData cfm, List<RawSelector> rawSelectors) throws InvalidRequestException
+    public static Selection fromSelectors(CFMetaData cfm, List<RawSelector> rawSelectors, boolean isJson) throws InvalidRequestException
     {
         List<ColumnDefinition> defs = new ArrayList<ColumnDefinition>();
 
@@ -194,8 +211,8 @@ public abstract class Selection
                 SelectorFactories.createFactoriesAndCollectColumnDefinitions(RawSelector.toSelectables(rawSelectors, cfm), cfm, defs);
         List<ColumnSpecification> metadata = collectMetadata(cfm, rawSelectors, factories);
 
-        return processesSelection(rawSelectors) ? new SelectionWithProcessing(cfm, defs, metadata, factories)
-                                                : new SimpleSelection(cfm, defs, metadata, false);
+        return processesSelection(rawSelectors) ? new SelectionWithProcessing(cfm, defs, metadata, factories, isJson)
+                                                : new SimpleSelection(cfm, defs, metadata, false, isJson);
     }
 
     private static List<ColumnSpecification> collectMetadata(CFMetaData cfm,
@@ -248,6 +265,44 @@ public abstract class Selection
 
         if (aggregates != 0 && aggregates != selectors.size())
             throw new InvalidRequestException(String.format(messageTemplate, messageArgs));
+    }
+
+    protected List<ByteBuffer> rowToJson(List<ByteBuffer> row, int protocolVersion)
+    {
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < metadata.names.size(); i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            ColumnSpecification spec = metadata.names.get(i);
+            String columnName = spec.name.toString();
+            if (!columnName.equals(columnName.toLowerCase(Locale.US)))
+                columnName = "\"" + columnName + "\"";
+
+            ByteBuffer buffer = row.get(i);
+            sb.append('"');
+            sb.append(JSONValue.escape(columnName));
+            sb.append("\": ");
+            if (buffer == null)
+                sb.append("null");
+            else
+                sb.append(spec.type.toJSONString(buffer, protocolVersion));
+        }
+        sb.append("}");
+        return Arrays.asList(UTF8Type.instance.getSerializer().serialize(sb.toString()));
+    }
+
+    @Override
+    public String toString()
+    {
+        return Objects.toStringHelper(this)
+                .add("columns", columns)
+                .add("metadata", metadata)
+                .add("collectTimestamps", collectTimestamps)
+                .add("collectTTLs", collectTTLs)
+                .add("isJson", isJson)
+                .toString();
     }
 
     public class ResultSetBuilder
@@ -369,22 +424,23 @@ public abstract class Selection
     {
         private final boolean isWildcard;
 
-        public SimpleSelection(CFMetaData cfm, Collection<ColumnDefinition> columns, boolean isWildcard)
+        public SimpleSelection(CFMetaData cfm, Collection<ColumnDefinition> columns, boolean isWildcard, boolean isJson)
         {
-            this(cfm, columns, new ArrayList<ColumnSpecification>(columns), isWildcard);
+            this(cfm, columns, new ArrayList<ColumnSpecification>(columns), isWildcard, isJson);
         }
 
         public SimpleSelection(CFMetaData cfm,
                                Collection<ColumnDefinition> columns,
                                List<ColumnSpecification> metadata,
-                               boolean isWildcard)
+                               boolean isWildcard,
+                               boolean isJson)
         {
             /*
              * In theory, even a simple selection could have multiple time the same column, so we
              * could filter those duplicate out of columns. But since we're very unlikely to
              * get much duplicate in practice, it's more efficient not to bother.
              */
-            super(cfm, columns, metadata, false, false);
+            super(cfm, columns, metadata, false, false, isJson);
             this.isWildcard = isWildcard;
         }
 
@@ -412,7 +468,7 @@ public abstract class Selection
 
                 public List<ByteBuffer> getOutputRow(int protocolVersion)
                 {
-                    return current;
+                    return isJson ? rowToJson(current, protocolVersion) : current;
                 }
 
                 public void addInputRow(int protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
@@ -435,13 +491,15 @@ public abstract class Selection
         public SelectionWithProcessing(CFMetaData cfm,
                                        Collection<ColumnDefinition> columns,
                                        List<ColumnSpecification> metadata,
-                                       SelectorFactories factories) throws InvalidRequestException
+                                       SelectorFactories factories,
+                                       boolean isJson) throws InvalidRequestException
         {
             super(cfm,
                   columns,
                   metadata,
                   factories.containsWritetimeSelectorFactory(),
-                  factories.containsTTLSelectorFactory());
+                  factories.containsTTLSelectorFactory(),
+                  isJson);
 
             this.factories = factories;
 
@@ -495,7 +553,8 @@ public abstract class Selection
                     {
                         outputRow.add(selectors.get(i).getOutput(protocolVersion));
                     }
-                    return outputRow;
+
+                    return isJson ? rowToJson(outputRow, protocolVersion) : outputRow;
                 }
 
                 public void addInputRow(int protocolVersion, ResultSetBuilder rs) throws InvalidRequestException

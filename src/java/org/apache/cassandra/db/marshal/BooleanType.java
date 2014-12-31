@@ -60,6 +60,22 @@ public class BooleanType extends AbstractType<Boolean>
         throw new MarshalException(String.format("unable to make boolean from '%s'", source));
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (!(parsed instanceof Boolean))
+            throw new MarshalException(String.format(
+                    "Expected a boolean value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        return getSerializer().serialize((Boolean) parsed);
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return getSerializer().deserialize(buffer).toString();
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.BOOLEAN;

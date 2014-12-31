@@ -92,6 +92,18 @@ public class ColumnToCollectionType extends AbstractType<ByteBuffer>
     }
 
     @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public void validate(ByteBuffer bytes)
     {
         throw new UnsupportedOperationException("ColumnToCollectionType should only be used in composite types, never alone");

@@ -50,6 +50,29 @@ public class BytesType extends AbstractType<ByteBuffer>
     }
 
     @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        try
+        {
+            return BytesType.instance.fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format("Value '%s' is not a valid blob representation: %s", parsed, exc.getMessage()));
+        }
+        catch (MarshalException exc)
+        {
+            throw new MarshalException(String.format("Value '%s' is not a valid blob representation: %s", parsed, exc.getMessage()));
+        }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return '"' + ByteBufferUtil.bytesToHex(buffer) + '"';
+    }
+
+    @Override
     public boolean isCompatibleWith(AbstractType<?> previous)
     {
         // Both asciiType and utf8Type really use bytes comparison and

@@ -24,8 +24,10 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.MapSerializer;
 import org.apache.cassandra.utils.Pair;
+import org.jdom.output.Format;
 
 public class MapType<K, V> extends CollectionType<Map<K, V>>
 {
@@ -191,5 +193,71 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             bbs.add(c.value());
         }
         return bbs;
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (!(parsed instanceof Map))
+            throw new MarshalException(String.format(
+                    "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        Map<Object, Object> map = (Map<Object, Object>) parsed;
+        List<ByteBuffer> buffers = new ArrayList<>(map.size() * 2);
+        for (Map.Entry<Object, Object> entry : map.entrySet())
+        {
+            if (entry.getKey() == null)
+                throw new MarshalException("Invalid null key in map");
+
+            if (entry.getValue() == null)
+                throw new MarshalException("Invalid null value in map");
+
+            buffers.add(keys.fromJSONObject(entry.getKey(), protocolVersion));
+            buffers.add(values.fromJSONObject(entry.getValue(), protocolVersion));
+        }
+
+        if (!isMultiCell)
+        {
+            // the map keys may not be sorted, so we need to sort them here
+            List<Pair<ByteBuffer, ByteBuffer>> sortableValues = new ArrayList<>(buffers.size() / 2);
+            for (int i = 0; i < buffers.size(); i += 2)
+                sortableValues.add(Pair.create(buffers.get(i), buffers.get(i + 1)));
+
+            Collections.sort(sortableValues, new Comparator<Pair<ByteBuffer, ByteBuffer>>()
+            {
+                @Override
+                public int compare(Pair<ByteBuffer, ByteBuffer> o1, Pair<ByteBuffer, ByteBuffer> o2)
+                {
+                    return keys.compare(o1.left, o2.left);
+                }
+            });
+
+            for (int i = 0; i < buffers.size(); i += 2)
+            {
+                Pair<ByteBuffer, ByteBuffer> buffer = sortableValues.get(i / 2);
+                buffers.set(i, buffer.left);
+                buffers.set(i + 1, buffer.right);
+            }
+        }
+
+        return CollectionSerializer.pack(buffers, map.size(), CollectionSerializer.Format.forProtocolVersion(protocolVersion));
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
+        StringBuilder sb = new StringBuilder("{");
+        int size = CollectionSerializer.readCollectionSize(buffer, format);
+        for (int i = 0; i < size; i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, format), protocolVersion));
+            sb.append(": ");
+            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, format), protocolVersion));
+        }
+        return sb.append("}").toString();
     }
 }

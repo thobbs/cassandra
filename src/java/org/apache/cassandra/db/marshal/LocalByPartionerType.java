@@ -59,6 +59,18 @@ public class LocalByPartionerType extends AbstractType<ByteBuffer>
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        throw new UnsupportedOperationException();
+    }
+
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
         // o1 and o2 can be empty so we need to use RowPosition, not DecoratedKey

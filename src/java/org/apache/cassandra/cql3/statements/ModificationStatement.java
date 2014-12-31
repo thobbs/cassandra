@@ -587,7 +587,7 @@ public abstract class ModificationStatement implements CQLStatement
         Selection selection;
         if (columnsWithConditions == null)
         {
-            selection = Selection.wildcard(cfm);
+            selection = Selection.wildcard(cfm, false);
         }
         else
         {
@@ -603,7 +603,7 @@ public abstract class ModificationStatement implements CQLStatement
             }
             for (ColumnDefinition def : columnsWithConditions)
                 defs.add(def);
-            selection = Selection.forColumns(cfm, new ArrayList<>(defs));
+            selection = Selection.forColumns(cfm, new ArrayList<>(defs), false);
 
         }
 

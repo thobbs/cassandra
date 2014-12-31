@@ -23,6 +23,8 @@ import java.util.*;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.serializers.CollectionSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.SetSerializer;
 
 public class SetType<T> extends CollectionType<Set<T>>
@@ -145,5 +147,33 @@ public class SetType<T> extends CollectionType<Set<T>>
         for (Cell c : cells)
             bbs.add(c.name().collectionElement());
         return bbs;
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (!(parsed instanceof List))
+            throw new MarshalException(String.format(
+                    "Expected a list (representing a set), but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        List list = (List) parsed;
+        TreeSet<ByteBuffer> buffers = new TreeSet<>(elements);
+        for (Object element : list)
+        {
+            if (element == null)
+                throw new MarshalException("Invalid null element in set");
+            buffers.add(elements.fromJSONObject(element, protocolVersion));
+        }
+
+        if (buffers.size() != list.size())
+            throw new MarshalException("List representation of set contained duplicate elements");
+
+        return CollectionSerializer.pack(buffers, buffers.size(), CollectionSerializer.Format.forProtocolVersion(protocolVersion));
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return ListType.setOrListToJsonString(buffer, elements, protocolVersion);
     }
 }

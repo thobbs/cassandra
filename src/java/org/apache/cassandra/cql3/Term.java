@@ -133,7 +133,7 @@ public interface Term
         /**
          * @return the serialized value of this terminal.
          */
-        public abstract ByteBuffer get(QueryOptions options);
+        public abstract ByteBuffer get(QueryOptions options) throws InvalidRequestException;
 
         public ByteBuffer bindAndGet(QueryOptions options) throws InvalidRequestException
         {

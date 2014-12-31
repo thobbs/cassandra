@@ -116,7 +116,7 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
         return format == Format.V3 ? input.getInt() : ByteBufferUtil.readShortLength(input);
     }
 
-    protected static void writeValue(ByteBuffer output, ByteBuffer value, Format format)
+    public static void writeValue(ByteBuffer output, ByteBuffer value, Format format)
     {
         if (format == Format.V3)
         {
@@ -153,7 +153,7 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
         }
     }
 
-    protected static int sizeOfValue(ByteBuffer value, Format format)
+    public static int sizeOfValue(ByteBuffer value, Format format)
     {
         if (format == Format.V3)
         {

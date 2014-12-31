@@ -26,6 +26,7 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -118,37 +119,50 @@ public class UpdateStatement extends ModificationStatement
     {
         private final List<ColumnIdentifier.Raw> columnNames;
         private final List<Term.Raw> columnValues;
+        private final boolean isJson;
+
+        private static final ColumnSpecification jsonReceiverSpec = new ColumnSpecification("", "", new ColumnIdentifier("json_string", false), UTF8Type.instance);
 
         /**
          * A parsed <code>INSERT</code> statement.
          *
          * @param name column family being operated on
+         * @param attrs additional attributes for statement (CL, timestamp, timeToLive)
          * @param columnNames list of column names
          * @param columnValues list of column values (corresponds to names)
-         * @param attrs additional attributes for statement (CL, timestamp, timeToLive)
+         * @param ifNotExists true if an IF NOT EXISTS condition was specified, false otherwise
+         * @param isJson true if INSERT ... JSON syntax was used, false otherwise
          */
         public ParsedInsert(CFName name,
                             Attributes.Raw attrs,
-                            List<ColumnIdentifier.Raw> columnNames, List<Term.Raw> columnValues,
-                            boolean ifNotExists)
+                            List<ColumnIdentifier.Raw> columnNames,
+                            List<Term.Raw> columnValues,
+                            boolean ifNotExists,
+                            boolean isJson)
         {
             super(name, attrs, null, ifNotExists, false);
             this.columnNames = columnNames;
             this.columnValues = columnValues;
+            this.isJson = isJson;
         }
 
         protected ModificationStatement prepareInternal(CFMetaData cfm, VariableSpecifications boundNames, Attributes attrs) throws InvalidRequestException
         {
-            UpdateStatement stmt = new UpdateStatement(ModificationStatement.StatementType.INSERT,boundNames.size(), cfm, attrs);
+            UpdateStatement stmt = new UpdateStatement(ModificationStatement.StatementType.INSERT, boundNames.size(), cfm, attrs);
 
             // Created from an INSERT
             if (stmt.isCounter())
                 throw new InvalidRequestException("INSERT statement are not allowed on counter tables, use UPDATE instead");
-            if (columnNames.size() != columnValues.size())
+
+            if (isJson)
+                assert columnValues.size() == 1;
+            else if (columnNames.size() != columnValues.size())
                 throw new InvalidRequestException("Unmatched column names/values");
+
             if (columnNames.isEmpty())
                 throw new InvalidRequestException("No columns provided to INSERT");
 
+            ColumnDefinition[] defs = new ColumnDefinition[columnNames.size()];
             for (int i = 0; i < columnNames.size(); i++)
             {
                 ColumnIdentifier id = columnNames.get(i).prepare(cfm);
@@ -156,31 +170,67 @@ public class UpdateStatement extends ModificationStatement
                 if (def == null)
                     throw new InvalidRequestException(String.format("Unknown identifier %s", id));
 
+                defs[i] = def;
+
                 for (int j = 0; j < i; j++)
                 {
-                    ColumnIdentifier otherId = columnNames.get(j).prepare(cfm);
-                    if (id.equals(otherId))
+                    if (id.equals(defs[j].name))
                         throw new InvalidRequestException(String.format("Multiple definitions found for column %s", id));
                 }
-
-                Term.Raw value = columnValues.get(i);
-
-                switch (def.kind)
-                {
-                    case PARTITION_KEY:
-                    case CLUSTERING_COLUMN:
-                        Term t = value.prepare(keyspace(), def);
-                        t.collectMarkerSpecification(boundNames);
-                        stmt.addKeyValue(def, t);
-                        break;
-                    default:
-                        Operation operation = new Operation.SetValue(value).prepare(keyspace(), def);
-                        operation.collectMarkerSpecification(boundNames);
-                        stmt.addOperation(operation);
-                        break;
-                }
             }
-            return stmt;
+
+            if (isJson)
+            {
+                Json.Raw jsonValue = (Json.Raw) columnValues.get(0);
+
+                HashSet<ColumnDefinition> expectedReceivers = new HashSet<>(columnNames.size());
+                expectedReceivers.addAll(Arrays.asList(defs));
+                jsonValue.setExpectedReceivers(expectedReceivers);
+
+                for (int i = 0; i < columnNames.size(); i++)
+                {
+                    ColumnDefinition def = defs[i];
+                    switch (def.kind)
+                    {
+                        case PARTITION_KEY:
+                        case CLUSTERING_COLUMN:
+                            Term t = jsonValue.prepare(keyspace(), def);
+                            t.collectMarkerSpecification(boundNames);
+                            stmt.addKeyValue(def, t);
+                            break;
+                        default:
+                            Operation operation = new Operation.SetValue(jsonValue).prepare(keyspace(), def);
+                            operation.collectMarkerSpecification(boundNames);
+                            stmt.addOperation(operation);
+                            break;
+                    }
+                }
+                return stmt;
+            }
+            else
+            {
+                for (int i = 0; i < columnValues.size(); i++)
+                {
+                    Term.Raw value = columnValues.get(i);
+                    ColumnDefinition def = defs[i];
+
+                    switch (def.kind)
+                    {
+                        case PARTITION_KEY:
+                        case CLUSTERING_COLUMN:
+                            Term t = value.prepare(keyspace(), def);
+                            t.collectMarkerSpecification(boundNames);
+                            stmt.addKeyValue(def, t);
+                            break;
+                        default:
+                            Operation operation = new Operation.SetValue(value).prepare(keyspace(), def);
+                            operation.collectMarkerSpecification(boundNames);
+                            stmt.addOperation(operation);
+                            break;
+                    }
+                }
+                return stmt;
+            }
         }
     }
 

@@ -632,8 +632,8 @@ public abstract class CQLTester
         {
             execute(query, values);
             String q = USE_PREPARED_VALUES
-                     ? query + " (values: " + formatAllValues(values) + ")"
-                     : replaceValues(query, values);
+                       ? query + " (values: " + formatAllValues(values) + ")"
+                       : replaceValues(query, values);
             Assert.fail("Query should be invalid but no error was thrown. Query is: " + q);
         }
         catch (InvalidRequestException e)
@@ -957,11 +957,26 @@ public abstract class CQLTester
         if (value instanceof BigDecimal)
             return DecimalType.instance;
 
+        if (value instanceof BigInteger)
+            return IntegerType.instance;
+
+        if (value instanceof BigDecimal)
+            return DecimalType.instance;
+
         if (value instanceof String)
             return UTF8Type.instance;
 
         if (value instanceof Boolean)
             return BooleanType.instance;
+
+        if (value instanceof InetAddress)
+            return InetAddressType.instance;
+
+        if (value instanceof Date)
+            return TimestampType.instance;
+
+        if (value instanceof UUID)
+            return UUIDType.instance;
 
         if (value instanceof List)
         {

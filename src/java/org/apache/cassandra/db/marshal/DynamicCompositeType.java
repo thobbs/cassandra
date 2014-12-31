@@ -373,6 +373,18 @@ public class DynamicCompositeType extends AbstractCompositeType
         }
 
         @Override
+        public ByteBuffer fromJSONObject(Object parsed, int protocolVersion)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toJSONString(ByteBuffer buffer, int protocolVersion)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void validate(ByteBuffer bytes)
         {
             throw new UnsupportedOperationException();

@@ -28,6 +28,7 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.AsciiSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.json.simple.JSONValue;
 
 public class AsciiType extends AbstractType<String>
 {
@@ -62,6 +63,33 @@ public class AsciiType extends AbstractType<String>
         catch (CharacterCodingException exc)
         {
             throw new MarshalException(String.format("Invalid ASCII character in string literal: %s", exc));
+        }
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        try
+        {
+            return fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected an ascii string, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        try
+        {
+            return '"' + JSONValue.escape(ByteBufferUtil.string(buffer, Charset.forName("US-ASCII"))) + '"';
+        }
+        catch (CharacterCodingException exc)
+        {
+            throw new AssertionError("ascii value contained non-ascii characters: ", exc);
         }
     }
 

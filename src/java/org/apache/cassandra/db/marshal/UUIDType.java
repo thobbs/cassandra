@@ -169,12 +169,27 @@ public class UUIDType extends AbstractType<UUID>
             }
             catch (IllegalArgumentException e)
             {
-                throw new MarshalException(String.format("unable to make UUID from '%s'", source), e);
+                throw new MarshalException(String.format("Unable to make UUID from '%s'", source), e);
             }
         }
 
-        throw new MarshalException(String.format("unable to coerce '%s' to version 1 UUID", source));
+        throw new MarshalException(String.format("Unable to make UUID from '%s'", source));
     }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        try
+        {
+            return fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a string representation of a uuid, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
 
     @Override
     public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)

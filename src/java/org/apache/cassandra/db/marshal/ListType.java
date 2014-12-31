@@ -24,7 +24,9 @@ import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.ListSerializer;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -171,5 +173,43 @@ public class ListType<T> extends CollectionType<List<T>>
         for (Cell c : cells)
             bbs.add(c.value());
         return bbs;
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (!(parsed instanceof List))
+            throw new MarshalException(String.format(
+                    "Expected a list, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        List list = (List) parsed;
+        List<ByteBuffer> buffers = new ArrayList<>(list.size());
+        for (Object element : list)
+        {
+            if (element == null)
+                throw new MarshalException("Invalid null element in list");
+            buffers.add(elements.fromJSONObject(element, protocolVersion));
+        }
+        return CollectionSerializer.pack(buffers, list.size(), CollectionSerializer.Format.forProtocolVersion(protocolVersion));
+    }
+
+    public static String setOrListToJsonString(ByteBuffer buffer, AbstractType elementsType, int protocolVersion)
+    {
+        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
+        StringBuilder sb = new StringBuilder("[");
+        int size = CollectionSerializer.readCollectionSize(buffer, format);
+        for (int i = 0; i < size; i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+            sb.append(elementsType.toJSONString(CollectionSerializer.readValue(buffer, format), protocolVersion));
+        }
+        return sb.append("]").toString();
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return setOrListToJsonString(buffer, elements, protocolVersion);
     }
 }

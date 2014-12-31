@@ -18,7 +18,9 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 
 import com.google.common.base.Objects;
@@ -27,6 +29,7 @@ import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
@@ -222,6 +225,67 @@ public class TupleType extends AbstractType<ByteBuffer>
             fields[i] = type.fromString(fieldString.replaceAll("\\\\:", ":").replaceAll("\\\\@", "@"));
         }
         return buildValue(fields);
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (!(parsed instanceof List))
+            throw new MarshalException(String.format(
+                    "Expected a list representation of a tuple, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        List list = (List) parsed;
+
+        if (list.size() > types.size())
+            throw new MarshalException(String.format("Tuple contains extra items (expected %s): %s", types.size(), parsed));
+        else if (types.size() > list.size())
+            throw new MarshalException(String.format("Tuple is missing items (expected %s): %s", types.size(), parsed));
+
+        List<ByteBuffer> buffers = new ArrayList<>(list.size());
+        Iterator<AbstractType<?>> typeIterator = types.iterator();
+        for (Object element : list)
+        {
+            if (element == null)
+            {
+                if (protocolVersion < Server.VERSION_3)
+                    throw new MarshalException("Tuples cannot contain nulls when the protocol version is < 3");
+                typeIterator.next();
+                buffers.add(null);
+            }
+            else
+            {
+                buffers.add(typeIterator.next().fromJSONObject(element, protocolVersion));
+            }
+        }
+
+        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
+        int size = 0;
+        for (ByteBuffer bb : buffers)
+            size += CollectionSerializer.sizeOfValue(bb, format);
+
+        ByteBuffer result = ByteBuffer.allocate(size);
+        for (ByteBuffer bb : buffers)
+            CollectionSerializer.writeValue(result, bb, format);
+        return (ByteBuffer)result.flip();
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < types.size(); i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            ByteBuffer value = CollectionSerializer.readValue(buffer, format);
+            if (value == null)
+                sb.append("null");
+            else
+                sb.append(types.get(i).toJSONString(value, protocolVersion));
+        }
+        return sb.append("]").toString();
     }
 
     public TypeSerializer<ByteBuffer> getSerializer()
