@@ -18,8 +18,12 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import com.google.common.base.Objects;
 
@@ -40,6 +44,7 @@ public class UserType extends TupleType
     public final String keyspace;
     public final ByteBuffer name;
     private final List<ByteBuffer> fieldNames;
+    private final List<String> stringFieldNames;
 
     public UserType(String keyspace, ByteBuffer name, List<ByteBuffer> fieldNames, List<AbstractType<?>> fieldTypes)
     {
@@ -48,6 +53,18 @@ public class UserType extends TupleType
         this.keyspace = keyspace;
         this.name = name;
         this.fieldNames = fieldNames;
+        this.stringFieldNames = new ArrayList<>(fieldNames.size());
+        for (ByteBuffer fieldName : fieldNames)
+        {
+            try
+            {
+                stringFieldNames.add(ByteBufferUtil.string(fieldName, Charset.forName("UTF-8")));
+            }
+            catch (CharacterCodingException ex)
+            {
+                throw new AssertionError("Got non-UTF8 field name for user-defined type: " + ByteBufferUtil.bytesToHex(fieldName), ex);
+            }
+        }
     }
 
     public static UserType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException
@@ -120,6 +137,77 @@ public class UserType extends TupleType
         // We're allowed to get less fields than declared, but not more
         if (input.hasRemaining())
             throw new MarshalException("Invalid remaining data after end of UDT value");
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (!(parsed instanceof Map))
+            throw new MarshalException(String.format(
+                    "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        Map map = (Map) parsed;
+        List<ByteBuffer> buffers = new ArrayList<>(map.size());
+
+        Set keys = map.keySet();
+        assert keys.isEmpty() || keys.iterator().next() instanceof String;
+
+        int foundValues = 0;
+        for (int i = 0; i < types.size(); i++)
+        {
+            Object value = map.get(stringFieldNames.get(i));
+            if (value == null)
+            {
+                buffers.add(null);
+            }
+            else
+            {
+                buffers.add(types.get(i).fromJSONObject(value, protocolVersion));
+                foundValues += 1;
+            }
+        }
+
+        // check for extra, unrecognized fields
+        if (foundValues != map.size())
+        {
+            for (Object fieldName : keys)
+            {
+                if (!stringFieldNames.contains((String) fieldName))
+                    throw new MarshalException(String.format(
+                            "Unknown field '%s' in value of user defined type %s", fieldName, getNameAsString()));
+            }
+        }
+
+        int size = 0;
+        for (ByteBuffer bb : buffers)
+            size += CollectionSerializer.sizeOfValue(bb, protocolVersion);
+
+        ByteBuffer result = ByteBuffer.allocate(size);
+        for (ByteBuffer bb : buffers)
+            CollectionSerializer.writeValue(result, bb, protocolVersion);
+        return (ByteBuffer)result.flip();
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        ByteBuffer[] buffers = split(buffer);
+        StringBuilder sb = new StringBuilder("{");
+        for (int i = 0; i < types.size(); i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            sb.append(UTF8Type.instance.toJSONString(fieldName(i), protocolVersion));
+            sb.append(": ");
+
+            ByteBuffer valueBuffer = buffers[i];
+            if (valueBuffer == null)
+                sb.append("null");
+            else
+                sb.append(types.get(i).toJSONString(valueBuffer, protocolVersion));
+        }
+        return sb.append("}").toString();
     }
 
     @Override

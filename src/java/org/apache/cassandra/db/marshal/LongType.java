@@ -69,6 +69,26 @@ public class LongType extends AbstractType<Long>
     }
 
     @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        try
+        {
+            return getSerializer().serialize(((Number) parsed).longValue());
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a bigint value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return getSerializer().deserialize(buffer).toString();
+    }
+
+    @Override
     public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
         return this == otherType || otherType == DateType.instance || otherType == TimestampType.instance;

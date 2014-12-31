@@ -25,6 +25,7 @@ import java.util.List;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 
 public class ReversedType<T> extends AbstractType<T>
@@ -81,6 +82,18 @@ public class ReversedType<T> extends AbstractType<T>
     public ByteBuffer fromString(String source)
     {
         return baseType.fromString(source);
+    }
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        return baseType.fromJSONObject(parsed, protocolVersion);
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return baseType.toJSONString(buffer, protocolVersion);
     }
 
     @Override

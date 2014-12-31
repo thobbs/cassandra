@@ -57,6 +57,26 @@ public class FloatType extends AbstractType<Float>
       }
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        try
+        {
+            return getSerializer().serialize(((Number) parsed).floatValue());
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a float value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return getSerializer().deserialize(buffer).toString();
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.FLOAT;

@@ -89,7 +89,7 @@ public class SelectStatement implements CQLStatement
     private final Comparator<List<ByteBuffer>> orderingComparator;
 
     // Used by forSelection below
-    private static final Parameters defaultParameters = new Parameters(Collections.<ColumnIdentifier.Raw, Boolean>emptyMap(), false, false);
+    private static final Parameters defaultParameters = new Parameters(Collections.<ColumnIdentifier.Raw, Boolean>emptyMap(), false, false, false);
 
     public SelectStatement(CFMetaData cfm,
                            int boundTerms,
@@ -612,6 +612,7 @@ public class SelectStatement implements CQLStatement
         if (restrictions.isNonCompositeSliceWithExclusiveBounds())
             cells = applySliceRestriction(cells, options);
 
+        int protocolVersion = options.getProtocolVersion();
         CQL3Row.RowIterator iter = cfm.comparator.CQL3RowBuilder(cfm, now).group(cells);
 
         // If there is static columns but there is no non-static row, then provided the select was a full
@@ -729,8 +730,8 @@ public class SelectStatement implements CQLStatement
             VariableSpecifications boundNames = getBoundVariables();
 
             Selection selection = selectClause.isEmpty()
-                                ? Selection.wildcard(cfm)
-                                : Selection.fromSelectors(cfm, selectClause);
+                                  ? Selection.wildcard(cfm, parameters.isJson)
+                                  : Selection.fromSelectors(cfm, selectClause, parameters.isJson);
 
             StatementRestrictions restrictions = prepareRestrictions(cfm, boundNames, selection);
 
@@ -1007,14 +1008,17 @@ public class SelectStatement implements CQLStatement
         private final Map<ColumnIdentifier.Raw, Boolean> orderings;
         private final boolean isDistinct;
         private final boolean allowFiltering;
+        public final boolean isJson;
 
         public Parameters(Map<ColumnIdentifier.Raw, Boolean> orderings,
                           boolean isDistinct,
-                          boolean allowFiltering)
+                          boolean allowFiltering,
+                          boolean isJson)
         {
             this.orderings = orderings;
             this.isDistinct = isDistinct;
             this.allowFiltering = allowFiltering;
+            this.isJson = isJson;
         }
     }
 

@@ -52,6 +52,17 @@ public class EmptyType extends AbstractType<Void>
         return ByteBufferUtil.EMPTY_BYTE_BUFFER;
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (!(parsed instanceof String))
+            throw new MarshalException(String.format("Expected an empty string, but got: %s", parsed));
+        if (!((String) parsed).isEmpty())
+            throw new MarshalException(String.format("'%s' is not empty", parsed));
+
+        return ByteBufferUtil.EMPTY_BYTE_BUFFER;
+    }
+
     public TypeSerializer<Void> getSerializer()
     {
         return EmptySerializer.instance;

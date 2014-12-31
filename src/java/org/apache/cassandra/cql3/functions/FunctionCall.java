@@ -86,7 +86,7 @@ public class FunctionCall extends Term.NonTerminal
         catch (MarshalException e)
         {
             throw new RuntimeException(String.format("Return of function %s (%s) is not a valid value for its declared return type %s", 
-                                                     fun, ByteBufferUtil.bytesToHex(result), fun.returnType().asCQL3Type()));
+                                                     fun.name(), ByteBufferUtil.bytesToHex(result), fun.returnType().asCQL3Type()));
         }
     }
 
@@ -127,7 +127,7 @@ public class FunctionCall extends Term.NonTerminal
 
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            Function fun = Functions.get(keyspace, name, terms, receiver.ksName, receiver.cfName);
+            Function fun = Functions.get(keyspace, name, terms, receiver.ksName, receiver.cfName, receiver.type);
             if (fun == null)
                 throw new InvalidRequestException(String.format("Unknown function %s called", name));
             if (fun.isAggregate())
@@ -184,7 +184,7 @@ public class FunctionCall extends Term.NonTerminal
             // later with a more helpful error message that if we were to return false here.
             try
             {
-                Function fun = Functions.get(keyspace, name, terms, receiver.ksName, receiver.cfName);
+                Function fun = Functions.get(keyspace, name, terms, receiver.ksName, receiver.cfName, receiver.type);
                 if (fun != null && receiver.type.equals(fun.returnType()))
                     return AssignmentTestable.TestResult.EXACT_MATCH;
                 else if (fun == null || receiver.type.isValueCompatibleWith(fun.returnType()))

@@ -55,6 +55,16 @@ public class FrozenType extends AbstractType<Void>
         throw new UnsupportedOperationException();
     }
 
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        throw new UnsupportedOperationException();
+    }
+
     public TypeSerializer<Void> getSerializer()
     {
         throw new UnsupportedOperationException();

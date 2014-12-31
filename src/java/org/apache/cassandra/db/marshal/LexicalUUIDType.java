@@ -58,6 +58,20 @@ public class LexicalUUIDType extends AbstractType<UUID>
         }
     }
 
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        try
+        {
+            return fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a string representation of a uuid, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
     public TypeSerializer<UUID> getSerializer()
     {
         return UUIDSerializer.instance;

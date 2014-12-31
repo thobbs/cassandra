@@ -65,6 +65,14 @@ public final class FunctionName
             && Objects.equal(this.name, that.name);
     }
 
+    public final boolean equalsNativeFunction(FunctionName that)
+    {
+        if (this.hasKeyspace())
+            return Objects.equal(this.keyspace, that.keyspace) && Objects.equal(this.name, that.name);
+        else
+            return Objects.equal(this.name, that.name);
+    }
+
     @Override
     public String toString()
     {

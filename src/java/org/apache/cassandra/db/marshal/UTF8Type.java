@@ -18,11 +18,15 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.UTF8Serializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.json.simple.JSONValue;
 
 public class UTF8Type extends AbstractType<String>
 {
@@ -38,6 +42,34 @@ public class UTF8Type extends AbstractType<String>
     public ByteBuffer fromString(String source)
     {
         return decompose(source);
+    }
+
+
+    @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        try
+        {
+            return fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a UTF-8 string, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        try
+        {
+            return '"' + JSONValue.escape(ByteBufferUtil.string(buffer, Charset.forName("UTF-8"))) + '"';
+        }
+        catch (CharacterCodingException exc)
+        {
+            throw new AssertionError("UTF-8 value contained non-utf8 characters: ", exc);
+        }
     }
 
     @Override

@@ -55,6 +55,30 @@ public class DateType extends AbstractType<Date>
     }
 
     @Override
+    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    {
+        if (parsed instanceof Long)
+            return ByteBufferUtil.bytes((Long) parsed);
+
+        try
+        {
+            return TimestampType.instance.fromString((String) parsed);
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a long or a datestring representation of a date value, but got a %s: %s",
+                    parsed.getClass().getSimpleName(), parsed));
+        }
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return '"' + TimestampSerializer.TO_JSON_FORMAT.format(TimestampSerializer.instance.deserialize(buffer)) + '"';
+    }
+
+    @Override
     public boolean isCompatibleWith(AbstractType<?> previous)
     {
         if (super.isCompatibleWith(previous))
