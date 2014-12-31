@@ -245,10 +245,17 @@ public class TupleType extends AbstractType<ByteBuffer>
         Iterator<AbstractType<?>> typeIterator = types.iterator();
         for (Object element : list)
         {
-            // TODO actually, we support nulls in tuples
             if (element == null)
-                throw new MarshalException("Invalid null element in tuple");
-            buffers.add(typeIterator.next().fromJSONObject(element, protocolVersion));
+            {
+                if (protocolVersion < Server.VERSION_3)
+                    throw new MarshalException("Tuples cannot contain nulls when the protocol version is < 3");
+                typeIterator.next();
+                buffers.add(null);
+            }
+            else
+            {
+                buffers.add(typeIterator.next().fromJSONObject(element, protocolVersion));
+            }
         }
 
         int size = 0;

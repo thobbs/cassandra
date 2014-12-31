@@ -353,9 +353,10 @@ public class JsonTest extends CQLTester
             row(0, tuple(1, "foobar", UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")))
         );
 
-        assertInvalidMessage("Invalid null element in tuple",
-                "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
-                0, "[1, null, \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
+        execute("INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))", 0, "[1, null, \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
+        assertRows(execute("SELECT k, tupleval FROM %s WHERE k = ?", 0),
+                row(0, tuple(1, null, UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799")))
+        );
 
         assertInvalidMessage("Tuple contains extra items",
                 "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",

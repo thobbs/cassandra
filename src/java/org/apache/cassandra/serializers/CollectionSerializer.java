@@ -94,7 +94,7 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
 
     public static void writeValue(ByteBuffer output, ByteBuffer value, int version)
     {
-        if (version >= 3)
+        if (version >= Server.VERSION_3)
         {
             if (value == null)
             {
