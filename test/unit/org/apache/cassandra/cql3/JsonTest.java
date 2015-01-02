@@ -686,9 +686,12 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"\\\"Foo\\\"\": 0}");
         execute("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"\\\"k\\\"\": 0, \"\\\"Foo\\\"\": 0}");
 
+        // results should preserve and quote case-sensitive identifiers
+        assertRows(execute("SELECT JSON * FROM %s"), row("{\"k\": 0, \"\\\"Foo\\\"\": 0}"));
+        assertRows(execute("SELECT JSON k, \"Foo\" as foo FROM %s"), row("{\"k\": 0, \"foo\": 0}"));
+        assertRows(execute("SELECT JSON k, \"Foo\" as \"Bar\" FROM %s"), row("{\"k\": 0, \"\\\"Bar\\\"\": 0}"));
+
         assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"foo\": 0}");
         assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"\\\"foo\\\"\": 0}");
-
-        // TODO assert column names on fetch after rebasing for trunk
     }
 }

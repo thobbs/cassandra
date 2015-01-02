@@ -276,9 +276,13 @@ public abstract class Selection
                 sb.append(", ");
 
             ColumnSpecification spec = metadata.names.get(i);
+            String columnName = spec.name.toString();
+            if (!columnName.equals(columnName.toLowerCase(Locale.US)))
+                columnName = "\"" + columnName + "\"";
+
             ByteBuffer buffer = row.get(i);
             sb.append('"');
-            sb.append(JSONValue.escape(spec.name.toString()));
+            sb.append(JSONValue.escape(columnName));
             sb.append("\": ");
             if (buffer == null)
                 sb.append("null");
