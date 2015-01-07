@@ -1749,6 +1749,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         List<Row> rows = new ArrayList<Row>();
         int columnsCount = 0;
         int total = 0, matched = 0;
+        boolean ignoreTombstonedPartitions = filter.ignoreTombstonedPartitions();
 
         try
         {
@@ -1783,8 +1784,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     removeDroppedColumns(data);
                 }
 
-                rows.add(new Row(rawRow.key, data));
-                matched++;
+                if (!ignoreTombstonedPartitions || !data.isMarkedForDelete())
+                {
+                    rows.add(new Row(rawRow.key, data));
+                    matched++;
+                }
 
                 if (data != null)
                     columnsCount += filter.lastCounted(data);
