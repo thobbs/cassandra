@@ -2128,11 +2128,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                     removeDroppedColumns(data);
                 }
 
-                if (!ignoreTombstonedPartitions || !data.isMarkedForDelete())
-                {
-                    rows.add(new Row(rawRow.key, data));
+                rows.add(new Row(rawRow.key, data));
+                if (!ignoreTombstonedPartitions || !data.hasOnlyTombstones(filter.timestamp))
                     matched++;
-                }
 
                 if (data != null)
                     columnsCount += filter.lastCounted(data);
