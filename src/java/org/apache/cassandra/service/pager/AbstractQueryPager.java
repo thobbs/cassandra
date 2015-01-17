@@ -18,20 +18,20 @@
 package org.apache.cassandra.service.pager;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Iterator;
+import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnCounter;
 import org.apache.cassandra.db.filter.IDiskAtomFilter;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.thrift.ColumnDef;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -307,13 +307,29 @@ abstract class AbstractQueryPager implements QueryPager
     {
         ColumnCounter counter = columnCounter();
 
-        // Discard the first 'toDiscard' live
+        List<Column> staticColumns = new ArrayList<>(cfm.staticColumns().size());
+
+        // Discard the first 'toDiscard' live, non-static columns
         while (iter.hasNext())
         {
             Column c = iter.next();
+
+            // if it's a static column, don't count it and save it to add to the trimmed results
+            ColumnDefinition columnDef = cfm.getColumnDefinitionFromColumnName(c.name());
+            if (columnDef != null && columnDef.type == ColumnDefinition.Type.STATIC)
+            {
+                staticColumns.add(c);
+                continue;
+            }
+
             counter.count(c, tester);
+
+            // once we've discarded the required amount, add the rest
             if (counter.live() > toDiscard)
             {
+                for (Column staticColumn : staticColumns)
+                    copy.addColumn(staticColumn);
+
                 copy.addColumn(c);
                 while (iter.hasNext())
                     copy.addColumn(iter.next());
@@ -343,9 +359,15 @@ abstract class AbstractQueryPager implements QueryPager
         return Math.min(liveCount, toDiscard);
     }
 
-    protected static Column firstColumn(ColumnFamily cf)
+    protected Column firstNonStaticColumn(ColumnFamily cf)
     {
-        return cf.iterator().next();
+        for (Column column : cf)
+        {
+            ColumnDefinition def = cfm.getColumnDefinitionFromColumnName(column.name());
+            if (def == null || def.type != ColumnDefinition.Type.STATIC)
+                return column;
+        }
+        return null;
     }
 
     protected static Column lastColumn(ColumnFamily cf)
