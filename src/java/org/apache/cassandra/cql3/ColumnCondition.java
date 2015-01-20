@@ -464,6 +464,7 @@ public class ColumnCondition
     static class CollectionBound extends Bound
     {
         private final Term.Terminal value;
+        private final QueryOptions options;
 
         private CollectionBound(ColumnCondition condition, QueryOptions options) throws InvalidRequestException
         {
@@ -471,6 +472,7 @@ public class ColumnCondition
             assert column.type.isCollection() && condition.collectionElement == null;
             assert condition.operator != Operator.IN;
             this.value = condition.value.bind(options);
+            this.options = options;
         }
 
         public boolean appliesTo(Composite rowPrefix, ColumnFamily current, final long now) throws InvalidRequestException
@@ -490,7 +492,7 @@ public class ColumnCondition
                         throw new InvalidRequestException(String.format("Invalid comparison with null for operator \"%s\"", operator));
                 }
 
-                return valueAppliesTo(type, iter, value, operator);
+                return valueAppliesTo(type, iter, value, operator, options);
             }
 
             // frozen collections
@@ -517,16 +519,53 @@ public class ColumnCondition
             return compareWithOperator(operator, type, conditionValue, cell.value());
         }
 
-        static boolean valueAppliesTo(CollectionType type, Iterator<Cell> iter, Term.Terminal value, Operator operator)
+        static boolean valueAppliesTo(CollectionType type, Iterator<Cell> iter, Term.Terminal value, Operator operator, QueryOptions options)
         {
             if (value == null)
                 return !iter.hasNext();
 
+            CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
             switch (type.kind)
             {
-                case LIST: return listAppliesTo((ListType)type, iter, ((Lists.Value)value).elements, operator);
-                case SET: return setAppliesTo((SetType)type, iter, ((Sets.Value)value).elements, operator);
-                case MAP: return mapAppliesTo((MapType)type, iter, ((Maps.Value)value).map, operator);
+                case LIST:
+                    List<ByteBuffer> valueList;
+                    if (value instanceof Lists.Value)
+                    {
+                        valueList = ((Lists.Value) value).elements;
+                    }
+                    else
+                    {
+                        ListType listType = (ListType) type;
+                        ByteBuffer serializedList = value.get(options.getProtocolVersion());
+                        valueList = listType.getSerializer().deserializeToByteBufferCollection(serializedList, format);
+                    }
+                    return listAppliesTo((ListType)type, iter, valueList, operator);
+                case SET:
+                    Set<ByteBuffer> valueSet;
+                    if (value instanceof Sets.Value)
+                    {
+                        valueSet = ((Sets.Value) value).elements;
+                    }
+                    else
+                    {
+                        SetType setType = (SetType) type;
+                        ByteBuffer serializedSet = value.get(options.getProtocolVersion());
+                        valueSet = setType.getSerializer().deserializeToByteBufferCollection(serializedSet, format);
+                    }
+                    return setAppliesTo((SetType)type, iter, valueSet, operator);
+                case MAP:
+                    Map<ByteBuffer, ByteBuffer> valueMap;
+                    if (value instanceof Maps.Value)
+                    {
+                        valueMap = ((Maps.Value) value).map;
+                    }
+                    else
+                    {
+                        MapType mapType = (MapType) type;
+                        ByteBuffer serializedMap = value.get(options.getProtocolVersion());
+                        valueMap = mapType.getSerializer().deserializeToByteBufferCollection(serializedMap, format);
+                    }
+                    return mapAppliesTo((MapType)type, iter, valueMap, operator);
             }
             throw new AssertionError();
         }
@@ -618,12 +657,14 @@ public class ColumnCondition
     public static class CollectionInBound extends Bound
     {
         private final List<Term.Terminal> inValues;
+        private final QueryOptions options;
 
         private CollectionInBound(ColumnCondition condition, QueryOptions options) throws InvalidRequestException
         {
             super(condition.column, condition.operator);
             assert column.type instanceof CollectionType && condition.collectionElement == null;
             assert condition.operator == Operator.IN;
+            this.options = options;
             inValues = new ArrayList<>();
             if (condition.inValues == null)
             {
@@ -681,7 +722,7 @@ public class ColumnCondition
                 List<Cell> cells = newArrayList(collectionColumns(name, current, now));
                 for (Term.Terminal value : inValues)
                 {
-                    if (CollectionBound.valueAppliesTo(type, cells.iterator(), value, Operator.EQ))
+                    if (CollectionBound.valueAppliesTo(type, cells.iterator(), value, Operator.EQ, options))
                         return true;
                 }
                 return false;

@@ -170,7 +170,7 @@ public class FunctionCall extends Term.NonTerminal
             for (Term t : parameters)
             {
                 assert t instanceof Term.Terminal;
-                buffers.add(((Term.Terminal)t).get(QueryOptions.DEFAULT));
+                buffers.add(((Term.Terminal)t).get(QueryOptions.DEFAULT.getProtocolVersion()));
             }
 
             return executeInternal(Server.CURRENT_VERSION, fun, buffers);

@@ -114,10 +114,10 @@ public class Json
             this.column = column;
         }
 
-        public ByteBuffer get(QueryOptions options) throws InvalidRequestException
+        public ByteBuffer get(int protocolVersion) throws InvalidRequestException
         {
             // get the specific value for this column from the set of all json values
-            return allJsonValues.getColumnValue(column, options);
+            return allJsonValues.getColumnValue(column, protocolVersion);
         }
     }
 
@@ -218,13 +218,13 @@ public class Json
             }
         }
 
-        public ByteBuffer get(QueryOptions options)
+        public ByteBuffer get(int protocolVersion)
         {
             throw new AssertionError("AllValues.get() should not be called directly");
         }
 
         /** Get the bound value for a specific column in the JSON map of values. */
-        public ByteBuffer getColumnValue(ColumnSpecification column, QueryOptions options) throws InvalidRequestException
+        public ByteBuffer getColumnValue(ColumnSpecification column, int protocolVersion) throws InvalidRequestException
         {
             Object parsedJsonObject = columnMap.get(column.name);
             if (parsedJsonObject == null)
@@ -232,7 +232,7 @@ public class Json
 
             try
             {
-                return column.type.fromJSONObject(parsedJsonObject, options.getProtocolVersion());
+                return column.type.fromJSONObject(parsedJsonObject, protocolVersion);
             }
             catch (MarshalException exc)
             {

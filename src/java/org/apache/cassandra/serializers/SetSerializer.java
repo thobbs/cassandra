@@ -98,6 +98,19 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
         }
     }
 
+    /**
+     * Deserializes a serialized set and returns a set of unserialized (ByteBuffer) elements.
+     */
+    public Set<ByteBuffer> deserializeToByteBufferCollection(ByteBuffer bytes, Format format)
+    {
+        ByteBuffer input = bytes.duplicate();
+        int n = readCollectionSize(input, format);
+        Set<ByteBuffer> s = new LinkedHashSet<>(n);
+        for (int i = 0; i < n; i++)
+            s.add(readValue(input, format));
+        return s;
+    }
+
     public String toString(Set<T> value)
     {
         StringBuilder sb = new StringBuilder();

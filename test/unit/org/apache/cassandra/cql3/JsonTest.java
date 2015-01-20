@@ -694,4 +694,41 @@ public class JsonTest extends CQLTester
         assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"foo\": 0}");
         assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"\\\"foo\\\"\": 0}");
     }
+
+    @Test
+    public void testInsertJsonSyntaxWithCollections() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                "k int PRIMARY KEY, " +
+                "m map<text, boolean>, " +
+                "mf frozen<map<text, boolean>>, " +
+                "s set<int>, " +
+                "sf frozen<set<int>>, " +
+                "l list<int>, " +
+                "lf frozen<list<int>>)");
+
+        // map
+        execute("INSERT INTO %s (k, m) JSON ?", "{\"k\": 0, \"m\": {\"a\": true, \"b\": false}}");
+        assertRows(execute("SELECT k, m FROM %s"), row(0, map("a", true, "b", false)));
+
+        // frozen map
+        execute("INSERT INTO %s (k, mf) JSON ?", "{\"k\": 0, \"mf\": {\"a\": true, \"b\": false}}");
+        assertRows(execute("SELECT k, mf FROM %s"), row(0, map("a", true, "b", false)));
+
+        // set
+        execute("INSERT INTO %s (k, s) JSON ?", "{\"k\": 0, \"s\": [3, 1, 2]}");
+        assertRows(execute("SELECT k, s FROM %s"), row(0, set(1, 2, 3)));
+
+        // frozen set
+        execute("INSERT INTO %s (k, sf) JSON ?", "{\"k\": 0, \"sf\": [3, 1, 2]}");
+        assertRows(execute("SELECT k, sf FROM %s"), row(0, set(1, 2, 3)));
+
+        // list
+        execute("INSERT INTO %s (k, l) JSON ?", "{\"k\": 0, \"l\": [1, 2, 3]}");
+        assertRows(execute("SELECT k, l FROM %s"), row(0, list(1, 2, 3)));
+
+        // frozen list
+        execute("INSERT INTO %s (k, lf) JSON ?", "{\"k\": 0, \"lf\": [1, 2, 3]}");
+        assertRows(execute("SELECT k, lf FROM %s"), row(0, list(1, 2, 3)));
+    }
 }

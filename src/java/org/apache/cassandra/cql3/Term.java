@@ -132,12 +132,13 @@ public interface Term
 
         /**
          * @return the serialized value of this terminal.
+         * @param protocolVersion
          */
-        public abstract ByteBuffer get(QueryOptions options) throws InvalidRequestException;
+        public abstract ByteBuffer get(int protocolVersion) throws InvalidRequestException;
 
         public ByteBuffer bindAndGet(QueryOptions options) throws InvalidRequestException
         {
-            return get(options);
+            return get(options.getProtocolVersion());
         }
     }
 
@@ -172,7 +173,7 @@ public interface Term
         public ByteBuffer bindAndGet(QueryOptions options) throws InvalidRequestException
         {
             Terminal t = bind(options);
-            return t == null ? null : t.get(options);
+            return t == null ? null : t.get(options.getProtocolVersion());
         }
     }
 }
