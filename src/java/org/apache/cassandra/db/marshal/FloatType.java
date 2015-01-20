@@ -53,7 +53,7 @@ public class FloatType extends AbstractType<Float>
       }
       catch (NumberFormatException e1)
       {
-          throw new MarshalException(String.format("unable to coerce '%s' to a float", source), e1);
+          throw new MarshalException(String.format("Unable to make float from '%s'", source), e1);
       }
     }
 
@@ -62,7 +62,10 @@ public class FloatType extends AbstractType<Float>
     {
         try
         {
-            return getSerializer().serialize(((Number) parsed).floatValue());
+            if (parsed instanceof String)
+                return fromString((String) parsed);
+            else
+                return getSerializer().serialize(((Number) parsed).floatValue());
         }
         catch (ClassCastException exc)
         {

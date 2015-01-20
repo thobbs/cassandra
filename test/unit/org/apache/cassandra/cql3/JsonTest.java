@@ -94,13 +94,17 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "123123123123");
         assertRows(execute("SELECT k, bigintval FROM %s WHERE k = ?", 0), row(0, 123123123123L));
 
+        // strings are also accepted
+        execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "\"123123123123\"");
+        assertRows(execute("SELECT k, bigintval FROM %s WHERE k = ?", 0), row(0, 123123123123L));
+
         // floats get truncated
         execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "123.456");
         assertRows(execute("SELECT k, bigintval FROM %s WHERE k = ?", 0), row(0, 123L));
         execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "123.999");
         assertRows(execute("SELECT k, bigintval FROM %s WHERE k = ?", 0), row(0, 123L));
 
-        assertInvalidMessage("Expected a bigint value, but got a String",
+        assertInvalidMessage("Unable to make long from",
                 "INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "\"abc\"");
 
         assertInvalidMessage("Expected a bigint value, but got a",
@@ -123,8 +127,13 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, booleanval) VALUES (?, fromJson(?))", 0, "false");
         assertRows(execute("SELECT k, booleanval FROM %s WHERE k = ?", 0), row(0, false));
 
-        assertInvalidMessage("Expected a boolean value, but got a String",
+        // strings are also accepted
+        execute("INSERT INTO %s (k, booleanval) VALUES (?, fromJson(?))", 0, "\"false\"");
+        assertRows(execute("SELECT k, booleanval FROM %s WHERE k = ?", 0), row(0, false));
+
+        assertInvalidMessage("Unable to make boolean from",
                 "INSERT INTO %s (k, booleanval) VALUES (?, fromJson(?))", 0, "\"abc\"");
+
         assertInvalidMessage("Expected a boolean value, but got a Long",
                 "INSERT INTO %s (k, booleanval) VALUES (?, fromJson(?))", 0, "123");
 
@@ -155,8 +164,15 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, doubleval) VALUES (?, fromJson(?))", 0, "123123");
         assertRows(execute("SELECT k, doubleval FROM %s WHERE k = ?", 0), row(0, 123123.0d));
 
-        assertInvalidMessage("Expected a double value, but got a String",
+        // strings are also accepted
+        execute("INSERT INTO %s (k, doubleval) VALUES (?, fromJson(?))", 0, "\"123123\"");
+        assertRows(execute("SELECT k, doubleval FROM %s WHERE k = ?", 0), row(0, 123123.0d));
+
+        assertInvalidMessage("Unable to make double from",
                 "INSERT INTO %s (k, doubleval) VALUES (?, fromJson(?))", 0, "\"xyzz\"");
+
+        assertInvalidMessage("Expected a double value, but got",
+                "INSERT INTO %s (k, doubleval) VALUES (?, fromJson(?))", 0, "true");
 
         // ================ float ================
         execute("INSERT INTO %s (k, floatval) VALUES (?, fromJson(?))", 0, "123123.123123");
@@ -165,8 +181,15 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, floatval) VALUES (?, fromJson(?))", 0, "123123");
         assertRows(execute("SELECT k, floatval FROM %s WHERE k = ?", 0), row(0, 123123.0f));
 
-        assertInvalidMessage("Expected a float value, but got a String",
+        // strings are also accepted
+        execute("INSERT INTO %s (k, floatval) VALUES (?, fromJson(?))", 0, "\"123123.0\"");
+        assertRows(execute("SELECT k, floatval FROM %s WHERE k = ?", 0), row(0, 123123.0f));
+
+        assertInvalidMessage("Unable to make float from",
                 "INSERT INTO %s (k, floatval) VALUES (?, fromJson(?))", 0, "\"xyzz\"");
+
+        assertInvalidMessage("Expected a float value, but got a",
+                "INSERT INTO %s (k, floatval) VALUES (?, fromJson(?))", 0, "true");
 
         // ================ inet ================
         execute("INSERT INTO %s (k, inetval) VALUES (?, fromJson(?))", 0, "\"127.0.0.1\"");
@@ -185,6 +208,10 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "123123");
         assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 123123));
 
+        // strings are also accepted
+        execute("INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "\"123123\"");
+        assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 123123));
+
         // int overflow (2 ^ 32, or Integer.MAX_INT + 1)
         execute("INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "2147483648");
         assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, -2147483648));
@@ -193,8 +220,11 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "123123.456");
         assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 123123));
 
-        assertInvalidMessage("Expected an int value, but got a String",
+        assertInvalidMessage("Unable to make int from",
                 "INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "\"xyzz\"");
+
+        assertInvalidMessage("Expected an int value, but got a",
+                "INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "true");
 
         // ================ text (varchar) ================
         execute("INSERT INTO %s (k, textval) VALUES (?, fromJson(?))", 0, "\"\"");
@@ -278,7 +308,7 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Expected a list, but got a Long",
                 "INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "123");
 
-        assertInvalidMessage("Expected an int value, but got a String",
+        assertInvalidMessage("Unable to make int from",
                 "INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "[\"abc\"]");
 
         assertInvalidMessage("Invalid null element in list",
@@ -366,7 +396,7 @@ public class JsonTest extends CQLTester
                 "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
                 0, "[1, \"foobar\"]");
 
-        assertInvalidMessage("Expected an int value, but got a String",
+        assertInvalidMessage("Unable to make int from",
                 "INSERT INTO %s (k, tupleval) VALUES (?, fromJson(?))",
                 0, "[\"not an int\", \"foobar\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
 
@@ -395,7 +425,7 @@ public class JsonTest extends CQLTester
         );
 
         assertInvalidMessage("Unknown field", "INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"xxx\": 1}");
-        assertInvalidMessage("Expected an int value, but got a String",
+        assertInvalidMessage("Unable to make int from",
                 "INSERT INTO %s (k, udtval) VALUES (?, fromJson(?))", 0, "{\"a\": \"foobar\"}");
     }
 
@@ -674,7 +704,7 @@ public class JsonTest extends CQLTester
                 "INSERT INTO %s (k, v) JSON ?",
                 "{\"k\": 0, \"v\": 0, \"zzz\": 0}");
 
-        assertInvalidMessage("Expected an int value, but got a String",
+        assertInvalidMessage("Unable to make int from",
                 "INSERT INTO %s (k, v) JSON ?",
                 "{\"k\": 0, \"v\": \"notanint\"}");
     }

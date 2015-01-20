@@ -62,7 +62,7 @@ public class LongType extends AbstractType<Long>
         }
         catch (Exception e)
         {
-            throw new MarshalException(String.format("unable to make long from '%s'", source), e);
+            throw new MarshalException(String.format("Unable to make long from '%s'", source), e);
         }
 
         return decompose(longType);
@@ -73,7 +73,10 @@ public class LongType extends AbstractType<Long>
     {
         try
         {
-            return getSerializer().serialize(((Number) parsed).longValue());
+            if (parsed instanceof String)
+                return fromString((String) parsed);
+            else
+                return getSerializer().serialize(((Number) parsed).longValue());
         }
         catch (ClassCastException exc)
         {

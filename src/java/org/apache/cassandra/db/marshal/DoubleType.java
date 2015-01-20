@@ -52,7 +52,7 @@ public class DoubleType extends AbstractType<Double>
       }
       catch (NumberFormatException e1)
       {
-          throw new MarshalException(String.format("unable to coerce '%s' to a double", source), e1);
+          throw new MarshalException(String.format("Unable to make double from '%s'", source), e1);
       }
 
       return decompose(d);
@@ -63,7 +63,10 @@ public class DoubleType extends AbstractType<Double>
     {
         try
         {
-            return getSerializer().serialize(((Number) parsed).doubleValue());
+            if (parsed instanceof String)
+                return fromString((String) parsed);
+            else
+                return getSerializer().serialize(((Number) parsed).doubleValue());
         }
         catch (ClassCastException exc)
         {

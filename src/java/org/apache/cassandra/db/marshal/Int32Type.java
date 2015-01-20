@@ -59,7 +59,7 @@ public class Int32Type extends AbstractType<Integer>
         }
         catch (Exception e)
         {
-            throw new MarshalException(String.format("unable to make int from '%s'", source), e);
+            throw new MarshalException(String.format("Unable to make int from '%s'", source), e);
         }
 
         return decompose(int32Type);
@@ -70,7 +70,10 @@ public class Int32Type extends AbstractType<Integer>
     {
         try
         {
-            return getSerializer().serialize(((Number) parsed).intValue());
+            if (parsed instanceof String)
+                return fromString((String) parsed);
+            else
+                return getSerializer().serialize(((Number) parsed).intValue());
         }
         catch (ClassCastException exc)
         {

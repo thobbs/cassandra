@@ -57,13 +57,15 @@ public class BooleanType extends AbstractType<Boolean>
         if (source.equalsIgnoreCase(Boolean.TRUE.toString()))
             return decompose(true);
 
-        throw new MarshalException(String.format("unable to make boolean from '%s'", source));
+        throw new MarshalException(String.format("Unable to make boolean from '%s'", source));
     }
 
     @Override
     public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
     {
-        if (!(parsed instanceof Boolean))
+        if (parsed instanceof String)
+            return fromString((String) parsed);
+        else if (!(parsed instanceof Boolean))
             throw new MarshalException(String.format(
                     "Expected a boolean value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
