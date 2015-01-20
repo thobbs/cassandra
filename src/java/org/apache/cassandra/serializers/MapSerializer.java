@@ -23,7 +23,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
 
 public class MapSerializer<K, V> extends CollectionSerializer<Map<K, V>>
@@ -68,16 +67,16 @@ public class MapSerializer<K, V> extends CollectionSerializer<Map<K, V>>
         return value.size();
     }
 
-    public void validateForNativeProtocol(ByteBuffer bytes, int version)
+    public void validate(ByteBuffer bytes, Format format)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, version);
+            int n = readCollectionSize(input, format);
             for (int i = 0; i < n; i++)
             {
-                keys.validate(readValue(input, version));
-                values.validate(readValue(input, version));
+                keys.validate(readValue(input, format));
+                values.validate(readValue(input, format));
             }
             if (input.hasRemaining())
                 throw new MarshalException("Unexpected extraneous bytes after map value");
@@ -88,19 +87,19 @@ public class MapSerializer<K, V> extends CollectionSerializer<Map<K, V>>
         }
     }
 
-    public Map<K, V> deserializeForNativeProtocol(ByteBuffer bytes, int version)
+    public Map<K, V> deserialize(ByteBuffer bytes, Format format)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, version);
+            int n = readCollectionSize(input, format);
             Map<K, V> m = new LinkedHashMap<K, V>(n);
             for (int i = 0; i < n; i++)
             {
-                ByteBuffer kbb = readValue(input, version);
+                ByteBuffer kbb = readValue(input, format);
                 keys.validate(kbb);
 
-                ByteBuffer vbb = readValue(input, version);
+                ByteBuffer vbb = readValue(input, format);
                 values.validate(vbb);
 
                 m.put(keys.deserialize(kbb), values.deserialize(vbb));
@@ -127,11 +126,11 @@ public class MapSerializer<K, V> extends CollectionSerializer<Map<K, V>>
         try
         {
             ByteBuffer input = serializedMap.duplicate();
-            int n = readCollectionSize(input, Server.VERSION_3);
+            int n = readCollectionSize(input, Format.V3);
             for (int i = 0; i < n; i++)
             {
-                ByteBuffer kbb = readValue(input, Server.VERSION_3);
-                ByteBuffer vbb = readValue(input, Server.VERSION_3);
+                ByteBuffer kbb = readValue(input, Format.V3);
+                ByteBuffer vbb = readValue(input, Format.V3);
                 int comparison = keyType.compare(kbb, serializedKey);
                 if (comparison == 0)
                     return vbb;

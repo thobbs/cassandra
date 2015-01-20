@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.List;
 
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.CollectionSerializer;
 
 /**
  * A CQL3 term, i.e. a column value with or without bind variables.
@@ -147,8 +148,8 @@ public interface Term
 
     public interface CollectionTerminal
     {
-        /** Gets the value of the collection when serialized with the given protocol version format */
-        public ByteBuffer getWithProtocolVersion(int protocolVersion);
+        /** Gets the value of the collection when serialized with the given format */
+        public ByteBuffer getWithSerializationFormat(CollectionSerializer.Format format);
     }
 
     /**

@@ -153,12 +153,12 @@ public abstract class Lists
 
         public ByteBuffer get(QueryOptions options)
         {
-            return getWithProtocolVersion(options.getProtocolVersion());
+            return getWithSerializationFormat(CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion()));
         }
 
-        public ByteBuffer getWithProtocolVersion(int protocolVersion)
+        public ByteBuffer getWithSerializationFormat(CollectionSerializer.Format format)
         {
-            return CollectionSerializer.pack(elements, elements.size(), protocolVersion);
+            return CollectionSerializer.pack(elements, elements.size(), format);
         }
 
         public boolean equals(ListType lt, Value v)
@@ -401,7 +401,7 @@ public abstract class Lists
                 if (value == null)
                     cf.addAtom(params.makeTombstone(name));
                 else
-                    cf.addColumn(params.makeColumn(name, listValue.getWithProtocolVersion(Server.CURRENT_VERSION)));
+                    cf.addColumn(params.makeColumn(name, listValue.getWithSerializationFormat(CollectionSerializer.Format.V3)));
             }
         }
     }

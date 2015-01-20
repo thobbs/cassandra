@@ -437,7 +437,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         }
         // NOTE: using protocol v1 serialization format for collections so as to not break
         // compatibility. Not sure if that's the right thing.
-        return CollectionSerializer.pack(serialized, objects.size(), 1);
+        return CollectionSerializer.pack(serialized, objects.size(), CollectionSerializer.Format.PRE_V3);
     }
 
     private ByteBuffer objToMapBB(List<Object> objects)
@@ -454,7 +454,7 @@ public abstract class AbstractCassandraStorage extends LoadFunc implements Store
         } 
         // NOTE: using protocol v1 serialization format for collections so as to not break
         // compatibility. Not sure if that's the right thing.
-        return CollectionSerializer.pack(serialized, objects.size(), 1);
+        return CollectionSerializer.pack(serialized, objects.size(), CollectionSerializer.Format.PRE_V3);
     }
 
     private ByteBuffer objToCompositeBB(List<Object> objects)

@@ -160,12 +160,12 @@ public abstract class Sets
 
         public ByteBuffer get(QueryOptions options)
         {
-            return getWithProtocolVersion(options.getProtocolVersion());
+            return getWithSerializationFormat(CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion()));
         }
 
-        public ByteBuffer getWithProtocolVersion(int protocolVersion)
+        public ByteBuffer getWithSerializationFormat(CollectionSerializer.Format format)
         {
-            return CollectionSerializer.pack(new ArrayList<>(elements), elements.size(), protocolVersion);
+            return CollectionSerializer.pack(elements, elements.size(), format);
         }
 
         public boolean equals(SetType st, Value v)
@@ -299,7 +299,7 @@ public abstract class Sets
                 if (value == null)
                     cf.addAtom(params.makeTombstone(cellName));
                 else
-                    cf.addColumn(params.makeColumn(cellName, ((Value) value).getWithProtocolVersion(Server.CURRENT_VERSION)));
+                    cf.addColumn(params.makeColumn(cellName, ((Value) value).getWithSerializationFormat(CollectionSerializer.Format.V3)));
             }
         }
     }

@@ -30,14 +30,43 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
     protected abstract List<ByteBuffer> serializeValues(T value);
     protected abstract int getElementCount(T value);
 
-    public abstract T deserializeForNativeProtocol(ByteBuffer buffer, int version);
-    public abstract void validateForNativeProtocol(ByteBuffer buffer, int version);
+    public abstract T deserialize(ByteBuffer buffer, Format format);
+    public abstract void validate(ByteBuffer buffer, Format format);
+
+    public T deserializeForNativeProtocol(ByteBuffer buffer, int protocolVersion)
+    {
+        return deserialize(buffer, Format.forProtocolVersion(protocolVersion));
+    }
+
+    public void validateForNativeProtocol(ByteBuffer buffer, int protocolVersion)
+    {
+        validate(buffer, Format.forProtocolVersion(protocolVersion));
+    }
+
+    public enum Format
+    {
+        // shorts are used for the collection size and the length of collection elements, nulls are not allowed
+        PRE_V3,
+
+        // ints are used for the collection size and the length of collection elements, nulls are allowed
+        V3;
+
+        public int sizeOfCollectionSize()
+        {
+            return this == PRE_V3 ? 2 : 4;
+        }
+
+        public static Format forProtocolVersion(int protocolVersion)
+        {
+            return protocolVersion >= Server.VERSION_3 ? V3 : PRE_V3;
+        }
+    }
 
     public ByteBuffer serialize(T value)
     {
         List<ByteBuffer> values = serializeValues(value);
         // See deserialize() for why using the protocol v3 variant is the right thing to do.
-        return pack(values, getElementCount(value), Server.VERSION_3);
+        return pack(values, getElementCount(value), Format.V3);
     }
 
     public T deserialize(ByteBuffer bytes)
@@ -61,40 +90,35 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
         validateForNativeProtocol(bytes, Server.VERSION_3);
     }
 
-    public static ByteBuffer pack(Collection<ByteBuffer> buffers, int elements, int version)
+    public static ByteBuffer pack(Collection<ByteBuffer> buffers, int elements, Format format)
     {
         int size = 0;
         for (ByteBuffer bb : buffers)
-            size += sizeOfValue(bb, version);
+            size += sizeOfValue(bb, format);
 
-        ByteBuffer result = ByteBuffer.allocate(sizeOfCollectionSize(elements, version) + size);
-        writeCollectionSize(result, elements, version);
+        ByteBuffer result = ByteBuffer.allocate(format.sizeOfCollectionSize() + size);
+        writeCollectionSize(result, elements, format);
         for (ByteBuffer bb : buffers)
-            writeValue(result, bb, version);
+            writeValue(result, bb, format);
         return (ByteBuffer)result.flip();
     }
 
-    protected static void writeCollectionSize(ByteBuffer output, int elements, int version)
+    protected static void writeCollectionSize(ByteBuffer output, int elements, Format format)
     {
-        if (version >= Server.VERSION_3)
+        if (format == Format.V3)
             output.putInt(elements);
         else
             output.putShort((short)elements);
     }
 
-    public static int readCollectionSize(ByteBuffer input, int version)
+    public static int readCollectionSize(ByteBuffer input, Format format)
     {
-        return version >= Server.VERSION_3 ? input.getInt() : ByteBufferUtil.readShortLength(input);
+        return format == Format.V3 ? input.getInt() : ByteBufferUtil.readShortLength(input);
     }
 
-    protected static int sizeOfCollectionSize(int elements, int version)
+    protected static void writeValue(ByteBuffer output, ByteBuffer value, Format format)
     {
-        return version >= Server.VERSION_3 ? 4 : 2;
-    }
-
-    protected static void writeValue(ByteBuffer output, ByteBuffer value, int version)
-    {
-        if (version >= Server.VERSION_3)
+        if (format == Format.V3)
         {
             if (value == null)
             {
@@ -113,9 +137,9 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
         }
     }
 
-    public static ByteBuffer readValue(ByteBuffer input, int version)
+    public static ByteBuffer readValue(ByteBuffer input, Format format)
     {
-        if (version >= Server.VERSION_3)
+        if (format == Format.V3)
         {
             int size = input.getInt();
             if (size < 0)
@@ -129,9 +153,9 @@ public abstract class CollectionSerializer<T> implements TypeSerializer<T>
         }
     }
 
-    protected static int sizeOfValue(ByteBuffer value, int version)
+    protected static int sizeOfValue(ByteBuffer value, Format format)
     {
-        if (version >= Server.VERSION_3)
+        if (format == Format.V3)
         {
             return value == null ? 4 : 4 + value.remaining();
         }

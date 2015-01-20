@@ -32,6 +32,7 @@ import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -507,11 +508,11 @@ public class ColumnCondition
             // make sure we use v3 serialization format for comparison
             ByteBuffer conditionValue;
             if (type.kind == CollectionType.Kind.LIST)
-                conditionValue = ((Lists.Value) value).getWithProtocolVersion(Server.VERSION_3);
+                conditionValue = ((Lists.Value) value).getWithSerializationFormat(CollectionSerializer.Format.V3);
             else if (type.kind == CollectionType.Kind.SET)
-                conditionValue = ((Sets.Value) value).getWithProtocolVersion(Server.VERSION_3);
+                conditionValue = ((Sets.Value) value).getWithSerializationFormat(CollectionSerializer.Format.V3);
             else
-                conditionValue = ((Maps.Value) value).getWithProtocolVersion(Server.VERSION_3);
+                conditionValue = ((Maps.Value) value).getWithSerializationFormat(CollectionSerializer.Format.V3);
 
             return compareWithOperator(operator, type, conditionValue, cell.value());
         }
@@ -695,7 +696,7 @@ public class ColumnCondition
                         if (cell == null || !cell.isLive(now))
                             return true;
                     }
-                    else if (type.compare(((Term.CollectionTerminal)value).getWithProtocolVersion(Server.VERSION_3), cell.value()) == 0)
+                    else if (type.compare(((Term.CollectionTerminal)value).getWithSerializationFormat(CollectionSerializer.Format.V3), cell.value()) == 0)
                     {
                         return true;
                     }

@@ -175,10 +175,10 @@ public abstract class Maps
 
         public ByteBuffer get(QueryOptions options)
         {
-            return getWithProtocolVersion(options.getProtocolVersion());
+            return getWithSerializationFormat(CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion()));
         }
 
-        public ByteBuffer getWithProtocolVersion(int protocolVersion)
+        public ByteBuffer getWithSerializationFormat(CollectionSerializer.Format format)
         {
             List<ByteBuffer> buffers = new ArrayList<>(2 * map.size());
             for (Map.Entry<ByteBuffer, ByteBuffer> entry : map.entrySet())
@@ -186,7 +186,7 @@ public abstract class Maps
                 buffers.add(entry.getKey());
                 buffers.add(entry.getValue());
             }
-            return CollectionSerializer.pack(buffers, map.size(), protocolVersion);
+            return CollectionSerializer.pack(buffers, map.size(), format);
         }
 
         public boolean equals(MapType mt, Value v)
@@ -372,7 +372,7 @@ public abstract class Maps
                 if (value == null)
                     cf.addAtom(params.makeTombstone(cellName));
                 else
-                    cf.addColumn(params.makeColumn(cellName, mapValue.getWithProtocolVersion(Server.CURRENT_VERSION)));
+                    cf.addColumn(params.makeColumn(cellName, mapValue.getWithSerializationFormat(CollectionSerializer.Format.V3)));
             }
         }
     }

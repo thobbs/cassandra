@@ -58,14 +58,14 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
         return value.size();
     }
 
-    public void validateForNativeProtocol(ByteBuffer bytes, int version)
+    public void validate(ByteBuffer bytes, Format format)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, version);
+            int n = readCollectionSize(input, format);
             for (int i = 0; i < n; i++)
-                elements.validate(readValue(input, version));
+                elements.validate(readValue(input, format));
             if (input.hasRemaining())
                 throw new MarshalException("Unexpected extraneous bytes after set value");
         }
@@ -75,16 +75,16 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
         }
     }
 
-    public Set<T> deserializeForNativeProtocol(ByteBuffer bytes, int version)
+    public Set<T> deserialize(ByteBuffer bytes, Format format)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, version);
+            int n = readCollectionSize(input, format);
             Set<T> l = new LinkedHashSet<T>(n);
             for (int i = 0; i < n; i++)
             {
-                ByteBuffer databb = readValue(input, version);
+                ByteBuffer databb = readValue(input, format);
                 elements.validate(databb);
                 l.add(elements.deserialize(databb));
             }

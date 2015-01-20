@@ -133,13 +133,14 @@ public class ListType<T> extends CollectionType<List<T>>
         ByteBuffer bb1 = o1.duplicate();
         ByteBuffer bb2 = o2.duplicate();
 
-        int size1 = CollectionSerializer.readCollectionSize(bb1, 3);
-        int size2 = CollectionSerializer.readCollectionSize(bb2, 3);
+        CollectionSerializer.Format format = CollectionSerializer.Format.V3;
+        int size1 = CollectionSerializer.readCollectionSize(bb1, format);
+        int size2 = CollectionSerializer.readCollectionSize(bb2, format);
 
         for (int i = 0; i < Math.min(size1, size2); i++)
         {
-            ByteBuffer v1 = CollectionSerializer.readValue(bb1, 3);
-            ByteBuffer v2 = CollectionSerializer.readValue(bb2, 3);
+            ByteBuffer v1 = CollectionSerializer.readValue(bb1, format);
+            ByteBuffer v2 = CollectionSerializer.readValue(bb2, format);
             int cmp = elementsComparator.compare(v1, v2);
             if (cmp != 0)
                 return cmp;
