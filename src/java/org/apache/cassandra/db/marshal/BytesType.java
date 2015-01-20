@@ -56,11 +56,7 @@ public class BytesType extends AbstractType<ByteBuffer>
         {
             return BytesType.instance.fromString((String) parsed);
         }
-        catch (ClassCastException exc)
-        {
-            throw new MarshalException(String.format("Value '%s' is not a valid blob representation: %s", parsed, exc.getMessage()));
-        }
-        catch (MarshalException exc)
+        catch (ClassCastException | MarshalException exc)
         {
             throw new MarshalException(String.format("Value '%s' is not a valid blob representation: %s", parsed, exc.getMessage()));
         }

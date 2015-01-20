@@ -21,12 +21,13 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 
+import org.json.simple.JSONValue;
+
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.UTF8Serializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.json.simple.JSONValue;
 
 public class UTF8Type extends AbstractType<String>
 {
