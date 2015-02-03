@@ -27,12 +27,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ToJsonFct extends AbstractFunction implements ScalarFunction
 {
     public static final FunctionName NAME = FunctionName.nativeFunction("tojson");
 
-    private static final Map<AbstractType<?>, ToJsonFct> instances = new HashMap<>();
+    private static final Map<AbstractType<?>, ToJsonFct> instances = new ConcurrentHashMap<>();
 
     public static ToJsonFct getInstance(List<AbstractType<?>> argTypes) throws InvalidRequestException
     {

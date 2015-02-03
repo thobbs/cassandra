@@ -25,12 +25,13 @@ import org.json.simple.parser.ParseException;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class FromJsonFct extends AbstractFunction implements ScalarFunction
 {
     public static final FunctionName NAME = FunctionName.nativeFunction("fromjson");
 
-    private static final Map<AbstractType<?>, FromJsonFct> instances = new HashMap<>();
+    private static final Map<AbstractType<?>, FromJsonFct> instances = new ConcurrentHashMap<>();
     private static final List<AbstractType<?>> fromJsonArgs = Collections.<AbstractType<?>>singletonList(UTF8Type.instance);
 
     public static FromJsonFct getInstance(AbstractType<?> returnType)
