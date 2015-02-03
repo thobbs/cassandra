@@ -79,7 +79,7 @@ public class FunctionCall extends Term.NonTerminal
         catch (MarshalException e)
         {
             throw new RuntimeException(String.format("Return of function %s (%s) is not a valid value for its declared return type %s",
-                                                     fun.name(), ByteBufferUtil.bytesToHex(result), fun.returnType().asCQL3Type()), e);
+                                                     fun, ByteBufferUtil.bytesToHex(result), fun.returnType().asCQL3Type()), e);
         }
     }
 
@@ -137,7 +137,7 @@ public class FunctionCall extends Term.NonTerminal
 
             if (fun.argTypes().size() != terms.size())
                 throw new InvalidRequestException(String.format("Incorrect number of arguments specified for function %s (expected %d, found %d)",
-                                                                fun.name(), fun.argTypes().size(), terms.size()));
+                                                                fun, fun.argTypes().size(), terms.size()));
 
             List<Term> parameters = new ArrayList<>(terms.size());
             boolean allTerminal = true;
