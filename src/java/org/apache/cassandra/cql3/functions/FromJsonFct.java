@@ -68,6 +68,9 @@ public class FromJsonFct extends AbstractFunction implements ScalarFunction
     {
         assert parameters.size() == 1 : "Unexpectedly got " + parameters.size() + " arguments for fromJson()";
         ByteBuffer argument = parameters.get(0);
+        if (argument == null)
+            return null;
+
         String jsonArg = UTF8Type.instance.getSerializer().deserialize(argument);
         try
         {

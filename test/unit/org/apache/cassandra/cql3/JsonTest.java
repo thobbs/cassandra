@@ -72,6 +72,9 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Could not decode JSON string '\u038E\u0394\u03B4\u03E0'",
                 "INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, "\u038E\u0394\u03B4\u03E0");
 
+        // handle nulls
+        execute("INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, null);
+
         // ================ ascii ================
         execute("INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, "\"ascii text\"");
         assertRows(execute("SELECT k, asciival FROM %s WHERE k = ?", 0), row(0, "ascii text"));
