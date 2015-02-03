@@ -684,6 +684,12 @@ public class JsonTest extends CQLTester
                 row(0, 0)
         );
 
+        // without specifying column names
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"v\": 0}");
+        assertRows(execute("SELECT * FROM %s"),
+                row(0, 0)
+        );
+
         execute("INSERT INTO %s (k, v) JSON ?", "{\"k\": 0, \"v\": null}");
         assertRows(execute("SELECT * FROM %s"),
                 row(0, null)

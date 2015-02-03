@@ -156,26 +156,45 @@ public class UpdateStatement extends ModificationStatement
 
             if (isJson)
                 assert columnValues.size() == 1;
-            else if (columnNames.size() != columnValues.size())
-                throw new InvalidRequestException("Unmatched column names/values");
 
-            if (columnNames.isEmpty())
-                throw new InvalidRequestException("No columns provided to INSERT");
-
-            ColumnDefinition[] defs = new ColumnDefinition[columnNames.size()];
-            for (int i = 0; i < columnNames.size(); i++)
+            ColumnDefinition[] defs;
+            if (columnNames == null)
             {
-                ColumnIdentifier id = columnNames.get(i).prepare(cfm);
-                ColumnDefinition def = cfm.getColumnDefinition(id);
-                if (def == null)
-                    throw new InvalidRequestException(String.format("Unknown identifier %s", id));
+                if (!isJson)
+                    throw new InvalidRequestException("Column names for INSERT must be provided when using VALUES");
 
-                defs[i] = def;
-
-                for (int j = 0; j < i; j++)
+                int numColumns = cfm.allColumns().size();
+                defs = new ColumnDefinition[numColumns];
+                Iterator<ColumnDefinition> iterator = cfm.allColumnsInSelectOrder();
+                for (int i = 0; i < numColumns; i++)
+                    defs[i] = iterator.next();
+            }
+            else if (columnNames.isEmpty())
+            {
+                throw new InvalidRequestException("No columns provided to INSERT");
+            }
+            else if (!isJson && columnNames.size() != columnValues.size())
+            {
+                throw new InvalidRequestException("Unmatched column names/values");
+            }
+            else
+            {
+                // we were provided a list of column names in the query
+                defs = new ColumnDefinition[columnNames.size()];
+                for (int i = 0; i < columnNames.size(); i++)
                 {
-                    if (id.equals(defs[j].name))
-                        throw new InvalidRequestException(String.format("Multiple definitions found for column %s", id));
+                    ColumnIdentifier id = columnNames.get(i).prepare(cfm);
+                    ColumnDefinition def = cfm.getColumnDefinition(id);
+                    if (def == null)
+                        throw new InvalidRequestException(String.format("Unknown identifier %s", id));
+
+                    defs[i] = def;
+
+                    for (int j = 0; j < i; j++)
+                    {
+                        if (id.equals(defs[j].name))
+                            throw new InvalidRequestException(String.format("Multiple definitions found for column %s", id));
+                    }
                 }
             }
 
@@ -183,13 +202,12 @@ public class UpdateStatement extends ModificationStatement
             {
                 Json.Raw jsonValue = (Json.Raw) columnValues.get(0);
 
-                HashSet<ColumnDefinition> expectedReceivers = new HashSet<>(columnNames.size());
+                HashSet<ColumnDefinition> expectedReceivers = new HashSet<>(defs.length);
                 expectedReceivers.addAll(Arrays.asList(defs));
                 jsonValue.setExpectedReceivers(expectedReceivers);
 
-                for (int i = 0; i < columnNames.size(); i++)
+                for (ColumnDefinition def : defs)
                 {
-                    ColumnDefinition def = defs[i];
                     switch (def.kind)
                     {
                         case PARTITION_KEY:
