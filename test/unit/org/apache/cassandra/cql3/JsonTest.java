@@ -764,4 +764,20 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, lf) JSON ?", "{\"k\": 0, \"lf\": [1, 2, 3]}");
         assertRows(execute("SELECT k, lf FROM %s"), row(0, list(1, 2, 3)));
     }
+
+    @Test
+    public void testInsertJsonSyntaxWithTuplesAndUDTs() throws Throwable
+    {
+        String typeName = createType("CREATE TYPE %s (a int, b frozen<set<int>>, c tuple<int, int>)");
+        createTable("CREATE TABLE %s (" +
+                "k int PRIMARY KEY, " +
+                "a frozen<" + typeName + ">, " +
+                "b tuple<int, boolean>)");
+
+        execute("INSERT INTO %s (k, a, b) JSON ?", "{\"k\": 0, \"a\": {\"a\": 0, \"b\": [1, 2, 3], \"c\": [0, 1]}, \"b\": [0, true]}");
+        assertRows(execute("SELECT k, a.a, a.b, a.c, b FROM %s"), row(0, 0, set(1, 2, 3), tuple(0, 1), tuple(0, true)));
+
+        execute("INSERT INTO %s (k, a, b) JSON ?", "{\"k\": 0, \"a\": {\"a\": 0, \"b\": [1, 2, 3], \"c\": null}, \"b\": null}");
+        assertRows(execute("SELECT k, a.a, a.b, a.c, b FROM %s"), row(0, 0, set(1, 2, 3), null, null));
+    }
 }
