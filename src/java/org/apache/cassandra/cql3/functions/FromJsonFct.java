@@ -33,7 +33,7 @@ public class FromJsonFct extends AbstractFunction implements ScalarFunction
     private static final Map<AbstractType<?>, FromJsonFct> instances = new HashMap<>();
     private static final List<AbstractType<?>> fromJsonArgs = Collections.<AbstractType<?>>singletonList(UTF8Type.instance);
 
-    public static synchronized FromJsonFct getInstance(AbstractType<?> returnType)
+    public static FromJsonFct getInstance(AbstractType<?> returnType)
     {
         FromJsonFct func = instances.get(returnType);
         if (func == null)

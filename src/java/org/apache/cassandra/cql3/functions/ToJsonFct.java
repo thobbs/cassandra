@@ -34,7 +34,7 @@ public class ToJsonFct extends AbstractFunction implements ScalarFunction
 
     private static final Map<AbstractType<?>, ToJsonFct> instances = new HashMap<>();
 
-    public static synchronized ToJsonFct getInstance(List<AbstractType<?>> argTypes) throws InvalidRequestException
+    public static ToJsonFct getInstance(List<AbstractType<?>> argTypes) throws InvalidRequestException
     {
         if (argTypes.size() != 1)
             throw new InvalidRequestException(String.format("toJson() only accepts one argument (got %d)", argTypes.size()));
