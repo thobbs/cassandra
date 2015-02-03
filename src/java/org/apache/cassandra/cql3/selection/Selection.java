@@ -290,7 +290,7 @@ public abstract class Selection
                 sb.append(spec.type.toJSONString(buffer, protocolVersion));
         }
         sb.append("}");
-        return Arrays.asList(UTF8Type.instance.getSerializer().serialize(sb.toString()));
+        return Collections.singletonList(UTF8Type.instance.getSerializer().serialize(sb.toString()));
     }
 
     @Override
