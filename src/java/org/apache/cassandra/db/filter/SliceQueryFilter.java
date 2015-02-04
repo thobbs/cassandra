@@ -105,7 +105,8 @@ public class SliceQueryFilter implements IDiskAtomFilter
     /** Returns true if the slice includes static columns, false otherwise. */
     private boolean sliceIncludesStatics(ColumnSlice slice, CFMetaData cfm)
     {
-        return cfm.hasStaticColumns() && ByteBufferUtil.EMPTY_BYTE_BUFFER.equals(reversed ? slice.finish : slice.start);
+        return cfm.hasStaticColumns() &&
+               cfm.getStaticColumnNameBuilder().build().compareTo(reversed ? slice.finish : slice.start) >= 0;
     }
 
     public boolean hasStaticSlice(CFMetaData cfm)
@@ -118,7 +119,7 @@ public class SliceQueryFilter implements IDiskAtomFilter
     }
 
     /**
-     * Splits this filter into two SliceQueryFilters: one that slices only the static columns, and once that slices the
+     * Splits this filter into two SliceQueryFilters: one that slices only the static columns, and one that slices the
      * remainder of the normal data.
      *
      * This should only be called when the filter is reversed and the filter is known to cover static columns (through

@@ -229,7 +229,8 @@ public class DataRange
         /** Returns true if the slice includes static columns, false otherwise. */
         private boolean sliceIncludesStatics(ColumnSlice slice, boolean reversed, CFMetaData cfm)
         {
-            return cfm.hasStaticColumns() && ByteBufferUtil.EMPTY_BYTE_BUFFER.equals(reversed ? slice.finish : slice.start);
+            return cfm.hasStaticColumns() &&
+                    cfm.getStaticColumnNameBuilder().build().compareTo(reversed ? slice.finish : slice.start) >= 0;
         }
 
         private ColumnSlice[] slicesForKey(ByteBuffer key)
