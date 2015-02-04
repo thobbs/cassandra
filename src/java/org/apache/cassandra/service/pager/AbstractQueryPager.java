@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service.pager;
 
-import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -30,8 +29,6 @@ import org.apache.cassandra.db.filter.ColumnCounter;
 import org.apache.cassandra.db.filter.IDiskAtomFilter;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.thrift.ColumnDef;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

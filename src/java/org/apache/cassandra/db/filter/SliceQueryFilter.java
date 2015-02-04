@@ -313,6 +313,8 @@ public class SliceQueryFilter implements IDiskAtomFilter
             return new ColumnCounter(now);
         else if (compositesToGroup == 0)
             return new ColumnCounter.GroupByPrefix(now, null, 0);
+        else if (reversed)
+            return new ColumnCounter.GroupByPrefixReversed(now, (CompositeType)comparator, compositesToGroup);
         else
             return new ColumnCounter.GroupByPrefix(now, (CompositeType)comparator, compositesToGroup);
     }
@@ -330,16 +332,11 @@ public class SliceQueryFilter implements IDiskAtomFilter
                                    : cf.getSortedColumns();
 
         DeletionInfo.InOrderTester tester = cf.deletionInfo().inOrderTester(reversed);
-        CFMetaData cfm = cf.metadata();
 
         for (Iterator<Column> iter = columns.iterator(); iter.hasNext(); )
         {
             Column column = iter.next();
-
-            // if it's static, don't count it
-            ColumnDefinition columnDefinition = cfm.getColumnDefinitionFromColumnName(column.name());
-            if (columnDefinition == null || columnDefinition.type != ColumnDefinition.Type.STATIC)
-                counter.count(column, tester);
+            counter.count(column, tester);
 
             if (counter.live() > trimTo)
             {
