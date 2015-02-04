@@ -128,7 +128,7 @@ public class AbstractQueryPagerTest
     private static CFMetaData createMetadata()
     {
         CFMetaData cfm = new CFMetaData("ks", "cf", ColumnFamilyType.Standard, Int32Type.instance);
-        cfm.setStaticColumns(new HashSet<ColumnDefinition>());
+        cfm.rebuild();
         return cfm;
     }
 

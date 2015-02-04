@@ -2197,12 +2197,6 @@ public final class CFMetaData
         return !staticColumns.isEmpty();
     }
 
-    @VisibleForTesting
-    public void setStaticColumns(Set<ColumnDefinition> staticColumns)
-    {
-        this.staticColumns = staticColumns;
-    }
-
     public ColumnNameBuilder getStaticColumnNameBuilder()
     {
         assert comparator instanceof CompositeType && clusteringKeyColumns().size() > 0;
