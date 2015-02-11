@@ -162,11 +162,9 @@ public class SetType<T> extends CollectionType<Set<T>>
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in set");
-            buffers.add(elements.fromJSONObject(element, protocolVersion));
+            if (!buffers.add(elements.fromJSONObject(element, protocolVersion)))
+                throw new MarshalException(String.format("List representation of set contained duplicate elements: %s", element));
         }
-
-        if (buffers.size() != list.size())
-            throw new MarshalException("List representation of set contained duplicate elements");
 
         return CollectionSerializer.pack(buffers, buffers.size(), CollectionSerializer.Format.forProtocolVersion(protocolVersion));
     }
