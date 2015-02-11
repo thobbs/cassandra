@@ -74,7 +74,7 @@ public class SSTableExportTest
     public static final String CF_VALSWITHQUOTES = "ValuesWithQuotes";
 
     @BeforeClass
-    public static void defineSchema() throws ConfigurationException, IOException, TException
+    public static void defineSchema() throws ConfigurationException
     {
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
@@ -224,6 +224,7 @@ public class SSTableExportTest
         qf = Util.namesQueryFilter(cfs, Util.dk("rowExclude"), "name");
         cf = qf.getSSTableColumnIterator(reader).getColumnFamily();
         assert cf == null;
+        reader.selfRef().release();
     }
 
     @Test

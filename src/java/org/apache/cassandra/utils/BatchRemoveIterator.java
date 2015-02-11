@@ -15,18 +15,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.scheduler;
+package org.apache.cassandra.utils;
+
+import java.util.Iterator;
 
 /**
- * Exposes client request scheduling metrics for a particular scheduler queue.
- * @see org.apache.cassandra.metrics.LatencyMetrics
+ * Iterator that allows us to more efficiently remove many items
  */
-@Deprecated
-public interface WeightedQueueMBean
+public interface BatchRemoveIterator<T> extends Iterator<T>
 {
-    public long getOperations();
-    public long getTotalLatencyMicros();
-    public double getRecentLatencyMicros();
-    public long[] getTotalLatencyHistogramMicros();
-    public long[] getRecentLatencyHistogramMicros();
+    /**
+     * Commits the remove operations in this batch iterator. After this no more
+     * deletes can be made. Any further calls to remove() or commit() will throw IllegalStateException.
+     */
+    void commit();
 }

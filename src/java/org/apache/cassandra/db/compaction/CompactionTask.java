@@ -18,7 +18,6 @@
 package org.apache.cassandra.db.compaction;
 
 import java.io.File;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
@@ -222,7 +221,14 @@ public class CompactionTask extends AbstractCompactionTask
                 }
                 catch (Throwable t)
                 {
-                    writer.abort();
+                    try
+                    {
+                        writer.abort();
+                    }
+                    catch (Throwable t2)
+                    {
+                        t.addSuppressed(t2);
+                    }
                     throw t;
                 }
                 finally

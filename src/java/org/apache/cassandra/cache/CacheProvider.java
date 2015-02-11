@@ -15,27 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.concurrent;
+package org.apache.cassandra.cache;
 
-/**
- * @see org.apache.cassandra.metrics.ThreadPoolMetrics
- */
-@Deprecated
-public interface IExecutorMBean
+public interface CacheProvider<K, V>
 {
-    /**
-     * Get the current number of running tasks
-     */
-    public int getActiveCount();
-
-    /**
-     * Get the number of completed tasks
-     */
-    public long getCompletedTasks();
-
-    /**
-     * Get the number of tasks waiting to be executed
-     */
-    public long getPendingTasks();
-
+    ICache<K, V> create();
 }

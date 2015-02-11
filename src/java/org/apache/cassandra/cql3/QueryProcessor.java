@@ -517,6 +517,7 @@ public class QueryProcessor implements QueryHandler
     {
         private void removeInvalidPreparedStatements(String ksName, String cfName)
         {
+            removeInvalidPreparedStatements(internalStatements.values().iterator(), ksName, cfName);
             removeInvalidPreparedStatements(preparedStatements.values().iterator(), ksName, cfName);
             removeInvalidPreparedStatements(thriftPreparedStatements.values().iterator(), ksName, cfName);
         }
@@ -546,6 +547,16 @@ public class QueryProcessor implements QueryHandler
                 SelectStatement selectStatement = ((SelectStatement) statement);
                 statementKsName = selectStatement.keyspace();
                 statementCfName = selectStatement.columnFamily();
+            }
+            else if (statement instanceof BatchStatement)
+            {
+                BatchStatement batchStatement = ((BatchStatement) statement);
+                for (ModificationStatement stmt : batchStatement.getStatements())
+                {
+                    if (shouldInvalidate(ksName, cfName, stmt))
+                        return true;
+                }
+                return false;
             }
             else
             {

@@ -44,7 +44,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.db.composites.CellNameType;
 import org.apache.cassandra.db.filter.NamesQueryFilter;
-import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
@@ -344,7 +343,7 @@ public class CommitLogTest
     }
 
     @Test
-    public void testTruncateWithoutSnapshot()  throws ExecutionException, InterruptedException
+    public void testTruncateWithoutSnapshot()
     {
         CommitLog.instance.resetUnsafe();
         boolean prev = DatabaseDescriptor.isAutoSnapshot();
@@ -373,7 +372,7 @@ public class CommitLogTest
     }
 
     @Test
-    public void testTruncateWithoutSnapshotNonDurable()  throws ExecutionException, InterruptedException
+    public void testTruncateWithoutSnapshotNonDurable()
     {
         CommitLog.instance.resetUnsafe();
         boolean prevAutoSnapshot = DatabaseDescriptor.isAutoSnapshot();

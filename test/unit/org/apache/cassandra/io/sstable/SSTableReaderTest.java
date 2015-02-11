@@ -107,7 +107,7 @@ public class SSTableReaderTest
     }
 
     @Test
-    public void testGetPositionsForRanges() throws ExecutionException, InterruptedException
+    public void testGetPositionsForRanges()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
@@ -146,7 +146,7 @@ public class SSTableReaderTest
     }
 
     @Test
-    public void testSpannedIndexPositions() throws IOException, ExecutionException, InterruptedException
+    public void testSpannedIndexPositions() throws IOException
     {
         MmappedSegmentedFile.MAX_SEGMENT_SIZE = 40; // each index entry is ~11 bytes, so this will generate lots of segments
 
@@ -200,7 +200,7 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
 
         clearAndLoad(store);
-        assert store.getMaxRowSize() != 0;
+        assert store.metric.maxRowSize.getValue() != 0;
     }
 
     private void clearAndLoad(ColumnFamilyStore cfs)
@@ -226,19 +226,19 @@ public class SSTableReaderTest
         store.forceBlockingFlush();
 
         SSTableReader sstable = store.getSSTables().iterator().next();
-        assertEquals(0, sstable.readMeter.count());
+        assertEquals(0, sstable.getReadMeter().count());
 
         DecoratedKey key = sstable.partitioner.decorateKey(ByteBufferUtil.bytes("4"));
         store.getColumnFamily(key, Composites.EMPTY, Composites.EMPTY, false, 100, 100);
-        assertEquals(1, sstable.readMeter.count());
+        assertEquals(1, sstable.getReadMeter().count());
         store.getColumnFamily(key, cellname("0"), cellname("0"), false, 100, 100);
-        assertEquals(2, sstable.readMeter.count());
+        assertEquals(2, sstable.getReadMeter().count());
         store.getColumnFamily(Util.namesQueryFilter(store, key, cellname("0")));
-        assertEquals(3, sstable.readMeter.count());
+        assertEquals(3, sstable.getReadMeter().count());
     }
 
     @Test
-    public void testGetPositionsForRangesWithKeyCache() throws ExecutionException, InterruptedException
+    public void testGetPositionsForRangesWithKeyCache()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
@@ -286,7 +286,7 @@ public class SSTableReaderTest
         // check if opening and querying works
         assertIndexQueryWorks(store);
     }
-    public void testGetPositionsKeyCacheStats() throws IOException, ExecutionException, InterruptedException
+    public void testGetPositionsKeyCacheStats()
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
@@ -357,6 +357,7 @@ public class SSTableReaderTest
         Assert.assertArrayEquals(ByteBufferUtil.getArray(firstKey.getKey()), target.getIndexSummaryKey(0));
         assert target.first.equals(firstKey);
         assert target.last.equals(lastKey);
+        target.selfRef().release();
     }
 
     @Test
@@ -383,6 +384,7 @@ public class SSTableReaderTest
 
         SSTableReader reopened = SSTableReader.open(sstable.descriptor);
         assert reopened.first.getToken() instanceof LocalToken;
+        reopened.selfRef().release();
     }
 
     /** see CASSANDRA-5407 */
@@ -407,7 +409,7 @@ public class SSTableReaderTest
     }
 
     @Test
-    public void testGetPositionsForRangesFromTableOpenedForBulkLoading() throws IOException, ExecutionException, InterruptedException
+    public void testGetPositionsForRangesFromTableOpenedForBulkLoading() throws IOException
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE1);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore("Standard2");
@@ -440,6 +442,7 @@ public class SSTableReaderTest
         SSTableReader bulkLoaded = SSTableReader.openForBatch(sstable.descriptor, components, store.metadata, sstable.partitioner);
         sections = bulkLoaded.getPositionsForRanges(ranges);
         assert sections.size() == 1 : "Expected to find range in sstable opened for bulk loading";
+        bulkLoaded.selfRef().release();
     }
 
     @Test

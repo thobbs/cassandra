@@ -81,6 +81,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.thrift.SlicePredicate;
@@ -131,7 +132,7 @@ public class ColumnFamilyStoreTest
     }
 
     @BeforeClass
-    public static void defineSchema() throws ConfigurationException, IOException, TException
+    public static void defineSchema() throws ConfigurationException
     {
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
@@ -178,9 +179,9 @@ public class ColumnFamilyStoreTest
         rm.applyUnsafe();
         cfs.forceBlockingFlush();
 
-        cfs.getRecentSSTablesPerReadHistogram(); // resets counts
+        ((ClearableHistogram)cfs.metric.sstablesPerReadHistogram.cf).clear(); // resets counts
         cfs.getColumnFamily(Util.namesQueryFilter(cfs, Util.dk("key1"), "Column1"));
-        assertEquals(1, cfs.getRecentSSTablesPerReadHistogram()[0]);
+        assertEquals(1, cfs.metric.sstablesPerReadHistogram.cf.getCount());
     }
 
     @Test
@@ -1794,9 +1795,10 @@ public class ColumnFamilyStoreTest
         sstables = dir.sstableLister().list();
         assertEquals(2, sstables.size());
 
+        SSTableReader sstable2 = SSTableReader.open(sstable1.descriptor);
         UUID compactionTaskID = SystemKeyspace.startCompaction(
                 Keyspace.open(ks).getColumnFamilyStore(cf),
-                Collections.singleton(SSTableReader.open(sstable1.descriptor)));
+                Collections.singleton(sstable2));
 
         Map<Integer, UUID> unfinishedCompaction = new HashMap<>();
         unfinishedCompaction.put(sstable1.descriptor.generation, compactionTaskID);
@@ -1809,6 +1811,8 @@ public class ColumnFamilyStoreTest
 
         Map<Pair<String, String>, Map<Integer, UUID>> unfinished = SystemKeyspace.getUnfinishedCompactions();
         assertTrue(unfinished.isEmpty());
+        sstable1.selfRef().release();
+        sstable2.selfRef().release();
     }
 
     /**

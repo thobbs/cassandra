@@ -28,16 +28,19 @@ import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
 
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.Uninterruptibles;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.addthis.metrics.reporter.config.ReporterConfig;
+
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.Stage;
@@ -45,16 +48,14 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Directories;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.thrift.ThriftServer;
 import org.apache.cassandra.tracing.Tracing;
@@ -345,7 +346,7 @@ public class CassandraDaemon
                 }
             }
         };
-        ScheduledExecutors.optionalTasks.schedule(runnable, 5 * 60, TimeUnit.SECONDS);
+        ScheduledExecutors.optionalTasks.schedule(runnable, 5, TimeUnit.MINUTES);
 
         SystemKeyspace.finishStartup();
 
@@ -382,7 +383,13 @@ public class CassandraDaemon
         if (!FBUtilities.getBroadcastAddress().equals(InetAddress.getLoopbackAddress()))
             waitForGossipToSettle();
 
-        // Thift
+        // schedule periodic dumps of table size estimates into SystemKeyspace.SIZE_ESTIMATES_CF
+        // set cassandra.size_recorder_interval to 0 to disable
+        int sizeRecorderInterval = Integer.getInteger("cassandra.size_recorder_interval", 5 * 60);
+        if (sizeRecorderInterval > 0)
+            ScheduledExecutors.optionalTasks.scheduleWithFixedDelay(SizeEstimatesRecorder.instance, 30, sizeRecorderInterval, TimeUnit.SECONDS);
+
+        // Thrift
         InetAddress rpcAddr = DatabaseDescriptor.getRpcAddress();
         int rpcPort = DatabaseDescriptor.getRpcPort();
         int listenBacklog = DatabaseDescriptor.getRpcListenBacklog();
@@ -476,6 +483,12 @@ public class CassandraDaemon
                 //Allow the server to start even if the bean can't be registered
             }
 
+            try {
+                DatabaseDescriptor.forceStaticInitialization();
+            } catch (ExceptionInInitializerError e) {
+                throw e.getCause();
+            }
+
             setup();
 
             if (pidFile != null)
@@ -493,12 +506,27 @@ public class CassandraDaemon
         }
         catch (Throwable e)
         {
-            logger.error("Exception encountered during startup", e);
+            boolean logStackTrace =
+                    e instanceof ConfigurationException ? ((ConfigurationException)e).logStackTrace : true;
 
-            // try to warn user on stdout too, if we haven't already detached
-            e.printStackTrace();
-            System.out.println("Exception encountered during startup: " + e.getMessage());
-            exitOrFail(3, "Exception encountered during startup", e);
+            System.out.println("Exception (" + e.getClass().getName() + ") encountered during startup: " + e.getMessage());
+
+            if (logStackTrace)
+            {
+                if (runManaged)
+                    logger.error("Exception encountered during startup", e);
+                // try to warn user on stdout too, if we haven't already detached
+                e.printStackTrace();
+                exitOrFail(3, "Exception encountered during startup", e);
+            }
+            else
+            {
+                if (runManaged)
+                    logger.error("Exception encountered during startup: " + e.getMessage());
+                // try to warn user on stdout too, if we haven't already detached
+                System.err.println(e.getMessage());
+                exitOrFail(3, "Exception encountered during startup: " + e.getMessage());
+            }
         }
     }
 
@@ -534,9 +562,9 @@ public class CassandraDaemon
         while (numOkay < GOSSIP_SETTLE_POLL_SUCCESSES_REQUIRED)
         {
             Uninterruptibles.sleepUninterruptibly(GOSSIP_SETTLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-            long completed = gossipStage.getCompletedTasks();
-            long active = gossipStage.getActiveCount();
-            long pending = gossipStage.getPendingTasks();
+            long completed = gossipStage.metrics.completedTasks.getValue();
+            long active = gossipStage.metrics.activeTasks.getValue();
+            long pending = gossipStage.metrics.pendingTasks.getValue();
             totalPolls++;
             if (active == 0 && pending == 0)
             {
@@ -570,7 +598,7 @@ public class CassandraDaemon
     {
         instance.activate();
     }
-    
+
     private void exitOrFail(int code, String message) {
         exitOrFail(code, message, null);
     }

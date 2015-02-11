@@ -433,11 +433,12 @@ public abstract class Lists
 
             long time = PrecisionTime.REFERENCE_TIME - (System.currentTimeMillis() - PrecisionTime.REFERENCE_TIME);
 
-            for (ByteBuffer buffer : getElementsFromValue(value, column.type, params.options))
+            List<ByteBuffer> toAdd = getElementsFromValue(value, column.type, params.options);
+            for (int i = toAdd.size() - 1; i >= 0; i--)
             {
                 PrecisionTime pt = PrecisionTime.getNext(time);
                 ByteBuffer uuid = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes(pt.millis, pt.nanos));
-                cf.addColumn(params.makeColumn(cf.getComparator().create(prefix, column, uuid), buffer));
+                cf.addColumn(params.makeColumn(cf.getComparator().create(prefix, column, uuid), toAdd.get(i)));
             }
         }
     }

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.io.sstable.format.big;
 
-import java.io.Closeable;
 import java.io.DataInput;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -34,7 +33,6 @@ import org.apache.cassandra.io.sstable.*;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.Version;
-import org.apache.cassandra.io.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,8 +52,6 @@ import org.apache.cassandra.io.util.FileMark;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.SegmentedFile;
 import org.apache.cassandra.io.util.SequentialWriter;
-import org.apache.cassandra.service.ActiveRepairService;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.FilterFactory;
@@ -284,14 +280,14 @@ public class BigTableWriter extends SSTableWriter
     /**
      * After failure, attempt to close the index writer and data file before deleting all temp components for the sstable
      */
-    public void abort(boolean closeBf)
+    public void abort()
     {
         assert descriptor.type.isTemporary;
         if (iwriter == null && dataFile == null)
             return;
 
         if (iwriter != null)
-            iwriter.abort(closeBf);
+            iwriter.abort();
 
         if (dataFile!= null)
             dataFile.abort();
@@ -350,7 +346,7 @@ public class BigTableWriter extends SSTableWriter
                                                            components, metadata,
                                                            partitioner, ifile,
                                                            dfile, iwriter.summary.build(partitioner, exclusiveUpperBoundOfReadableIndex),
-                                                           iwriter.bf, maxDataAge, sstableMetadata, SSTableReader.OpenReason.EARLY);
+                                                           iwriter.bf.sharedCopy(), maxDataAge, sstableMetadata, SSTableReader.OpenReason.EARLY);
 
         // now it's open, find the ACTUAL last readable key (i.e. for which the data file has also been flushed)
         sstable.first = getMinimalKey(first);
@@ -359,7 +355,7 @@ public class BigTableWriter extends SSTableWriter
         if (inclusiveUpperBoundOfReadableData == null)
         {
             // Prevent leaving tmplink files on disk
-            sstable.releaseReference();
+            sstable.selfRef().release();
             return null;
         }
         int offset = 2;
@@ -371,7 +367,7 @@ public class BigTableWriter extends SSTableWriter
             inclusiveUpperBoundOfReadableData = iwriter.getMaxReadableKey(offset++);
             if (inclusiveUpperBoundOfReadableData == null)
             {
-                sstable.releaseReference();
+                sstable.selfRef().release();
                 return null;
             }
         }
@@ -391,6 +387,7 @@ public class BigTableWriter extends SSTableWriter
 
     public SSTableReader finish(FinishType finishType, long maxDataAge, long repairedAt)
     {
+        assert finishType != FinishType.CLOSE;
         Pair<Descriptor, StatsMetadata> p;
 
         p = close(finishType, repairedAt < 0 ? this.repairedAt : repairedAt);
@@ -410,16 +407,16 @@ public class BigTableWriter extends SSTableWriter
                                                            ifile,
                                                            dfile,
                                                            iwriter.summary.build(partitioner),
-                                                           iwriter.bf,
+                                                           iwriter.bf.sharedCopy(),
                                                            maxDataAge,
                                                            metadata,
                                                            finishType.openReason);
         sstable.first = getMinimalKey(first);
         sstable.last = getMinimalKey(last);
 
-        switch (finishType)
+        if (finishType.isFinal)
         {
-            case NORMAL: case FINISH_EARLY:
+            iwriter.bf.close();
             // try to save the summaries to disk
             sstable.saveSummary(iwriter.builder, dbuilder);
             iwriter = null;
@@ -431,16 +428,18 @@ public class BigTableWriter extends SSTableWriter
     // Close the writer and return the descriptor to the new sstable and it's metadata
     public Pair<Descriptor, StatsMetadata> close()
     {
-        return close(FinishType.NORMAL, this.repairedAt);
+        return close(FinishType.CLOSE, this.repairedAt);
     }
 
     private Pair<Descriptor, StatsMetadata> close(FinishType type, long repairedAt)
     {
         switch (type)
         {
-            case EARLY: case NORMAL:
+            case EARLY: case CLOSE: case NORMAL:
             iwriter.close();
             dataFile.close();
+            if (type == FinishType.CLOSE)
+                iwriter.bf.close();
         }
 
         // write sstable statistics
@@ -451,9 +450,8 @@ public class BigTableWriter extends SSTableWriter
 
         // remove the 'tmp' marker from all components
         Descriptor descriptor = this.descriptor;
-        switch (type)
+        if (type.isFinal)
         {
-            case NORMAL: case FINISH_EARLY:
             dataFile.writeFullChecksum(descriptor);
             writeMetadata(descriptor, metadataComponents);
             // save the table of components
@@ -538,11 +536,10 @@ public class BigTableWriter extends SSTableWriter
             builder.addPotentialBoundary(indexPosition);
         }
 
-        public void abort(boolean closeBf)
+        public void abort()
         {
             indexFile.abort();
-            if (closeBf)
-                bf.close();
+            bf.close();
         }
 
         /**
