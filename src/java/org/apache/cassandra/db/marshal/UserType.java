@@ -147,7 +147,7 @@ public class UserType extends TupleType
                     "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
         Map map = (Map) parsed;
-        List<ByteBuffer> buffers = new ArrayList<>(map.size());
+        ByteBuffer[] buffers = new ByteBuffer[types.size()];
 
         Set keys = map.keySet();
         assert keys.isEmpty() || keys.iterator().next() instanceof String;
@@ -158,11 +158,11 @@ public class UserType extends TupleType
             Object value = map.get(stringFieldNames.get(i));
             if (value == null)
             {
-                buffers.add(null);
+                buffers[i] = null;
             }
             else
             {
-                buffers.add(types.get(i).fromJSONObject(value, protocolVersion));
+                buffers[i] = types.get(i).fromJSONObject(value, protocolVersion);
                 foundValues += 1;
             }
         }
