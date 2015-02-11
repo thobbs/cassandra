@@ -198,6 +198,7 @@ public class UpdateStatement extends ModificationStatement
                 }
             }
 
+            String ks = keyspace();
             if (isJson)
             {
                 Json.Raw jsonValue = (Json.Raw) columnValues.get(0);
@@ -207,48 +208,34 @@ public class UpdateStatement extends ModificationStatement
                 jsonValue.setExpectedReceivers(expectedReceivers);
 
                 for (ColumnDefinition def : defs)
-                {
-                    switch (def.kind)
-                    {
-                        case PARTITION_KEY:
-                        case CLUSTERING_COLUMN:
-                            Term t = jsonValue.prepare(keyspace(), def);
-                            t.collectMarkerSpecification(boundNames);
-                            stmt.addKeyValue(def, t);
-                            break;
-                        default:
-                            Operation operation = new Operation.SetValue(jsonValue).prepare(keyspace(), def);
-                            operation.collectMarkerSpecification(boundNames);
-                            stmt.addOperation(operation);
-                            break;
-                    }
-                }
+                    handleTerm(stmt, jsonValue, def, ks, boundNames);
+
                 return stmt;
             }
             else
             {
                 for (int i = 0; i < columnValues.size(); i++)
-                {
-                    Term.Raw value = columnValues.get(i);
-                    ColumnDefinition def = defs[i];
+                    handleTerm(stmt, columnValues.get(i), defs[i], ks, boundNames);
 
-                    switch (def.kind)
-                    {
-                        case PARTITION_KEY:
-                        case CLUSTERING_COLUMN:
-                            Term t = value.prepare(keyspace(), def);
-                            t.collectMarkerSpecification(boundNames);
-                            stmt.addKeyValue(def, t);
-                            break;
-                        default:
-                            Operation operation = new Operation.SetValue(value).prepare(keyspace(), def);
-                            operation.collectMarkerSpecification(boundNames);
-                            stmt.addOperation(operation);
-                            break;
-                    }
-                }
                 return stmt;
             }
+        }
+    }
+
+    private static void handleTerm(UpdateStatement stmt, Term.Raw value, ColumnDefinition def, String keyspace, VariableSpecifications boundNames)
+    {
+        switch (def.kind)
+        {
+            case PARTITION_KEY:
+            case CLUSTERING_COLUMN:
+                Term t = value.prepare(keyspace, def);
+                t.collectMarkerSpecification(boundNames);
+                stmt.addKeyValue(def, t);
+                break;
+            default:
+                Operation operation = new Operation.SetValue(value).prepare(keyspace, def);
+                operation.collectMarkerSpecification(boundNames);
+                stmt.addOperation(operation);
         }
     }
 
