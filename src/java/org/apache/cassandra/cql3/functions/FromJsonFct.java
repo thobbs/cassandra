@@ -17,15 +17,16 @@
  */
 package org.apache.cassandra.cql3.functions;
 
-import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.serializers.MarshalException;
-import org.json.simple.JSONValue;
-import org.json.simple.parser.ParseException;
-
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+
+import org.codehaus.jackson.map.ObjectMapper;
+
+import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.serializers.MarshalException;
 
 public class FromJsonFct extends AbstractFunction implements ScalarFunction
 {
@@ -33,6 +34,8 @@ public class FromJsonFct extends AbstractFunction implements ScalarFunction
 
     private static final Map<AbstractType<?>, FromJsonFct> instances = new ConcurrentHashMap<>();
     private static final List<AbstractType<?>> fromJsonArgs = Collections.<AbstractType<?>>singletonList(UTF8Type.instance);
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public static FromJsonFct getInstance(AbstractType<?> returnType)
     {
@@ -75,12 +78,12 @@ public class FromJsonFct extends AbstractFunction implements ScalarFunction
         String jsonArg = UTF8Type.instance.getSerializer().deserialize(argument);
         try
         {
-            Object object = JSONValue.parseWithException(jsonArg);
+            Object object = objectMapper.readValue(jsonArg, Object.class);
             if (object == null)
                 return null;
             return returnType.fromJSONObject(object, protocolVersion);
         }
-        catch (ParseException exc)
+        catch (IOException exc)
         {
             throw new InvalidRequestException(String.format("Could not decode JSON string '%s': %s", jsonArg, exc.toString()));
         }

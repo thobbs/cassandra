@@ -85,7 +85,7 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Invalid ASCII character in string literal",
                 "INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, "\"\\u1fff\\u2013\\u33B4\\u2014\"");
 
-        assertInvalidMessage("Expected an ascii string, but got a Long",
+        assertInvalidMessage("Expected an ascii string, but got a Integer",
                 "INSERT INTO %s (k, asciival) VALUES (?, fromJson(?))", 0, "123");
 
         // test that we can use fromJson() in other valid places in queries
@@ -137,7 +137,7 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Unable to make boolean from",
                 "INSERT INTO %s (k, booleanval) VALUES (?, fromJson(?))", 0, "\"abc\"");
 
-        assertInvalidMessage("Expected a boolean value, but got a Long",
+        assertInvalidMessage("Expected a boolean value, but got a Integer",
                 "INSERT INTO %s (k, booleanval) VALUES (?, fromJson(?))", 0, "123");
 
         // ================ decimal ================
@@ -204,7 +204,7 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Unable to make inet address from 'xyzz'",
                 "INSERT INTO %s (k, inetval) VALUES (?, fromJson(?))", 0, "\"xyzz\"");
 
-        assertInvalidMessage("Expected a string representation of an inet value, but got a Long",
+        assertInvalidMessage("Expected a string representation of an inet value, but got a Integer",
                 "INSERT INTO %s (k, inetval) VALUES (?, fromJson(?))", 0, "123");
 
         // ================ int ================
@@ -239,7 +239,7 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, textval) VALUES (?, fromJson(?))", 0, "\"some \\\" text\"");
         assertRows(execute("SELECT k, textval FROM %s WHERE k = ?", 0), row(0, "some \" text"));
 
-        assertInvalidMessage("Expected a UTF-8 string, but got a Long",
+        assertInvalidMessage("Expected a UTF-8 string, but got a Integer",
                 "INSERT INTO %s (k, textval) VALUES (?, fromJson(?))", 0, "123");
 
         // ================ timestamp ================
@@ -265,7 +265,7 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("TimeUUID supports only version 1 UUIDs",
                 "INSERT INTO %s (k, timeuuidval) VALUES (?, fromJson(?))", 0, "\"00000000-0000-0000-0000-000000000000\"");
 
-        assertInvalidMessage("Expected a string representation of a timeuuid, but got a Long",
+        assertInvalidMessage("Expected a string representation of a timeuuid, but got a Integer",
                 "INSERT INTO %s (k, timeuuidval) VALUES (?, fromJson(?))", 0, "123");
 
          // ================ uuidval ================
@@ -278,7 +278,7 @@ public class JsonTest extends CQLTester
         assertInvalidMessage("Unable to make UUID from",
                 "INSERT INTO %s (k, uuidval) VALUES (?, fromJson(?))", 0, "\"00000000-0000-0000-zzzz-000000000000\"");
 
-        assertInvalidMessage("Expected a string representation of a uuid, but got a Long",
+        assertInvalidMessage("Expected a string representation of a uuid, but got a Integer",
                 "INSERT INTO %s (k, uuidval) VALUES (?, fromJson(?))", 0, "123");
 
         // ================ varint ================
@@ -308,7 +308,7 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "[]");
         assertRows(execute("SELECT k, listval FROM %s WHERE k = ?", 0), row(0, null));
 
-        assertInvalidMessage("Expected a list, but got a Long",
+        assertInvalidMessage("Expected a list, but got a Integer",
                 "INSERT INTO %s (k, listval) VALUES (?, fromJson(?))", 0, "123");
 
         assertInvalidMessage("Unable to make int from",
@@ -335,7 +335,7 @@ public class JsonTest extends CQLTester
                 "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))",
                 0, "[\"6bddc89a-5644-11e4-97fc-56847afe9799\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
 
-        assertInvalidMessage("Expected a list (representing a set), but got a Long",
+        assertInvalidMessage("Expected a list (representing a set), but got a Integer",
                 "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "123");
 
         assertInvalidMessage("Unable to make UUID from",
@@ -364,7 +364,7 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "{}");
         assertRows(execute("SELECT k, mapval FROM %s WHERE k = ?", 0), row(0, null));
 
-        assertInvalidMessage("Expected a map, but got a Long",
+        assertInvalidMessage("Expected a map, but got a Integer",
                 "INSERT INTO %s (k, mapval) VALUES (?, fromJson(?))", 0, "123");
 
         assertInvalidMessage("Invalid ASCII character in string literal",
@@ -707,8 +707,8 @@ public class JsonTest extends CQLTester
 
         assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s (k, v) JSON ?", new Object[]{null});
         assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s (k, v) JSON ?", "null");
-        assertInvalidMessage("Expected a map", "INSERT INTO %s (k, v) JSON ?", "\"notamap\"");
-        assertInvalidMessage("Expected a map", "INSERT INTO %s (k, v) JSON ?", "12.34");
+        assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s (k, v) JSON ?", "\"notamap\"");
+        assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s (k, v) JSON ?", "12.34");
         assertInvalidMessage("JSON values map contains unrecognized column",
                 "INSERT INTO %s (k, v) JSON ?",
                 "{\"k\": 0, \"v\": 0, \"zzz\": 0}");

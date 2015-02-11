@@ -37,7 +37,7 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Objects;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
-import org.json.simple.JSONValue;
+import org.codehaus.jackson.io.JsonStringEncoder;
 
 public abstract class Selection
 {
@@ -51,6 +51,8 @@ public abstract class Selection
             return def.isStatic();
         }
     };
+
+    private static JsonStringEncoder jsonStringEncoder = new JsonStringEncoder();
 
     private static final ColumnIdentifier jsonId = new ColumnIdentifier("json", false);
 
@@ -262,7 +264,7 @@ public abstract class Selection
 
             ByteBuffer buffer = row.get(i);
             sb.append('"');
-            sb.append(JSONValue.escape(columnName));
+            sb.append(jsonStringEncoder.quoteAsString(columnName));
             sb.append("\": ");
             if (buffer == null)
                 sb.append("null");

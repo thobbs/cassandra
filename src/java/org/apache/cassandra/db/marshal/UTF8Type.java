@@ -21,7 +21,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 
-import org.json.simple.JSONValue;
+import org.codehaus.jackson.io.JsonStringEncoder;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.serializers.MarshalException;
@@ -34,6 +34,8 @@ public class UTF8Type extends AbstractType<String>
     public static final UTF8Type instance = new UTF8Type();
 
     UTF8Type() {} // singleton
+
+    private static JsonStringEncoder jsonStringEncoder = new JsonStringEncoder();
 
     public int compare(ByteBuffer o1, ByteBuffer o2)
     {
@@ -65,7 +67,7 @@ public class UTF8Type extends AbstractType<String>
     {
         try
         {
-            return '"' + JSONValue.escape(ByteBufferUtil.string(buffer, Charset.forName("UTF-8"))) + '"';
+            return '"' + new String(jsonStringEncoder.quoteAsString(ByteBufferUtil.string(buffer, Charset.forName("UTF-8")))) + '"';
         }
         catch (CharacterCodingException exc)
         {

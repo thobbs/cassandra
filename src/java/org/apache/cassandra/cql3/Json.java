@@ -20,15 +20,16 @@ package org.apache.cassandra.cql3;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
-import org.json.simple.JSONValue;
-import org.json.simple.parser.ParseException;
+import org.codehaus.jackson.map.ObjectMapper;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
 /** Term-related classes for INSERT JSON support. */
 public class Json
 {
+    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public interface Raw extends Term.Raw
     {
@@ -196,15 +197,11 @@ public class Json
         {
             try
             {
-                Object object = JSONValue.parseWithException(jsonString);
-                if (object == null)
+                Map<String, Object> valueMap = objectMapper.readValue(jsonString, Map.class);
+
+                if (valueMap == null)
                     throw new InvalidRequestException("Got null for INSERT JSON values");
 
-                if (!(object instanceof Map))
-                    throw new InvalidRequestException(String.format(
-                            "Expected a map for INSERT JSON values, but got a %s: %s", object.getClass().getSimpleName(), object));
-
-                Map<String, Object> valueMap = (Map<String, Object>)object;
                 handleCaseSensitivity(valueMap);
 
                 columnMap = new HashMap<>(expectedReceivers.size());
@@ -223,9 +220,9 @@ public class Json
                             "JSON values map contains unrecognized column: %s", valueMap.keySet().iterator().next()));
                 }
             }
-            catch (ParseException exc)
+            catch (IOException exc)
             {
-                throw new InvalidRequestException(String.format("Could not decode JSON string '%s': %s", jsonString, exc.toString()));
+                throw new InvalidRequestException(String.format("Could not decode JSON string as a map: %s. (String was: %s)", exc.toString(), jsonString));
             }
             catch (MarshalException exc)
             {

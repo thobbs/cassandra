@@ -23,7 +23,7 @@ import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CharacterCodingException;
 
-import org.json.simple.JSONValue;
+import org.codehaus.jackson.io.JsonStringEncoder;
 
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.serializers.MarshalException;
@@ -36,6 +36,8 @@ public class AsciiType extends AbstractType<String>
     public static final AsciiType instance = new AsciiType();
 
     AsciiType() {} // singleton
+
+    private static JsonStringEncoder jsonStringEncoder = new JsonStringEncoder();
 
     private final ThreadLocal<CharsetEncoder> encoder = new ThreadLocal<CharsetEncoder>()
     {
@@ -86,7 +88,7 @@ public class AsciiType extends AbstractType<String>
     {
         try
         {
-            return '"' + JSONValue.escape(ByteBufferUtil.string(buffer, Charset.forName("US-ASCII"))) + '"';
+            return '"' + new String(jsonStringEncoder.quoteAsString(ByteBufferUtil.string(buffer, Charset.forName("US-ASCII")))) + '"';
         }
         catch (CharacterCodingException exc)
         {
