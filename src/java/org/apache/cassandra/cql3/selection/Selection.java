@@ -247,26 +247,6 @@ public abstract class Selection
 
     public abstract boolean isAggregate();
 
-    /**
-     * Checks that selectors are either all aggregates or that none of them is.
-     *
-     * @param selectors the selectors to test.
-     * @param messageTemplate the error message template
-     * @param messageArgs the error message arguments
-     * @throws InvalidRequestException if some of the selectors are aggregate but not all of them
-     */
-    static void validateSelectors(List<Selector> selectors, String messageTemplate, Object... messageArgs)
-            throws InvalidRequestException
-    {
-        int aggregates = 0;
-        for (Selector s : selectors)
-            if (s.isAggregate())
-                ++aggregates;
-
-        if (aggregates != 0 && aggregates != selectors.size())
-            throw new InvalidRequestException(String.format(messageTemplate, messageArgs));
-    }
-
     protected List<ByteBuffer> rowToJson(List<ByteBuffer> row, int protocolVersion)
     {
         StringBuilder sb = new StringBuilder("{");
