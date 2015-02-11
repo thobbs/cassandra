@@ -171,22 +171,20 @@ public class Json
 
     private static void handleCaseSensitivity(Map<String, Object> valueMap)
     {
-        List<String> toLowercase = new ArrayList<>();
-        List<String> toDequote = new ArrayList<>();
-        for (String mapKey : valueMap.keySet())
+        for (String mapKey : new ArrayList<>(valueMap.keySet()))
         {
-            String lowered = mapKey.toLowerCase(Locale.US);
+            // if it's surrounded by quotes, remove them and preserve the case
             if (mapKey.startsWith("\"") && mapKey.endsWith("\""))
-                toDequote.add(mapKey);
-            else if (!mapKey.equals(lowered))
-                toLowercase.add(mapKey);
+            {
+                valueMap.put(mapKey.substring(1, mapKey.length() - 1), valueMap.remove(mapKey));
+                continue;
+            }
+
+            // otherwise, lowercase it if needed
+            String lowered = mapKey.toLowerCase(Locale.US);
+            if (!mapKey.equals(lowered))
+                valueMap.put(lowered, valueMap.remove(mapKey));
         }
-
-        for (String quoted : toDequote)
-            valueMap.put(quoted.substring(1, quoted.length() - 1), valueMap.remove(quoted));
-
-        for (String uppercase : toLowercase)
-            valueMap.put(uppercase.toLowerCase(Locale.US), valueMap.remove(uppercase));
     }
 
     /** Represents a full set of JSON values in an INSERT JSON statement. */
