@@ -244,6 +244,17 @@ public abstract class Sets
         }
     }
 
+    public static Set<ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
+    {
+        if (value instanceof Value)
+            return ((Value) value).elements;
+
+        ByteBuffer serializedList = value.get(options.getProtocolVersion());
+        SetSerializer<?> listSerializer = (SetSerializer<?>) columnType.getSerializer();
+        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
+        return listSerializer.deserializeToByteBufferCollection(serializedList, format);
+    }
+
     public static class Setter extends Operation
     {
         public Setter(ColumnDefinition column, Term t)
@@ -261,17 +272,6 @@ public abstract class Sets
             }
             Adder.doAdd(t, cf, prefix, column, params);
         }
-    }
-
-    private static Set<ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
-    {
-        if (value instanceof Value)
-            return ((Value) value).elements;
-
-        ByteBuffer serializedList = value.get(options.getProtocolVersion());
-        SetSerializer<?> listSerializer = (SetSerializer<?>) columnType.getSerializer();
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
-        return listSerializer.deserializeToByteBufferCollection(serializedList, format);
     }
 
     public static class Adder extends Operation

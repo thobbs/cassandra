@@ -528,43 +528,13 @@ public class ColumnCondition
             switch (type.kind)
             {
                 case LIST:
-                    List<ByteBuffer> valueList;
-                    if (value instanceof Lists.Value)
-                    {
-                        valueList = ((Lists.Value) value).elements;
-                    }
-                    else
-                    {
-                        ListType listType = (ListType) type;
-                        ByteBuffer serializedList = value.get(options.getProtocolVersion());
-                        valueList = listType.getSerializer().deserializeToByteBufferCollection(serializedList, format);
-                    }
+                    List<ByteBuffer> valueList = Lists.getElementsFromValue(value, type, options);
                     return listAppliesTo((ListType)type, iter, valueList, operator);
                 case SET:
-                    Set<ByteBuffer> valueSet;
-                    if (value instanceof Sets.Value)
-                    {
-                        valueSet = ((Sets.Value) value).elements;
-                    }
-                    else
-                    {
-                        SetType setType = (SetType) type;
-                        ByteBuffer serializedSet = value.get(options.getProtocolVersion());
-                        valueSet = setType.getSerializer().deserializeToByteBufferCollection(serializedSet, format);
-                    }
+                    Set<ByteBuffer> valueSet = Sets.getElementsFromValue(value, type, options);
                     return setAppliesTo((SetType)type, iter, valueSet, operator);
                 case MAP:
-                    Map<ByteBuffer, ByteBuffer> valueMap;
-                    if (value instanceof Maps.Value)
-                    {
-                        valueMap = ((Maps.Value) value).map;
-                    }
-                    else
-                    {
-                        MapType mapType = (MapType) type;
-                        ByteBuffer serializedMap = value.get(options.getProtocolVersion());
-                        valueMap = mapType.getSerializer().deserializeToByteBufferCollection(serializedMap, format);
-                    }
+                    Map<ByteBuffer, ByteBuffer> valueMap = Maps.getElementsFromValue(value, type, options);
                     return mapAppliesTo((MapType)type, iter, valueMap, operator);
             }
             throw new AssertionError();

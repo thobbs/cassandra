@@ -249,6 +249,17 @@ public abstract class Lists
         }
     }
 
+    public static List<ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
+    {
+        if (value instanceof Value)
+            return ((Value) value).elements;
+
+        ByteBuffer serializedList = value.get(options.getProtocolVersion());
+        ListSerializer<?> listSerializer = (ListSerializer<?>) columnType.getSerializer();
+        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
+        return listSerializer.deserializeToByteBufferCollection(serializedList, format);
+    }
+
     /*
      * For prepend, we need to be able to generate unique but decreasing time
      * UUID, which is a bit challenging. To do that, given a time in milliseconds,
@@ -363,17 +374,6 @@ public abstract class Lists
                 cf.addColumn(params.makeColumn(elementName, value));
             }
         }
-    }
-
-    private static List<ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
-    {
-        if (value instanceof Value)
-            return ((Value) value).elements;
-
-        ByteBuffer serializedList = value.get(options.getProtocolVersion());
-        ListSerializer<?> listSerializer = (ListSerializer<?>) columnType.getSerializer();
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
-        return listSerializer.deserializeToByteBufferCollection(serializedList, format);
     }
 
     public static class Appender extends Operation

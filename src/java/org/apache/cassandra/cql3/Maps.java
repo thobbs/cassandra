@@ -24,6 +24,7 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.composites.CellName;
 import org.apache.cassandra.db.composites.Composite;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.CollectionSerializer;
@@ -268,6 +269,17 @@ public abstract class Maps
         }
     }
 
+    public static Map<ByteBuffer, ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
+    {
+        if (value instanceof Value)
+            return ((Maps.Value) value).map;
+
+        ByteBuffer serializedMap = value.get(options.getProtocolVersion());
+        MapSerializer<?, ?> mapSerializer = (MapSerializer<?, ?>) columnType.getSerializer();
+        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
+        return mapSerializer.deserializeToByteBufferCollection(serializedMap, format);
+    }
+
     public static class Setter extends Operation
     {
         public Setter(ColumnDefinition column, Term t)
@@ -352,21 +364,8 @@ public abstract class Maps
                 if (value == null)
                     return;
 
-                Set<Map.Entry<ByteBuffer, ByteBuffer>> entrySet;
-                if (value instanceof Value)
-                {
-                    Maps.Value mapValue = (Maps.Value) value;
-                    entrySet = mapValue.map.entrySet();
-                }
-                else
-                {
-                    ByteBuffer serializedMap = value.get(params.options.getProtocolVersion());
-                    MapSerializer<?, ?> mapSerializer = (MapSerializer<?, ?>) column.type.getSerializer();
-                    CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(params.options.getProtocolVersion());
-                    entrySet = mapSerializer.deserializeToByteBufferCollection(serializedMap, format).entrySet();
-                }
-
-                for (Map.Entry<ByteBuffer, ByteBuffer> entry : entrySet)
+                Map<ByteBuffer, ByteBuffer> elements = getElementsFromValue(value, column.type, params.options);
+                for (Map.Entry<ByteBuffer, ByteBuffer> entry : elements.entrySet())
                 {
                     CellName cellName = cf.getComparator().create(prefix, column, entry.getKey());
                     cf.addColumn(params.makeColumn(cellName, entry.getValue()));
