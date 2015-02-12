@@ -702,7 +702,8 @@ public abstract class ModificationStatement implements CQLStatement
         {
             VariableSpecifications boundNames = getBoundVariables();
             ModificationStatement statement = prepare(boundNames);
-            return new ParsedStatement.Prepared(statement, boundNames);
+            CFMetaData cfm = ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
+            return new ParsedStatement.Prepared(statement, boundNames, boundNames.getPartitionKeyBindIndexes(cfm));
         }
 
         public ModificationStatement prepare(VariableSpecifications boundNames) throws InvalidRequestException

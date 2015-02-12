@@ -221,7 +221,7 @@ public class ResultSet
     {
         public static final CBCodec<Metadata> codec = new Codec();
 
-        public static final Metadata EMPTY = new Metadata(EnumSet.of(Flag.NO_METADATA), null, 0, null);
+        public static final Metadata EMPTY = new Metadata(EnumSet.of(Flag.NO_METADATA), null, 0, null, null);
 
         private final EnumSet<Flag> flags;
         // Please note that columnCount can actually be smaller than names, even if names is not null. This is
@@ -229,27 +229,34 @@ public class ResultSet
         // (SelectStatement.orderResults) but that shouldn't be sent to the user as they haven't been requested
         // (CASSANDRA-4911). So the serialization code will exclude any columns in name whose index is >= columnCount.
         public final List<ColumnSpecification> names;
+        private final Short[] partitionKeyBindIndexes;
         private final int columnCount;
         private PagingState pagingState;
 
         public Metadata(List<ColumnSpecification> names)
         {
-            this(EnumSet.noneOf(Flag.class), names, names.size(), null);
+            this(names, null);
+        }
+
+        public Metadata(List<ColumnSpecification> names, Short[] partitionKeyBindIndexes)
+        {
+            this(EnumSet.noneOf(Flag.class), names, names.size(), partitionKeyBindIndexes, null);
             if (!names.isEmpty() && allInSameCF())
                 flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 
-        private Metadata(EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, PagingState pagingState)
+        private Metadata(EnumSet<Flag> flags, List<ColumnSpecification> names, int columnCount, Short[] partitionKeyBindIndexes, PagingState pagingState)
         {
             this.flags = flags;
             this.names = names;
             this.columnCount = columnCount;
             this.pagingState = pagingState;
+            this.partitionKeyBindIndexes = partitionKeyBindIndexes;
         }
 
         public Metadata copy()
         {
-            return new Metadata(EnumSet.copyOf(flags), names, columnCount, pagingState);
+            return new Metadata(EnumSet.copyOf(flags), names, columnCount, partitionKeyBindIndexes, pagingState);
         }
 
         // The maximum number of values that the ResultSet can hold. This can be bigger than columnCount due to CASSANDRA-4911
@@ -265,7 +272,7 @@ public class ResultSet
             names.add(name);
         }
 
-        private boolean allInSameCF()
+        protected boolean allInSameCF()
         {
             if (names == null)
                 return false;
@@ -330,12 +337,24 @@ public class ResultSet
 
                 EnumSet<Flag> flags = Flag.deserialize(iflags);
 
+                Short[] partitionKeyBindIndexes = null;
+                if (version >= Server.VERSION_4)
+                {
+                    int numPKNames = body.readInt();
+                    if (numPKNames > 0)
+                    {
+                        partitionKeyBindIndexes = new Short[numPKNames];
+                        for (int i = 0; i < numPKNames; i++)
+                            partitionKeyBindIndexes[i] = body.readShort();
+                    }
+                }
+
                 PagingState state = null;
                 if (flags.contains(Flag.HAS_MORE_PAGES))
                     state = PagingState.deserialize(CBUtil.readValue(body));
 
                 if (flags.contains(Flag.NO_METADATA))
-                    return new Metadata(flags, null, columnCount, state);
+                    return new Metadata(flags, null, columnCount, null, state);
 
                 boolean globalTablesSpec = flags.contains(Flag.GLOBAL_TABLES_SPEC);
 
@@ -357,7 +376,7 @@ public class ResultSet
                     AbstractType type = DataType.toType(DataType.codec.decodeOne(body, version));
                     names.add(new ColumnSpecification(ksName, cfName, colName, type));
                 }
-                return new Metadata(flags, names, names.size(), state);
+                return new Metadata(flags, names, names.size(), partitionKeyBindIndexes, state);
             }
 
             public void encode(Metadata m, ByteBuf dest, int version)
@@ -370,6 +389,21 @@ public class ResultSet
 
                 dest.writeInt(Flag.serialize(m.flags));
                 dest.writeInt(m.columnCount);
+
+                if (version >= Server.VERSION_4)
+                {
+                    // there's no point in providing partition key bind indexes if the statements affect multiple tables
+                    if (m.partitionKeyBindIndexes == null || !globalTablesSpec)
+                    {
+                        dest.writeInt(0);
+                    }
+                    else
+                    {
+                        dest.writeInt(m.partitionKeyBindIndexes.length);
+                        for (Short bindIndex : m.partitionKeyBindIndexes)
+                            dest.writeShort(bindIndex);
+                    }
+                }
 
                 if (hasMorePages)
                     CBUtil.writeValue(m.pagingState.serialize(), dest);

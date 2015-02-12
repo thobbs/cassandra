@@ -413,7 +413,11 @@ public class BatchStatement implements CQLStatement
             BatchStatement batchStatement = new BatchStatement(boundNames.size(), type, statements, prepAttrs);
             batchStatement.validate();
 
-            return new ParsedStatement.Prepared(batchStatement, boundNames);
+            // Use the CFMetadata of the first statement for partition key bind indexes.  If the statements affect
+            // multiple tables, we won't send partition key bind indexes.
+            ModificationStatement firstStatement = batchStatement.statements.get(0);
+
+            return new ParsedStatement.Prepared(batchStatement, boundNames, boundNames.getPartitionKeyBindIndexes(firstStatement.cfm));
         }
     }
 }

@@ -766,7 +766,7 @@ public class SelectStatement implements CQLStatement
                                                         orderingComparator,
                                                         prepareLimit(boundNames));
 
-            return new ParsedStatement.Prepared(stmt, boundNames);
+            return new ParsedStatement.Prepared(stmt, boundNames, boundNames.getPartitionKeyBindIndexes(cfm));
         }
 
         /**

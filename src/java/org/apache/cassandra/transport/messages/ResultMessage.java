@@ -287,7 +287,7 @@ public abstract class ResultMessage extends Message.Response
 
         public Prepared(MD5Digest statementId, ParsedStatement.Prepared prepared)
         {
-            this(statementId, -1, new ResultSet.Metadata(prepared.boundNames), extractResultMetadata(prepared.statement));
+            this(statementId, -1, new ResultSet.Metadata(prepared.boundNames, prepared.partitionKeyBindIndexes), extractResultMetadata(prepared.statement));
         }
 
         public static Prepared forThrift(int statementId, List<ColumnSpecification> names)
