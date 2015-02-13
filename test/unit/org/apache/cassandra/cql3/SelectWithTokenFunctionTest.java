@@ -47,6 +47,7 @@ public class SelectWithTokenFunctionTest
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.single_partition (a int PRIMARY KEY, b text)");
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.compound_partition (a int, b text, PRIMARY KEY ((a, b)))");
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.single_clustering (a int, b text, PRIMARY KEY (a, b))");
+        executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.compound_with_clustering (a int, b int, c int, PRIMARY KEY ((a, b), c))");
         clientState = ClientState.forInternalCalls();
     }
 
@@ -167,5 +168,14 @@ public class SelectWithTokenFunctionTest
     public void testTokenFunctionOnEachPartitionKeyColumns() throws Throwable
     {
         execute("SELECT * FROM %s.compound_partition WHERE token(a) > token(0) and token(b) > token('c')");
+    }
+
+    @Test
+    public void testTokenFunctionWithCompoundPartitionAndClusteringCols() throws Throwable
+    {
+        // just test that the queries don't error
+        // note: these shouldn't require ALLOW FILTERING
+        execute("SELECT * FROM %s.compound_with_clustering WHERE token(a, b) > token(0, 0) AND c > 10 ALLOW FILTERING;");
+        execute("SELECT * FROM %s.compound_with_clustering WHERE c > 10 AND token(a, b) > token(0, 0) ALLOW FILTERING;");
     }
 }
