@@ -219,4 +219,14 @@ public class SelectWithTokenFunctionTest extends CQLTester
         assertRows(execute("SELECT * FROM %s WHERE b = ? AND token(a, b) > token(?, ?) and c = ? ALLOW FILTERING;", 1, 0, 0, 4),
                    row(1, 1, 4));
     }
+
+    @Test
+    public void testTokenFunctionWithCompoundPartitionAndClusteringCols() throws Throwable
+    {
+        createTable("CREATE TABLE IF NOT EXISTS %s (a int, b int, c int, PRIMARY KEY ((a, b), c))");
+        // just test that the queries don't error
+        // note: these shouldn't require ALLOW FILTERING
+        execute("SELECT * FROM %s WHERE token(a, b) > token(0, 0) AND c > 10 ALLOW FILTERING;");
+        execute("SELECT * FROM %s WHERE c > 10 AND token(a, b) > token(0, 0) ALLOW FILTERING;");
+    }
 }
