@@ -67,10 +67,12 @@ public class SelectWithTokenFunctionTest extends CQLTester
     @Test
     public void testTokenFunctionWithCompoundPartitionAndClusteringCols() throws Throwable
     {
-        createTable("CREATE TABLE IF NOT EXISTS %s (a int, b int, c int, PRIMARY KEY ((a, b), c))");
+        createTable("CREATE TABLE IF NOT EXISTS %s (a int, b int, c int, d int, PRIMARY KEY ((a, b), c, d))");
         // just test that the queries don't error
         // note: these shouldn't require ALLOW FILTERING
         execute("SELECT * FROM %s WHERE token(a, b) > token(0, 0) AND c > 10 ALLOW FILTERING;");
         execute("SELECT * FROM %s WHERE c > 10 AND token(a, b) > token(0, 0) ALLOW FILTERING;");
+        execute("SELECT * FROM %s WHERE token(a, b) > token(0, 0) AND (c, d) > (0, 0) ALLOW FILTERING;");
+        execute("SELECT * FROM %s WHERE (c, d) > (0, 0) AND token(a, b) > token(0, 0) ALLOW FILTERING;");
     }
 }
