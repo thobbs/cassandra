@@ -133,7 +133,7 @@ public class SelectStatement implements CQLStatement
                                    null);
     }
 
-    public ResultSet.Metadata getResultMetadata()
+    public ResultSet.ResultMetadata getResultMetadata()
     {
         return selection.getResultMetadata();
     }
