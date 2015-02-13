@@ -47,7 +47,7 @@ public class SelectWithTokenFunctionTest
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.single_partition (a int PRIMARY KEY, b text)");
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.compound_partition (a int, b text, PRIMARY KEY ((a, b)))");
         executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.single_clustering (a int, b text, PRIMARY KEY (a, b))");
-        executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.compound_with_clustering (a int, b int, c int, PRIMARY KEY ((a, b), c))");
+        executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.compound_with_clustering (a int, b int, c int, d int, PRIMARY KEY ((a, b), c, d))");
         clientState = ClientState.forInternalCalls();
     }
 
@@ -177,5 +177,7 @@ public class SelectWithTokenFunctionTest
         // note: these shouldn't require ALLOW FILTERING
         execute("SELECT * FROM %s.compound_with_clustering WHERE token(a, b) > token(0, 0) AND c > 10 ALLOW FILTERING;");
         execute("SELECT * FROM %s.compound_with_clustering WHERE c > 10 AND token(a, b) > token(0, 0) ALLOW FILTERING;");
+        execute("SELECT * FROM %s.compound_with_clustering WHERE token(a, b) > token(0, 0) AND (c, d) > (0, 0) ALLOW FILTERING;");
+        execute("SELECT * FROM %s.compound_with_clustering WHERE (c, d) > (0, 0) AND token(a, b) > token(0, 0) ALLOW FILTERING;");
     }
 }
