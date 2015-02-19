@@ -123,19 +123,25 @@ public class Json
      */
     public static class Value extends Term.Terminal
     {
-        private final AllValues allJsonValues;
         private final ColumnSpecification column;
+        private final Object parsedJsonValue;
 
-        public Value(AllValues allJsonValues, ColumnSpecification column)
+        public Value(Object parsedJsonValue, ColumnSpecification column)
         {
-            this.allJsonValues = allJsonValues;
+            this.parsedJsonValue = parsedJsonValue;
             this.column = column;
         }
 
         public ByteBuffer get(int protocolVersion) throws InvalidRequestException
         {
-            // get the specific value for this column from the set of all json values
-            return allJsonValues.getColumnValue(column, protocolVersion);
+            try
+            {
+                return column.type.fromJSONObject(parsedJsonValue, protocolVersion);
+            }
+            catch (MarshalException exc)
+            {
+                throw new InvalidRequestException(String.format("Error decoding JSON value for %s: %s", column.name, exc.getMessage()));
+            }
         }
     }
 
@@ -166,7 +172,7 @@ public class Json
         public Value bind(QueryOptions options) throws InvalidRequestException
         {
             AllValues boundValues = allJsonValues.bind(options);
-            return new Value(boundValues, column);
+            return boundValues.createColumnTerminal(column);
         }
     }
 
@@ -235,21 +241,16 @@ public class Json
             throw new AssertionError("AllValues.get() should not be called directly");
         }
 
-        /** Get the bound value for a specific column in the JSON map of values. */
-        public ByteBuffer getColumnValue(ColumnSpecification column, int protocolVersion) throws InvalidRequestException
+        /**
+         *  Creates a JSON.Value terminal for a specific column.
+         */
+        Value createColumnTerminal(ColumnSpecification column)
         {
             Object parsedJsonObject = columnMap.get(column.name);
             if (parsedJsonObject == null)
                 return null;
 
-            try
-            {
-                return column.type.fromJSONObject(parsedJsonObject, protocolVersion);
-            }
-            catch (MarshalException exc)
-            {
-                throw new InvalidRequestException(String.format("Error decoding JSON value for %s: %s", column.name, exc.getMessage()));
-            }
+            return new Value(parsedJsonObject, column);
         }
     }
 
