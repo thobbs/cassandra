@@ -17,10 +17,11 @@
  */
 package org.apache.cassandra.io.util;
 
-import java.io.Closeable;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import com.sun.jna.Native;
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FastByteOperations;
 import org.apache.cassandra.utils.memory.MemoryUtil;
@@ -33,7 +34,7 @@ import sun.nio.ch.DirectBuffer;
 public class Memory implements AutoCloseable
 {
     private static final Unsafe unsafe = NativeAllocator.unsafe;
-    private static final IAllocator allocator = DatabaseDescriptor.getoffHeapMemoryAllocator();
+    static final IAllocator allocator = DatabaseDescriptor.getoffHeapMemoryAllocator();
     private static final long BYTE_ARRAY_BASE_OFFSET = unsafe.arrayBaseOffset(byte[].class);
 
     private static final boolean bigEndian = ByteOrder.nativeOrder().equals(ByteOrder.BIG_ENDIAN);
@@ -48,14 +49,26 @@ public class Memory implements AutoCloseable
 
     protected long peer;
     // size of the memory region
-    private final long size;
+    protected final long size;
 
     protected Memory(long bytes)
     {
+        if (bytes <= 0)
+            throw new AssertionError();
         size = bytes;
         peer = allocator.allocate(size);
-        if (size != 0 && peer == 0)
+        // we permit a 0 peer iff size is zero, since such an allocation makes no sense, and an allocator would be
+        // justified in returning a null pointer (and permitted to do so: http://www.cplusplus.com/reference/cstdlib/malloc)
+        if (peer == 0)
             throw new OutOfMemoryError();
+    }
+
+    // create a memory object that references the exacy same memory location as the one provided.
+    // this should ONLY be used by SafeMemory
+    protected Memory(Memory copyOf)
+    {
+        size = copyOf.size;
+        peer = copyOf.peer;
     }
 
     public static Memory allocate(long bytes)
@@ -68,20 +81,20 @@ public class Memory implements AutoCloseable
 
     public void setByte(long offset, byte b)
     {
-        checkPosition(offset);
+        checkBounds(offset, offset + 1);
         unsafe.putByte(peer + offset, b);
     }
 
     public void setMemory(long offset, long bytes, byte b)
     {
+        checkBounds(offset, offset + bytes);
         // check if the last element will fit into the memory
-        checkPosition(offset + bytes - 1);
         unsafe.setMemory(peer + offset, bytes, b);
     }
 
     public void setLong(long offset, long l)
     {
-        checkPosition(offset);
+        checkBounds(offset, offset + 8);
         if (unaligned)
         {
             unsafe.putLong(peer + offset, l);
@@ -120,7 +133,7 @@ public class Memory implements AutoCloseable
 
     public void setInt(long offset, int l)
     {
-        checkPosition(offset);
+        checkBounds(offset, offset + 4);
         if (unaligned)
         {
             unsafe.putInt(peer + offset, l);
@@ -155,7 +168,8 @@ public class Memory implements AutoCloseable
             throw new NullPointerException();
         else if (buffer.remaining() == 0)
             return;
-        checkPosition(memoryOffset + buffer.remaining());
+
+        checkBounds(memoryOffset, memoryOffset + buffer.remaining());
         if (buffer.hasArray())
         {
             setBytes(memoryOffset, buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining());
@@ -186,22 +200,21 @@ public class Memory implements AutoCloseable
         else if (count == 0)
             return;
 
-        checkPosition(memoryOffset);
         long end = memoryOffset + count;
-        checkPosition(end - 1);
+        checkBounds(memoryOffset, end);
 
         unsafe.copyMemory(buffer, BYTE_ARRAY_BASE_OFFSET + bufferOffset, null, peer + memoryOffset, count);
     }
 
     public byte getByte(long offset)
     {
-        checkPosition(offset);
+        checkBounds(offset, offset + 1);
         return unsafe.getByte(peer + offset);
     }
 
     public long getLong(long offset)
     {
-        checkPosition(offset);
+        checkBounds(offset, offset + 8);
         if (unaligned) {
             return unsafe.getLong(peer + offset);
         } else {
@@ -233,7 +246,7 @@ public class Memory implements AutoCloseable
 
     public int getInt(long offset)
     {
-        checkPosition(offset);
+        checkBounds(offset, offset + 4);
         if (unaligned) {
             return unsafe.getInt(peer + offset);
         } else {
@@ -272,17 +285,15 @@ public class Memory implements AutoCloseable
         else if (count == 0)
             return;
 
-        checkPosition(memoryOffset);
-        long end = memoryOffset + count;
-        checkPosition(end - 1);
-
+        checkBounds(memoryOffset, memoryOffset + count);
         FastByteOperations.UnsafeOperations.copy(null, peer + memoryOffset, buffer, bufferOffset, count);
     }
 
-    private void checkPosition(long offset)
+    @Inline
+    protected void checkBounds(long start, long end)
     {
         assert peer != 0 : "Memory was freed";
-        assert offset >= 0 && offset < size : "Illegal offset: " + offset + ", size: " + size;
+        assert start >= 0 && end <= size && start <= end : "Illegal bounds [" + start + ".." + end + "); size: " + size;
     }
 
     public void put(long trgOffset, Memory memory, long srcOffset, long size)
@@ -299,12 +310,12 @@ public class Memory implements AutoCloseable
 
     public void free()
     {
-        assert peer != 0;
-        allocator.free(peer);
+        if (peer != 0) allocator.free(peer);
+        else assert size == 0;
         peer = 0;
     }
 
-    public void close() throws Exception
+    public void close()
     {
         free();
     }
@@ -344,4 +355,15 @@ public class Memory implements AutoCloseable
         result[result.length - 1] = MemoryUtil.getByteBuffer(peer + offset, (int) (size() - offset));
         return result;
     }
+
+    public String toString()
+    {
+        return toString(peer, size);
+    }
+
+    protected static String toString(long peer, long size)
+    {
+        return String.format("Memory@[%x..%x)", peer, peer + size);
+    }
+
 }
