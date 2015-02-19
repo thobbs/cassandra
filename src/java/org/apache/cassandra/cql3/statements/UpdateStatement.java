@@ -173,7 +173,7 @@ public class UpdateStatement extends ModificationStatement
             {
                 throw new InvalidRequestException("No columns provided to INSERT");
             }
-            else if (!isJson && columnNames.size() != columnValues.size())
+            else if (columnNames.size() != columnValues.size())
             {
                 throw new InvalidRequestException("Unmatched column names/values");
             }

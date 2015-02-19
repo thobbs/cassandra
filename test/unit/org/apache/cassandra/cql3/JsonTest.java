@@ -679,7 +679,7 @@ public class JsonTest extends CQLTester
     public void testInsertJsonSyntax() throws Throwable
     {
         createTable("CREATE TABLE %s (k int primary key, v int)");
-        execute("INSERT INTO %s (k, v) JSON ?", "{\"k\": 0, \"v\": 0}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"v\": 0}");
         assertRows(execute("SELECT * FROM %s"),
                 row(0, 0)
         );
@@ -690,31 +690,31 @@ public class JsonTest extends CQLTester
                 row(0, 0)
         );
 
-        execute("INSERT INTO %s (k, v) JSON ?", "{\"k\": 0, \"v\": null}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"v\": null}");
         assertRows(execute("SELECT * FROM %s"),
                 row(0, null)
         );
 
-        execute("INSERT INTO %s (k, v) JSON ?", "{\"v\": 1, \"k\": 0}");
+        execute("INSERT INTO %s JSON ?", "{\"v\": 1, \"k\": 0}");
         assertRows(execute("SELECT * FROM %s"),
                 row(0, 1)
         );
 
-        execute("INSERT INTO %s (k, v) JSON ?", "{\"k\": 0}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0}");
         assertRows(execute("SELECT * FROM %s"),
                 row(0, null)
         );
 
-        assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s (k, v) JSON ?", new Object[]{null});
-        assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s (k, v) JSON ?", "null");
-        assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s (k, v) JSON ?", "\"notamap\"");
-        assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s (k, v) JSON ?", "12.34");
+        assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s JSON ?", new Object[]{null});
+        assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s JSON ?", "null");
+        assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s JSON ?", "\"notamap\"");
+        assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s JSON ?", "12.34");
         assertInvalidMessage("JSON values map contains unrecognized column",
-                "INSERT INTO %s (k, v) JSON ?",
+                "INSERT INTO %s JSON ?",
                 "{\"k\": 0, \"v\": 0, \"zzz\": 0}");
 
         assertInvalidMessage("Unable to make int from",
-                "INSERT INTO %s (k, v) JSON ?",
+                "INSERT INTO %s JSON ?",
                 "{\"k\": 0, \"v\": \"notanint\"}");
     }
 
@@ -722,17 +722,17 @@ public class JsonTest extends CQLTester
     public void testCaseSensitivity() throws Throwable
     {
         createTable("CREATE TABLE %s (k int primary key, \"Foo\" int)");
-        execute("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"\\\"Foo\\\"\": 0}");
-        execute("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"K\": 0, \"\\\"Foo\\\"\": 0}");
-        execute("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"\\\"k\\\"\": 0, \"\\\"Foo\\\"\": 0}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"\\\"Foo\\\"\": 0}");
+        execute("INSERT INTO %s JSON ?", "{\"K\": 0, \"\\\"Foo\\\"\": 0}");
+        execute("INSERT INTO %s JSON ?", "{\"\\\"k\\\"\": 0, \"\\\"Foo\\\"\": 0}");
 
         // results should preserve and quote case-sensitive identifiers
         assertRows(execute("SELECT JSON * FROM %s"), row("{\"k\": 0, \"\\\"Foo\\\"\": 0}"));
         assertRows(execute("SELECT JSON k, \"Foo\" as foo FROM %s"), row("{\"k\": 0, \"foo\": 0}"));
         assertRows(execute("SELECT JSON k, \"Foo\" as \"Bar\" FROM %s"), row("{\"k\": 0, \"\\\"Bar\\\"\": 0}"));
 
-        assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"foo\": 0}");
-        assertInvalid("INSERT INTO %s (k, \"Foo\") JSON ?", "{\"k\": 0, \"\\\"foo\\\"\": 0}");
+        assertInvalid("INSERT INTO %s JSON ?", "{\"k\": 0, \"foo\": 0}");
+        assertInvalid("INSERT INTO %s JSON ?", "{\"k\": 0, \"\\\"foo\\\"\": 0}");
     }
 
     @Test
@@ -748,27 +748,27 @@ public class JsonTest extends CQLTester
                 "lf frozen<list<int>>)");
 
         // map
-        execute("INSERT INTO %s (k, m) JSON ?", "{\"k\": 0, \"m\": {\"a\": true, \"b\": false}}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"m\": {\"a\": true, \"b\": false}}");
         assertRows(execute("SELECT k, m FROM %s"), row(0, map("a", true, "b", false)));
 
         // frozen map
-        execute("INSERT INTO %s (k, mf) JSON ?", "{\"k\": 0, \"mf\": {\"a\": true, \"b\": false}}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"mf\": {\"a\": true, \"b\": false}}");
         assertRows(execute("SELECT k, mf FROM %s"), row(0, map("a", true, "b", false)));
 
         // set
-        execute("INSERT INTO %s (k, s) JSON ?", "{\"k\": 0, \"s\": [3, 1, 2]}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"s\": [3, 1, 2]}");
         assertRows(execute("SELECT k, s FROM %s"), row(0, set(1, 2, 3)));
 
         // frozen set
-        execute("INSERT INTO %s (k, sf) JSON ?", "{\"k\": 0, \"sf\": [3, 1, 2]}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"sf\": [3, 1, 2]}");
         assertRows(execute("SELECT k, sf FROM %s"), row(0, set(1, 2, 3)));
 
         // list
-        execute("INSERT INTO %s (k, l) JSON ?", "{\"k\": 0, \"l\": [1, 2, 3]}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"l\": [1, 2, 3]}");
         assertRows(execute("SELECT k, l FROM %s"), row(0, list(1, 2, 3)));
 
         // frozen list
-        execute("INSERT INTO %s (k, lf) JSON ?", "{\"k\": 0, \"lf\": [1, 2, 3]}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"lf\": [1, 2, 3]}");
         assertRows(execute("SELECT k, lf FROM %s"), row(0, list(1, 2, 3)));
     }
 
@@ -781,10 +781,10 @@ public class JsonTest extends CQLTester
                 "a frozen<" + typeName + ">, " +
                 "b tuple<int, boolean>)");
 
-        execute("INSERT INTO %s (k, a, b) JSON ?", "{\"k\": 0, \"a\": {\"a\": 0, \"b\": [1, 2, 3], \"c\": [0, 1]}, \"b\": [0, true]}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"a\": {\"a\": 0, \"b\": [1, 2, 3], \"c\": [0, 1]}, \"b\": [0, true]}");
         assertRows(execute("SELECT k, a.a, a.b, a.c, b FROM %s"), row(0, 0, set(1, 2, 3), tuple(0, 1), tuple(0, true)));
 
-        execute("INSERT INTO %s (k, a, b) JSON ?", "{\"k\": 0, \"a\": {\"a\": 0, \"b\": [1, 2, 3], \"c\": null}, \"b\": null}");
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"a\": {\"a\": 0, \"b\": [1, 2, 3], \"c\": null}, \"b\": null}");
         assertRows(execute("SELECT k, a.a, a.b, a.c, b FROM %s"), row(0, 0, set(1, 2, 3), null, null));
     }
 }

@@ -371,20 +371,17 @@ insertStatement returns [UpdateStatement.ParsedInsert expr]
         List<Term.Raw> values = new ArrayList<Term.Raw>();
         boolean ifNotExists = false;
         boolean isJson = false;
-        boolean haveColumnNames = false;
     }
     : K_INSERT K_INTO cf=columnFamilyName
-        ( '(' c1=cident { columnNames.add(c1); }  ( ',' cn=cident { columnNames.add(cn); } )* ')' { haveColumnNames = true; } )?
-        ( K_VALUES
+        ( '(' c1=cident { columnNames.add(c1); }  ( ',' cn=cident { columnNames.add(cn); } )* ')'
+          K_VALUES
            '(' v1=term { values.add(v1); } ( ',' vn=term { values.add(vn); } )* ')'
         | K_JSON
-           v1=jsonValue { values.add(v1); isJson = true; })
+           v1=jsonValue { values.add(v1); isJson = true; columnNames = null; })
 
         ( K_IF K_NOT K_EXISTS { ifNotExists = true; } )?
         ( usingClause[attrs] )?
       {
-          if (!haveColumnNames)
-              columnNames = null;
           $expr = new UpdateStatement.ParsedInsert(cf,
                                                    attrs,
                                                    columnNames,
