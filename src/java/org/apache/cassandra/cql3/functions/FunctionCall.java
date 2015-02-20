@@ -178,6 +178,13 @@ public class FunctionCall extends Term.NonTerminal
             try
             {
                 Function fun = Functions.get(keyspace, name, terms, receiver.ksName, receiver.cfName, receiver.type);
+
+                // Because fromJson() can return whatever type the receiver is, we'll always get EXACT_MATCH.  To
+                // handle potentially ambiguous function calls with fromJson() as an argument, always return
+                // WEAKLY_ASSIGNABLE to force the user to typecast if necessary
+                if (fun != null && fun.name().equals(FromJsonFct.NAME))
+                    return TestResult.WEAKLY_ASSIGNABLE;
+
                 if (fun != null && receiver.type.equals(fun.returnType()))
                     return AssignmentTestable.TestResult.EXACT_MATCH;
                 else if (fun == null || receiver.type.isValueCompatibleWith(fun.returnType()))
