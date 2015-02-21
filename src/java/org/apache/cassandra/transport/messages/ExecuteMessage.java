@@ -52,7 +52,7 @@ public class ExecuteMessage extends Message.Request
             }
             else
             {
-                return new ExecuteMessage(MD5Digest.wrap(id), QueryOptions.codec.decode(body, version));
+                return new ExecuteMessage(MD5Digest.wrap(id), QueryOptions.ExecuteOptions.codec.decode(body, version));
             }
         }
 

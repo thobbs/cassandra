@@ -37,11 +37,10 @@ Table of Contents
       4.2.7. AUTH_CHALLENGE
       4.2.8. AUTH_SUCCESS
   5. Compression
-  6. Data Type Serialization Formats
-  7. User Defined Type Serialization
-  8. Result paging
-  9. Error codes
-  10. Changes from v3
+  6. Data Type Serialization Formats and Type Codes
+  7. Result paging
+  8. Error codes
+  9. Changes from v3
 
 
 1. Overview
@@ -103,7 +102,7 @@ Table of Contents
   connection.
 
   This document describe the version 3 of the protocol. For the changes made since
-  version 3, see Section 10.
+  version 3, see Section 9.
 
 
 2.2. flags
@@ -198,12 +197,9 @@ Table of Contents
     [bytes]        A [int] n, followed by n bytes if n >= 0. If n < 0,
                    no byte should follow and the value represented is `null`.
     [short bytes]  A [short] n, followed by n bytes if n >= 0.
-
-    [option]       A pair of <id><value> where <id> is a [short] representing
-                   the option id and <value> depends on that option (and can be
-                   of size 0). The supported id (and the corresponding <value>)
-                   will be described when this is used.
-    [option list]  A [short] n, followed by n [option].
+    [type]         A [short], possibly followed by additional data, depending
+                   on the value of the [short].  See Section 6 for details on
+                   type codes.
     [inet]         An address (ip and port) to a node. It consists of one
                    [byte] n, that represents the address size, followed by n
                    [byte] representing the IP address (in practice n can only be
@@ -285,53 +281,64 @@ Table of Contents
 4.1.4. QUERY
 
   Performs a CQL query. The body of the message must be:
-    <query><query_parameters>
-  where <query> is a [long string] representing the query and
-  <query_parameters> must be
-    <consistency><flags>[<n>[name_1]<value_1>...[name_n]<value_n>][<result_page_size>][<paging_state>][<serial_consistency>][<timestamp>]
+    <query><consistency><flags>[<query_parameters>][<result_page_size>][<paging_state>][<serial_consistency>][<timestamp>]
   where:
+    - <query> is a [long string] representing the CQL query
     - <consistency> is the [consistency] level for the operation.
     - <flags> is a [byte] whose bits define the options for this query and
-      in particular influence what the remainder of the message contains.
+      in particular determines which optional fields the message contains.
       A flag is set if the bit corresponding to its `mask` is set. Supported
-      flags are, given there mask:
+      masks and their corresponding flags are:
         0x01: Values. In that case, a [short] <n> followed by <n> [bytes]
               values are provided. Those value are used for bound variables in
               the query. Optionally, if the 0x40 flag is present, each value
               will be preceded by a [string] name, representing the name of
-              the marker the value must be binded to. This is optional, and
-              if not present, values will be binded by position.
+              the marker the value must be bound to. This is optional, and
+              if not present, values will be bound by position.
         0x02: Skip_metadata. If present, the Result Set returned as a response
-              to that query (if any) will have the NO_METADATA flag (see
+              to the query (if any) will have the NO_METADATA flag (see
               Section 4.2.5.2).
-        0x04: Page_size. In that case, <result_page_size> is an [int]
-              controlling the desired page size of the result (in CQL3 rows).
-              See the section on paging (Section 8) for more details.
-        0x08: With_paging_state. If present, <paging_state> should be present.
-              <paging_state> is a [bytes] value that should have been returned
-              in a result set (Section 4.2.5.2). If provided, the query will be
-              executed but starting from a given paging state. This also to
-              continue paging on a different node from the one it has been
-              started (See Section 8 for more details).
-        0x10: With serial consistency. If present, <serial_consistency> should be
-              present. <serial_consistency> is the [consistency] level for the
-              serial phase of conditional updates. That consitency can only be
-              either SERIAL or LOCAL_SERIAL and if not present, it defaults to
-              SERIAL. This option will be ignored for anything else that a
-              conditional update/insert.
-        0x20: With default timestamp. If present, <timestamp> should be present.
-              <timestamp> is a [long] representing the default timestamp for the query
-              in microseconds (negative values are forbidden). If provided, this will
-              replace the server side assigned timestamp as default timestamp.
-              Note that a timestamp in the query itself will still override
-              this timestamp. This is entirely optional.
-        0x40: With names for values. This only makes sense if the 0x01 flag is set and
-              is ignored otherwise. If present, the values from the 0x01 flag will
-              be preceded by a name (see above). Note that this is only useful for
-              QUERY requests where named bind markers are used; for EXECUTE statements,
-              since the names for the expected values was returned during preparation,
-              a client can always provide values in the right order without any names
-              and using this flag, while supported, is almost surely inefficient.
+        0x04: Page_size. If set, <result_page_size> must be present.
+        0x08: With_paging_state. If set, <paging_state> must be present.
+        0x10: With serial consistency. If set, <serial_consistency> must be
+              present.
+        0x20: With default timestamp. If set, <timestamp> must be present.
+        0x40: With names for values. This should only be used in conjunction with
+              the 0x01 flag, and is ignored otherwise. If present, the values from
+              the 0x01 flag will be preceded by a name (see below). Note that this
+              is only useful for QUERY requests where named bind markers are used.
+              With EXECUTE statements, the names for the expected values are
+              returned during preparation, enabling the client to provide the
+              correct positional order without any names.  While the EXECUTE
+              message does support this flag, it is almost surely inefficient.
+    - <query_parameters> takes the form [<n><param_1>...<param_n>], where <n> is a
+      [short] denoting the number of <param> items to follow.  Each <param> has the form:
+        [<name>]<typecode><value>
+      where:
+        - <name> is a [string] representing the name of the bind marker that the
+          value will bound to.  This field should only be set if the 0x40 flag
+          is present.  If absent, positional binding of values will be performed.
+        - <typecode> is a [type], as described in Section 6.  The <typecode>
+          field *must* be present in QUERY messages, but *must* be omitted
+          in EXECUTE messages.
+        - <value> is a serialized value of type <typecode>.  See Section 6 for
+          more information on serialization formats for different types.
+    - <result_page_size> controlling the desired page size of the result (in
+      CQL3 rows).  See the section on paging (Section 7) for more details.
+    - <paging_state> is a [bytes] value that should have been returned in a result
+      set (Section 4.2.5.2). If provided, the query will be executed starting
+      from the given paging state. This allows paging to be continued on a
+      different node (See Section 7 for more details).
+    - <serial_consistency> is the [consistency] level for the serial phase of
+      conditional updates. The value can only be either SERIAL or LOCAL_SERIAL,
+      and if not present, defaults to SERIAL. This option will be ignored for
+      anything other than a conditional update/insert.
+    - <timestamp> is a [long] representing the default timestamp for the query
+      in microseconds (negative values are forbidden). If provided, this will
+      replace the server-side assigned timestamp as the default timestamp.
+      Note that a timestamp in the CQL query itself will override this
+      timestamp.
+
 
   Note that the consistency is ignored by some queries (USE, CREATE, ALTER,
   TRUNCATE, ...).
@@ -352,10 +359,13 @@ Table of Contents
 4.1.6. EXECUTE
 
   Executes a prepared query. The body of the message must be:
-    <id><query_parameters>
+    <id><consistency><flags>[<query_parameters>][<result_page_size>][<paging_state>][<serial_consistency>][<timestamp>]
   where <id> is the prepared query ID. It's the [short bytes] returned as a
-  response to a PREPARE message. As for <query_parameters>, it has the exact
-  same definition than in QUERY (see Section 4.1.4).
+  response to a PREPARE message.
+
+  The remainder of the message is the same as for QUERY message (Section 4.1.4),
+  but with one exception: within the <query_parameters>, the <type> field
+  must be omitted.
 
   The response from the server will be a RESULT message.
 
@@ -446,7 +456,7 @@ Table of Contents
   Indicates an error processing a request. The body of the message will be an
   error code ([int]) followed by a [string] error message. Then, depending on
   the exception, more content may follow. The error codes are defined in
-  Section 9, along with their additional content if any.
+  Section 8, along with their additional content if any.
 
 
 4.2.2. READY
@@ -529,7 +539,7 @@ Table of Contents
                       <paging_state> will be present. The <paging_state> is a
                       [bytes] value that should be used in QUERY/EXECUTE to
                       continue paging and retrieve the remained of the result for
-                      this query (See Section 8 for more details).
+                      this query (See Section 7 for more details).
             0x0004    No_metadata: if set, the <metadata> is only composed of
                       these <flags>, the <column_count> and optionally the
                       <paging_state> (depending on the Has_more_pages flage) but
@@ -544,59 +554,18 @@ Table of Contents
           (unique) keyspace name and table name the columns return are of.
         - <col_spec_i> specifies the columns returned in the query. There is
           <column_count> such column specifications that are composed of:
-            (<ksname><tablename>)?<name><type>
-          The initial <ksname> and <tablename> are two [string] are only present
+            (<ksname><tablename>)?<name><typecode>
+          The initial <ksname> and <tablename> are two [string], and are only present
           if the Global_tables_spec flag is not set. The <column_name> is a
-          [string] and <type> is an [option] that correspond to the description
-          (what this description is depends a bit on the context: in results to
-          selects, this will be either the user chosen alias or the selection used
-          (often a colum name, but it can be a function call too). In results to
-          a PREPARE, this will be either the name of the bind variable corresponding
-          or the column name for the variable if it is "anonymous") and type of
-          the corresponding result. The option for <type> is either a native
-          type (see below), in which case the option has no value, or a
-          'custom' type, in which case the value is a [string] representing
-          the full qualified class name of the type represented. Valid option
-          ids are:
-            0x0000    Custom: the value is a [string], see above.
-            0x0001    Ascii
-            0x0002    Bigint
-            0x0003    Blob
-            0x0004    Boolean
-            0x0005    Counter
-            0x0006    Decimal
-            0x0007    Double
-            0x0008    Float
-            0x0009    Int
-            0x000B    Timestamp
-            0x000C    Uuid
-            0x000D    Varchar
-            0x000E    Varint
-            0x000F    Timeuuid
-            0x0010    Inet
-            0x0020    List: the value is an [option], representing the type
-                            of the elements of the list.
-            0x0021    Map: the value is two [option], representing the types of the
-                           keys and values of the map
-            0x0022    Set: the value is an [option], representing the type
-                            of the elements of the set
-            0x0030    UDT: the value is <ks><udt_name><n><name_1><type_1>...<name_n><type_n>
-                           where:
-                              - <ks> is a [string] representing the keyspace name this
-                                UDT is part of.
-                              - <udt_name> is a [string] representing the UDT name.
-                              - <n> is a [short] reprensenting the number of fields of
-                                the UDT, and thus the number of <name_i><type_i> pair
-                                following
-                              - <name_i> is a [string] representing the name of the
-                                i_th field of the UDT.
-                              - <type_i> is an [option] representing the type of the
-                                i_th field of the UDT.
-            0x0031    Tuple: the value is <n><type_1>...<type_n> where <n> is a [short]
-                             representing the number of value in the type, and <type_i>
-                             are [option] representing the type of the i_th component
-                             of the tuple
-
+          [string] that describes the column.  The string value is dependent
+          on the context.  In results to SELECT statements, this will either
+          be the user-chosen alias or the selection used (often a column name,
+          but it may also be a function call or subfield lookup).  In results
+          to a PREPARE, this will either be:
+            - The name of the bind marker, if named bind markers are used, or
+            - The column name corresponding to the bind marker, if "anonymous"
+              bind markers are used.
+          The <typecode> is a [type], as described in Section 6.
     - <rows_count> is an [int] representing the number of rows present in this
       result. Those rows are serialized in the <rows_content> part.
     - <rows_content> is composed of <row_1>...<row_m> where m is <rows_count>.
@@ -742,13 +711,18 @@ Table of Contents
       avaivable on some installation.
 
 
-6. Data Type Serialization Formats
+6. Data Type Serialization Formats and Type Codes
 
-  This sections describes the serialization formats for all CQL data types
-  supported by Cassandra through the native protocol.  These serialization
-  formats should be used by client drivers to encode values for EXECUTE
-  messages.  Cassandra will use these formats when returning values in
-  RESULT messages.
+  This sections describes the type codes and serialization formats for all
+  CQL data types supported by Cassandra through the native protocol.  These
+  serialization formats should be used by client drivers to encode values for
+  EXECUTE and QUERY messages.  Cassandra will use these type codes and formats
+  when returning values in RESULT messages.
+
+  Each type has a unique type code.  For most types, the type code is simply
+  a [short].  Some types (most notably, collections, tuples, and UDTs)
+  include additional type information after the [short].  The type descriptions
+  below describe the additional information in detail.
 
   All values are represented as [bytes] in EXECUTE and RESULT messages.
   The [bytes] format includes an int prefix denoting the length of the value.
@@ -763,80 +737,123 @@ Table of Contents
 
 6.1. ascii
 
+  Type code: 0x0001
+
   A sequence of bytes in the ASCII range [0, 127].  Bytes with values outside of
   this range will result in a validation error.
 
 6.2 bigint
 
+  Type code: 0x0002
+
   An eight-byte two's complement integer.
 
 6.3 blob
+
+  Type code: 0x0003
 
   Any sequence of bytes.
 
 6.4 boolean
 
+  Type code: 0x0004
+
   A single byte.  A value of 0 denotes "false"; any other value denotes "true".
   (However, it is recommended that a value of 1 be used to represent "true".)
 
-6.5 decimal
+6.5 counter
+
+  Type code: 0x0005
+
+  TODO can clients actually get counter values, not bigints?
+
+6.6 decimal
+
+  Type code: 0x0006
 
   The decimal format represents an arbitrary-precision number.  It contains an
   [int] "scale" component followed by a varint encoding (see section 6.17)
   of the unscaled value.  The encoded value represents "<unscaled>E<-scale>".
   In other words, "<unscaled> * 10 ^ (-1 * <scale>)".
 
-6.6 double
+6.7 double
+
+  Type code: 0x0007
 
   An eight-byte floating point number in the IEEE 754 binary64 format.
 
-6.7 float
+6.8 float
+
+  Type code: 0x0008
 
   An four-byte floating point number in the IEEE 754 binary32 format.
 
-6.8 inet
+6.9 inet
+
+  Type code: 0x0010
 
   A 4 byte or 16 byte sequence denoting an IPv4 or IPv6 address, respectively.
 
-6.9 int
+6.10 int
+
+  Type code: 0x0009
 
   A four-byte two's complement integer.
 
-6.10 list
+6.11 list
+
+  Type code: 0x0020, followed by a second [type] code representing
+             the type of the elements in the list.
 
   A [int] n indicating the number of elements in the list, followed by n
   elements.  Each element is [bytes] representing the serialized value.
 
-6.11 map
+6.12 map
+
+  Type code: 0x0021, followed by two [type] codes representing
+             the types of keys and values in the map, respectively.
 
   A [int] n indicating the number of key/value pairs in the map, followed by
   n entries.  Each entry is composed of two [bytes] representing the key
   and value.
 
-6.12 set
+6.13 set
+
+  Type code: 0x0022, followed by a second [type] code representing
+             the type of the elements in the set.
 
   A [int] n indicating the number of elements in the set, followed by n
   elements.  Each element is [bytes] representing the serialized value.
 
-6.13 text
+6.14 text
+
+  Type code: 0x000D
 
   A sequence of bytes conforming to the UTF-8 specifications.
 
-6.14 timestamp
+6.15 timestamp
+
+  Type code: 0x000B
 
   An eight-byte two's complement integer representing a millisecond-precision
   offset from the unix epoch (00:00:00, January 1st, 1970).  Negative values
   represent a negative offset from the epoch.
 
-6.15 uuid
+6.16 uuid
+
+  Type code: 0x000C
 
   A 16 byte sequence representing any valid UUID as defined by RFC 4122.
 
-6.16 varchar
+6.17 varchar
+
+  Type code: 0x000D
 
   An alias of the "text" type.
 
-6.17 varint
+6.18 varint
+
+  Type code: 0x000E
 
   A variable-length two's complement encoding of a signed integer.
 
@@ -858,35 +875,58 @@ Table of Contents
   value.  Implementors should pad positive values that have a MSB >= 0x80
   with a leading 0x00 byte.
 
-6.18 timeuuid
+6.19 timeuuid
+
+  Type code: 0x000F
 
   A 16 byte sequence representing a version 1 UUID as defined by RFC 4122.
 
-6.19 tuple
+6.20 tuple
 
-  A sequence of [bytes] values representing the items in a tuple.  The encoding
-  of each element depends on the data type for that position in the tuple.
-  Null values may be represented by using length -1 for the [bytes]
-  representation of an element.
+  Type code: 0x0031, followed by <n><type_1>...<type_n>, where:
+              - <n> is a [short] representing the number of types to follow.
+              - <type_i> is a [type] representing the type of the i_th
+                component of the tuple.
+
+  A tuple values is a sequence of [bytes] values representing the items in a tuple.
+  The encoding of each element depends on the data type for that position in the tuple.
+  Null values may be represented by using length -1 for the [bytes] representation of
+  an element.
 
   Within a tuple, all data types should use the v3 protocol serialization format.
 
+6.21 User Defined Type
 
-7. User Defined Types
+  Type code: 0x0031, followed by <ks><udt_name><n><name_1><type_1>...<name_n><type_n>
+             where:
+               - <ks> is a [string] representing the keyspace name this
+                 UDT is defined in.
+               - <udt_name> is a [string] representing the UDT name.
+               - <n> is a [short] reprensenting the number of fields in
+                 the UDT, and thus the number of <name_i><type_i> pairs
+                 to follow.
+               - <name_i> is a [string] representing the name of the
+                 i_th field of the UDT.
+               - <type_i> is a [type] representing the type of the
+                 i_th field of the UDT.
 
-  This section describes the serialization format for User defined types (UDT),
-  as described in section 4.2.5.2.
-
-  A UDT value is composed of successive [bytes] values, one for each field of the UDT
+  A UDT value is composed of a sequence of [bytes] values, one for each field of the UDT
   value (in the order defined by the type). A UDT value will generally have one value
-  for each field of the type it represents, but it is allowed to have less values than
+  for each field of the type it represents, but it is allowed to have fewer values than
   the type has fields.
 
   Within a user-defined type value, all data types should use the v3 protocol
   serialization format.
 
+6.22. Custom Types
 
-8. Result paging
+  Type code: 0x0000, followed by a [string] representing the fully-qualified
+             class name of the type represented.
+
+  The serialization format for custom types depends on the implementation
+  of the custom type.
+
+7. Result paging
 
   The protocol allows for paging the result of queries. For that, the QUERY and
   EXECUTE messages have a <result_page_size> value that indicate the desired
@@ -920,7 +960,7 @@ Table of Contents
     slightly smaller or bigger pages in the future for performance reasons.
 
 
-9. Error codes
+8. Error codes
 
   The supported error codes are described below:
     0x0000    Server error: something unexpected happened. This indicates a
@@ -1034,9 +1074,11 @@ Table of Contents
               this host. The rest of the ERROR message body will be [short
               bytes] representing the unknown ID.
 
-10. Changes from v3
+9. Changes from v3
 
   * The format of "SCHEMA_CHANGE" events (Section 4.2.6) (and implicitly "Schema_change" results (Section 4.2.5.5))
     has been modified, and now includes changes related to user defined functions and user defined aggregates.
   * Read_failure error code was added.
   * Function_failure error code was added.
+  * QUERY messages now include a [type] field for each query parameter value
+    (see Section 4.1.4).

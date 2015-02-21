@@ -402,22 +402,6 @@ public abstract class CBUtil
         return size;
     }
 
-    public static Pair<List<String>, List<ByteBuffer>> readNameAndValueList(ByteBuf cb)
-    {
-        int size = cb.readUnsignedShort();
-        if (size == 0)
-            return Pair.create(Collections.<String>emptyList(), Collections.<ByteBuffer>emptyList());
-
-        List<String> s = new ArrayList<>(size);
-        List<ByteBuffer> l = new ArrayList<>(size);
-        for (int i = 0; i < size; i++)
-        {
-            s.add(readString(cb));
-            l.add(readValue(cb));
-        }
-        return Pair.create(s, l);
-    }
-
     public static InetSocketAddress readInet(ByteBuf cb)
     {
         int addrSize = cb.readByte();

@@ -43,7 +43,7 @@ public class QueryMessage extends Message.Request
         public QueryMessage decode(ByteBuf body, int version)
         {
             String query = CBUtil.readLongString(body);
-            if (version == 1)
+            if (version == Server.VERSION_1)
             {
                 ConsistencyLevel consistency = CBUtil.readConsistencyLevel(body);
                 return new QueryMessage(query, QueryOptions.fromProtocolV1(consistency, Collections.<ByteBuffer>emptyList()));
@@ -57,7 +57,7 @@ public class QueryMessage extends Message.Request
         public void encode(QueryMessage msg, ByteBuf dest, int version)
         {
             CBUtil.writeLongString(msg.query, dest);
-            if (version == 1)
+            if (version == Server.VERSION_1)
                 CBUtil.writeConsistencyLevel(msg.options.getConsistency(), dest);
             else
                 QueryOptions.codec.encode(msg.options, dest, version);
@@ -67,7 +67,7 @@ public class QueryMessage extends Message.Request
         {
             int size = CBUtil.sizeOfLongString(msg.query);
 
-            if (version == 1)
+            if (version == Server.VERSION_1)
             {
                 size += CBUtil.sizeOfConsistencyLevel(msg.options.getConsistency());
             }
