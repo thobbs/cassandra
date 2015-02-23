@@ -19,6 +19,7 @@ package org.apache.cassandra.transport.messages;
 
 import java.util.List;
 
+import com.google.common.annotations.VisibleForTesting;
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.CodecException;
 import com.google.common.base.Predicate;
@@ -320,7 +321,7 @@ public class ErrorMessage extends Message.Response
         return new WrappedException(t, streamId);
     }
 
-    private static class WrappedException extends RuntimeException
+    public static class WrappedException extends RuntimeException
     {
         private final int streamId;
 
@@ -328,6 +329,12 @@ public class ErrorMessage extends Message.Response
         {
             super(cause);
             this.streamId = streamId;
+        }
+
+        @VisibleForTesting
+        public int getStreamId()
+        {
+            return this.streamId;
         }
     }
 
