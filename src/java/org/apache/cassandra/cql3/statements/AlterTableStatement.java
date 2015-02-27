@@ -195,19 +195,28 @@ public class AlterTableStatement extends SchemaAlteringStatement
                         }
                         break;
                     case COLUMN_ALIAS:
-                        assert cfDef.isComposite;
-                        List<AbstractType<?>> oldTypes = ((CompositeType) cfm.comparator).types;
-                        // Note that CFMetaData.validateCompatibility already validate the change we're about to do. However, the error message it
-                        // sends is a bit cryptic for a CQL3 user, so validating here for a sake of returning a better error message
-                        // Do note that we need isCompatibleWith here, not just isValueCompatibleWith.
-                        if (!validator.getType().isCompatibleWith(oldTypes.get(name.position)))
-                            throw new ConfigurationException(String.format("Cannot change %s from type %s to type %s: types are not order-compatible.",
-                                                                           columnName,
-                                                                           oldTypes.get(name.position).asCQL3Type(),
-                                                                           validator));
-                        List<AbstractType<?>> newTypes = new ArrayList<AbstractType<?>>(oldTypes);
-                        newTypes.set(name.position, validator.getType());
-                        cfm.comparator = CompositeType.getInstance(newTypes);
+                        if (cfDef.isComposite)
+                        {
+                            List<AbstractType<?>> oldTypes = ((CompositeType) cfm.comparator).types;
+                            // Note that CFMetaData.validateCompatibility already validate the change we're about to do. However, the error message it
+                            // sends is a bit cryptic for a CQL3 user, so validating here for a sake of returning a better error message
+                            // Do note that we need isCompatibleWith here, not just isValueCompatibleWith.
+                            if (!validator.getType().isCompatibleWith(oldTypes.get(name.position)))
+                                throw new ConfigurationException(String.format("Cannot change %s from type %s to type %s: types are not order-compatible.",
+                                        columnName,
+                                        oldTypes.get(name.position).asCQL3Type(),
+                                        validator));
+                            List<AbstractType<?>> newTypes = new ArrayList<AbstractType<?>>(oldTypes);
+                            newTypes.set(name.position, validator.getType());
+                            cfm.comparator = CompositeType.getInstance(newTypes);
+                        }
+                        else
+                        {
+                            if (!validator.getType().isCompatibleWith(cfm.comparator))
+                                throw new ConfigurationException(String.format("Cannot change %s from type %s to type %s: types are not order-compatible.",
+                                        columnName, cfm.comparator.asCQL3Type(), validator));
+                            cfm.comparator = validator.getType();
+                        }
                         break;
                     case VALUE_ALIAS:
                         // See below
