@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class ToJsonFct extends AbstractFunction implements ScalarFunction
+public class ToJsonFct extends NativeScalarFunction
 {
     public static final FunctionName NAME = FunctionName.nativeFunction("tojson");
 
@@ -52,22 +52,7 @@ public class ToJsonFct extends AbstractFunction implements ScalarFunction
 
     private ToJsonFct(AbstractType<?> argType)
     {
-        super(NAME, Collections.<AbstractType<?>>singletonList(argType), UTF8Type.instance);
-    }
-
-    public boolean isAggregate()
-    {
-        return false;
-    }
-
-    public boolean isNative()
-    {
-        return true;
-    }
-
-    public boolean isPure()
-    {
-        return true;
+        super("tojson", UTF8Type.instance, argType);
     }
 
     public ByteBuffer execute(int protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException

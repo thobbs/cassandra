@@ -28,12 +28,11 @@ import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
 
-public class FromJsonFct extends AbstractFunction implements ScalarFunction
+public class FromJsonFct extends NativeScalarFunction
 {
     public static final FunctionName NAME = FunctionName.nativeFunction("fromjson");
 
     private static final Map<AbstractType<?>, FromJsonFct> instances = new ConcurrentHashMap<>();
-    private static final List<AbstractType<?>> fromJsonArgs = Collections.<AbstractType<?>>singletonList(UTF8Type.instance);
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -50,22 +49,7 @@ public class FromJsonFct extends AbstractFunction implements ScalarFunction
 
     private FromJsonFct(AbstractType<?> returnType)
     {
-        super(NAME, fromJsonArgs, returnType);
-    }
-
-    public boolean isAggregate()
-    {
-        return false;
-    }
-
-    public boolean isNative()
-    {
-        return true;
-    }
-
-    public boolean isPure()
-    {
-        return true;
+        super("fromjson", returnType, UTF8Type.instance);
     }
 
     public ByteBuffer execute(int protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException
