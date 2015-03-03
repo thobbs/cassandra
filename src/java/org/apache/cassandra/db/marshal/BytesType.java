@@ -54,7 +54,11 @@ public class BytesType extends AbstractType<ByteBuffer>
     {
         try
         {
-            return BytesType.instance.fromString((String) parsed);
+            String parsedString = (String) parsed;
+            if (!parsedString.startsWith("0x"))
+                throw new MarshalException(String.format("String representation of blob is missing 0x prefix: %s", parsedString));
+
+            return BytesType.instance.fromString(parsedString.substring(2));
         }
         catch (ClassCastException | MarshalException exc)
         {
@@ -65,7 +69,7 @@ public class BytesType extends AbstractType<ByteBuffer>
     @Override
     public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        return '"' + ByteBufferUtil.bytesToHex(buffer) + '"';
+        return "\"0x" + ByteBufferUtil.bytesToHex(buffer) + '"';
     }
 
     @Override

@@ -120,11 +120,17 @@ public class JsonTest extends CQLTester
                 "INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "[\"abc\"]");
 
         // ================ blob ================
-        execute("INSERT INTO %s (k, blobval) VALUES (?, fromJson(?))", 0, "\"00000001\"");
+        execute("INSERT INTO %s (k, blobval) VALUES (?, fromJson(?))", 0, "\"0x00000001\"");
         assertRows(execute("SELECT k, blobval FROM %s WHERE k = ?", 0), row(0, ByteBufferUtil.bytes(1)));
 
         assertInvalidMessage("Value 'xyzz' is not a valid blob representation",
             "INSERT INTO %s (k, blobval) VALUES (?, fromJson(?))", 0, "\"xyzz\"");
+
+        assertInvalidMessage("String representation of blob is missing 0x prefix: 123",
+                "INSERT INTO %s (k, blobval) VALUES (?, fromJson(?))", 0, "\"123\"");
+
+        assertInvalidMessage("Value '0x123' is not a valid blob representation",
+                "INSERT INTO %s (k, blobval) VALUES (?, fromJson(?))", 0, "\"0x123\"");
 
         assertInvalidMessage("Value '123' is not a valid blob representation",
                 "INSERT INTO %s (k, blobval) VALUES (?, fromJson(?))", 0, "123");
@@ -495,10 +501,10 @@ public class JsonTest extends CQLTester
 
         // ================ blob ================
         execute("INSERT INTO %s (k, blobval) VALUES (?, ?)", 0, ByteBufferUtil.bytes(1));
-        assertRows(execute("SELECT k, toJson(blobval) FROM %s WHERE k = ?", 0), row(0, "\"00000001\""));
+        assertRows(execute("SELECT k, toJson(blobval) FROM %s WHERE k = ?", 0), row(0, "\"0x00000001\""));
 
         execute("INSERT INTO %s (k, blobval) VALUES (?, ?)", 0, ByteBufferUtil.EMPTY_BYTE_BUFFER);
-        assertRows(execute("SELECT k, toJson(blobval) FROM %s WHERE k = ?", 0), row(0, "\"\""));
+        assertRows(execute("SELECT k, toJson(blobval) FROM %s WHERE k = ?", 0), row(0, "\"0x\""));
 
         // ================ boolean ================
         execute("INSERT INTO %s (k, booleanval) VALUES (?, ?)", 0, true);
