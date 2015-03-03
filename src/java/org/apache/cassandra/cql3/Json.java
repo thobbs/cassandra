@@ -86,6 +86,8 @@ public class Json
         private DelayedAllValues allJsonValues;
         private Set<? extends ColumnSpecification> expectedReceivers;
 
+        private static final ColumnIdentifier JSON_IDENTIFIER = new ColumnIdentifier("[json]", true);
+
         public Marker(int bindIndex)
         {
             super(bindIndex);
@@ -93,8 +95,7 @@ public class Json
 
         private static ColumnSpecification makeReceiver(ColumnSpecification receiver) throws InvalidRequestException
         {
-            ColumnIdentifier identifier = new ColumnIdentifier("json_values", true);
-            return new ColumnSpecification(receiver.ksName, receiver.cfName, identifier, UTF8Type.instance);
+            return new ColumnSpecification(receiver.ksName, receiver.cfName, JSON_IDENTIFIER, UTF8Type.instance);
         }
 
         /**

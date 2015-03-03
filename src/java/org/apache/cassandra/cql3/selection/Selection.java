@@ -54,7 +54,7 @@ public abstract class Selection
 
     private static JsonStringEncoder jsonStringEncoder = new JsonStringEncoder();
 
-    private static final ColumnIdentifier jsonId = new ColumnIdentifier("json", false);
+    private static final ColumnIdentifier jsonId = new ColumnIdentifier("[json]", false);
 
     private final CFMetaData cfm;
     private final Collection<ColumnDefinition> columns;

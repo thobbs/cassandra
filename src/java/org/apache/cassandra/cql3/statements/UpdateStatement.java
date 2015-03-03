@@ -121,8 +121,6 @@ public class UpdateStatement extends ModificationStatement
         private final List<Term.Raw> columnValues;
         private final boolean isJson;
 
-        private static final ColumnSpecification jsonReceiverSpec = new ColumnSpecification("", "", new ColumnIdentifier("json_string", false), UTF8Type.instance);
-
         /**
          * A parsed <code>INSERT</code> statement.
          *
