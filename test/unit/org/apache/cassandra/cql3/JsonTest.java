@@ -251,6 +251,9 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, textval) VALUES (?, fromJson(?))", 0, "\"some \\\" text\"");
         assertRows(execute("SELECT k, textval FROM %s WHERE k = ?", 0), row(0, "some \" text"));
 
+        execute("INSERT INTO %s (k, textval) VALUES (?, fromJson(?))", 0, "\"\\u2013\"");
+        assertRows(execute("SELECT k, textval FROM %s WHERE k = ?", 0), row(0, "\u2013"));
+
         assertInvalidMessage("Expected a UTF-8 string, but got a Integer",
                 "INSERT INTO %s (k, textval) VALUES (?, fromJson(?))", 0, "123");
 
@@ -557,6 +560,12 @@ public class JsonTest extends CQLTester
 
         execute("INSERT INTO %s (k, textval) VALUES (?, ?)", 0, "abcd");
         assertRows(execute("SELECT k, toJson(textval) FROM %s WHERE k = ?", 0), row(0, "\"abcd\""));
+
+        execute("INSERT INTO %s (k, textval) VALUES (?, ?)", 0, "\u8422");
+        assertRows(execute("SELECT k, toJson(textval) FROM %s WHERE k = ?", 0), row(0, "\"\u8422\""));
+
+        execute("INSERT INTO %s (k, textval) VALUES (?, ?)", 0, "\u0000");
+        assertRows(execute("SELECT k, toJson(textval) FROM %s WHERE k = ?", 0), row(0, "\"\\u0000\""));
 
         // ================ timestamp ================
         execute("INSERT INTO %s (k, timestampval) VALUES (?, ?)", 0, new SimpleDateFormat("y-M-d").parse("2014-01-01"));
