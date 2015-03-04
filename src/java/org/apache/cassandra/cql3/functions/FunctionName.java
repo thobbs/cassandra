@@ -34,7 +34,7 @@ public final class FunctionName
     public FunctionName(String keyspace, String name)
     {
         assert name != null : "Name parameter must not be null";
-        this.keyspace = keyspace != null ? keyspace : null;
+        this.keyspace = keyspace;
         this.name = name;
     }
 
@@ -65,12 +65,13 @@ public final class FunctionName
             && Objects.equal(this.name, that.name);
     }
 
-    public final boolean equalsNativeFunction(FunctionName that)
+    public final boolean equalsNativeFunction(FunctionName nativeFunction)
     {
-        if (this.hasKeyspace())
-            return Objects.equal(this.keyspace, that.keyspace) && Objects.equal(this.name, that.name);
-        else
-            return Objects.equal(this.name, that.name);
+        assert nativeFunction.keyspace.equals(SystemKeyspace.NAME);
+        if (this.hasKeyspace() && !this.keyspace.equals(SystemKeyspace.NAME))
+            return false;
+
+        return Objects.equal(this.name, nativeFunction.name);
     }
 
     @Override
