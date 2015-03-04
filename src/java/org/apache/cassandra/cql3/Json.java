@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
+import org.codehaus.jackson.io.JsonStringEncoder;
 import org.codehaus.jackson.map.ObjectMapper;
 
 import java.io.IOException;
@@ -30,6 +31,8 @@ import java.util.*;
 public class Json
 {
     private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    public static final JsonStringEncoder JSON_STRING_ENCODER = new JsonStringEncoder();
 
     public interface Raw extends Term.Raw
     {
@@ -182,7 +185,7 @@ public class Json
         }
     }
 
-    private static void handleCaseSensitivity(Map<String, Object> valueMap)
+    public static void handleCaseSensitivity(Map<String, Object> valueMap)
     {
         for (String mapKey : new ArrayList<>(valueMap.keySet()))
         {

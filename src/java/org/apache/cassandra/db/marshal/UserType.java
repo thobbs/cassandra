@@ -20,14 +20,12 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
@@ -146,7 +144,10 @@ public class UserType extends TupleType
             throw new MarshalException(String.format(
                     "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
-        Map map = (Map) parsed;
+        Map<String, Object> map = (Map<String, Object>) parsed;
+
+        Json.handleCaseSensitivity(map);
+
         ByteBuffer[] buffers = new ByteBuffer[types.size()];
 
         Set keys = map.keySet();
@@ -199,8 +200,13 @@ public class UserType extends TupleType
             if (i > 0)
                 sb.append(", ");
 
-            sb.append(UTF8Type.instance.toJSONString(fieldName(i), protocolVersion));
-            sb.append(": ");
+            String name = stringFieldNames.get(i);
+            if (!name.equals(name.toLowerCase(Locale.US)))
+                name = "\"" + name + "\"";
+
+            sb.append('"');
+            sb.append(Json.JSON_STRING_ENCODER.quoteAsString(name));
+            sb.append("\": ");
 
             ByteBuffer valueBuffer = buffers[i];
             if (valueBuffer == null)

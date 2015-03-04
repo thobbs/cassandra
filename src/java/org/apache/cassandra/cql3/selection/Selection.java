@@ -24,6 +24,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.db.CounterCell;
@@ -37,7 +38,6 @@ import com.google.common.base.Predicate;
 import com.google.common.base.Objects;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
-import org.codehaus.jackson.io.JsonStringEncoder;
 
 public abstract class Selection
 {
@@ -51,8 +51,6 @@ public abstract class Selection
             return def.isStatic();
         }
     };
-
-    private static JsonStringEncoder jsonStringEncoder = new JsonStringEncoder();
 
     private static final ColumnIdentifier jsonId = new ColumnIdentifier("[json]", false);
 
@@ -264,7 +262,7 @@ public abstract class Selection
 
             ByteBuffer buffer = row.get(i);
             sb.append('"');
-            sb.append(jsonStringEncoder.quoteAsString(columnName));
+            sb.append(Json.JSON_STRING_ENCODER.quoteAsString(columnName));
             sb.append("\": ");
             if (buffer == null)
                 sb.append("null");

@@ -756,6 +756,16 @@ public class JsonTest extends CQLTester
 
         assertInvalid("INSERT INTO %s JSON ?", "{\"k\": 0, \"foo\": 0}");
         assertInvalid("INSERT INTO %s JSON ?", "{\"k\": 0, \"\\\"foo\\\"\": 0}");
+
+        // user-defined types also need to handle case-sensitivity
+        String typeName = createType("CREATE TYPE %s (a int, \"Foo\" int)");
+        createTable("CREATE TABLE %s (k int primary key, v frozen<" + typeName + ">)");
+
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"v\": {\"a\": 0, \"\\\"Foo\\\"\": 0}}");
+        assertRows(execute("SELECT JSON k, v FROM %s"), row("{\"k\": 0, \"v\": {\"a\": 0, \"\\\"Foo\\\"\": 0}}"));
+
+        execute("INSERT INTO %s JSON ?", "{\"k\": 0, \"v\": {\"A\": 0, \"\\\"Foo\\\"\": 0}}");
+        assertRows(execute("SELECT JSON k, v FROM %s"), row("{\"k\": 0, \"v\": {\"a\": 0, \"\\\"Foo\\\"\": 0}}"));
     }
 
     @Test
