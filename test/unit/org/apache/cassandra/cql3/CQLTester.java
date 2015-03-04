@@ -887,10 +887,11 @@ public abstract class CQLTester
         AbstractType type = typeFor(value);
         String s = type.getString(type.decompose(value));
 
-        if (type instanceof UTF8Type)
+        if (type instanceof InetAddressType || type instanceof TimestampType)
+            return String.format("'%s'", s);
+        else if (type instanceof UTF8Type)
             return String.format("'%s'", s.replaceAll("'", "''"));
-
-        if (type instanceof BytesType)
+        else if (type instanceof BytesType)
             return "0x" + s;
 
         return s;
@@ -972,12 +973,6 @@ public abstract class CQLTester
 
         if (value instanceof Double)
             return DoubleType.instance;
-
-        if (value instanceof BigInteger)
-            return IntegerType.instance;
-
-        if (value instanceof BigDecimal)
-            return DecimalType.instance;
 
         if (value instanceof BigInteger)
             return IntegerType.instance;
