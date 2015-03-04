@@ -62,13 +62,18 @@ public class Json
          * Callers should call prepare() on this once for each receiver in the INSERT statement.
          */
         @Override
-        public Value prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
+        public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
             // only create the AllValuesWrapper once and return it for all calls
             if (allJsonValues == null)
                 allJsonValues = new AllValues(text, expectedReceivers);
 
-            return new Value(allJsonValues, receiver);
+            Value terminal =  allJsonValues.createColumnTerminal(receiver);
+
+            // We got the equivalent of a null literal for this column.  Instead of returning null directly, we need
+            // to return something that bind() can be called on, so we'll use an actual null literal constant.
+            return terminal == null ? Constants.NULL_LITERAL.prepare(keyspace, receiver)
+                                    : terminal;
         }
 
         public void setExpectedReceivers(Set<? extends ColumnSpecification> expectedReceivers)

@@ -726,7 +726,9 @@ public class JsonTest extends CQLTester
                 row(0, null)
         );
 
-        assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s JSON ?", new Object[]{null});
+        if (USE_PREPARED_VALUES)
+            assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s JSON ?", new Object[]{null});
+
         assertInvalidMessage("Got null for INSERT JSON values", "INSERT INTO %s JSON ?", "null");
         assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s JSON ?", "\"notamap\"");
         assertInvalidMessage("Could not decode JSON string as a map", "INSERT INTO %s JSON ?", "12.34");
