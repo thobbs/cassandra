@@ -1477,7 +1477,7 @@ With @INSERT@ statements, the new @JSON@ keyword can be used to enable inserting
 bc(sample). 
 INSERT INTO mytable JSON '{"\"myKey\"": 0, "value": 0}'
 
-Any columns which are ommitted from the @JSON@ map will be defaulted to a @NULL@ value (which may result in a tombstone being created).
+Any columns which are ommitted from the @JSON@ map will be defaulted to a @NULL@ value (which will result in a tombstone being created).
 
 h3(#jsonEncoding). JSON Encoding of Cassandra Data Types
 
