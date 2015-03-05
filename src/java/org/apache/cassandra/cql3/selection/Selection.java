@@ -242,36 +242,10 @@ public abstract class Selection
 
     public ResultSetBuilder resultSetBuilder(long now) throws InvalidRequestException
     {
-        return new ResultSetBuilder(now);
+        return new ResultSetBuilder(now, isJson);
     }
 
     public abstract boolean isAggregate();
-
-    protected List<ByteBuffer> rowToJson(List<ByteBuffer> row, int protocolVersion)
-    {
-        StringBuilder sb = new StringBuilder("{");
-        for (int i = 0; i < metadata.names.size(); i++)
-        {
-            if (i > 0)
-                sb.append(", ");
-
-            ColumnSpecification spec = metadata.names.get(i);
-            String columnName = spec.name.toString();
-            if (!columnName.equals(columnName.toLowerCase(Locale.US)))
-                columnName = "\"" + columnName + "\"";
-
-            ByteBuffer buffer = row.get(i);
-            sb.append('"');
-            sb.append(Json.JSON_STRING_ENCODER.quoteAsString(columnName));
-            sb.append("\": ");
-            if (buffer == null)
-                sb.append("null");
-            else
-                sb.append(spec.type.toJSONString(buffer, protocolVersion));
-        }
-        sb.append("}");
-        return Collections.singletonList(UTF8Type.instance.getSerializer().serialize(sb.toString()));
-    }
 
     @Override
     public String toString()
@@ -307,14 +281,16 @@ public abstract class Selection
         final long[] timestamps;
         final int[] ttls;
         final long now;
+        final boolean isJson;
 
-        private ResultSetBuilder(long now) throws InvalidRequestException
+        private ResultSetBuilder(long now, boolean isJson) throws InvalidRequestException
         {
             this.resultSet = new ResultSet(getResultMetadata().copy(), new ArrayList<List<ByteBuffer>>());
             this.selectors = newSelectors();
             this.timestamps = collectTimestamps ? new long[columns.size()] : null;
             this.ttls = collectTTLs ? new int[columns.size()] : null;
             this.now = now;
+            this.isJson = isJson;
         }
 
         public void add(ByteBuffer v)
@@ -350,11 +326,11 @@ public abstract class Selection
                 selectors.addInputRow(protocolVersion, this);
                 if (!selectors.isAggregate())
                 {
-                    resultSet.addRow(selectors.getOutputRow(protocolVersion));
+                    resultSet.addRow(getOutputRow(protocolVersion));
                     selectors.reset();
                 }
             }
-            current = new ArrayList<ByteBuffer>(columns.size());
+            current = new ArrayList<>(columns.size());
         }
 
         public ResultSet build(int protocolVersion) throws InvalidRequestException
@@ -362,16 +338,47 @@ public abstract class Selection
             if (current != null)
             {
                 selectors.addInputRow(protocolVersion, this);
-                resultSet.addRow(selectors.getOutputRow(protocolVersion));
+                resultSet.addRow(getOutputRow(protocolVersion));
                 selectors.reset();
                 current = null;
             }
 
             if (resultSet.isEmpty() && selectors.isAggregate())
-            {
-                resultSet.addRow(selectors.getOutputRow(protocolVersion));
-            }
+                resultSet.addRow(getOutputRow(protocolVersion));
             return resultSet;
+        }
+
+        private List<ByteBuffer> getOutputRow(int protocolVersion)
+        {
+            List<ByteBuffer> outputRow = selectors.getOutputRow(protocolVersion);
+            return isJson ? rowToJson(outputRow, protocolVersion)
+                          : outputRow;
+        }
+
+        private List<ByteBuffer> rowToJson(List<ByteBuffer> row, int protocolVersion)
+        {
+            StringBuilder sb = new StringBuilder("{");
+            for (int i = 0; i < metadata.names.size(); i++)
+            {
+                if (i > 0)
+                    sb.append(", ");
+
+                ColumnSpecification spec = metadata.names.get(i);
+                String columnName = spec.name.toString();
+                if (!columnName.equals(columnName.toLowerCase(Locale.US)))
+                    columnName = "\"" + columnName + "\"";
+
+                ByteBuffer buffer = row.get(i);
+                sb.append('"');
+                sb.append(Json.JSON_STRING_ENCODER.quoteAsString(columnName));
+                sb.append("\": ");
+                if (buffer == null)
+                    sb.append("null");
+                else
+                    sb.append(spec.type.toJSONString(buffer, protocolVersion));
+            }
+            sb.append("}");
+            return Collections.singletonList(UTF8Type.instance.getSerializer().serialize(sb.toString()));
         }
 
         private ByteBuffer value(Cell c)
@@ -448,7 +455,7 @@ public abstract class Selection
 
                 public List<ByteBuffer> getOutputRow(int protocolVersion)
                 {
-                    return isJson ? rowToJson(current, protocolVersion) : current;
+                    return current;
                 }
 
                 public void addInputRow(int protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
@@ -514,10 +521,8 @@ public abstract class Selection
 
                 public void reset()
                 {
-                    for (int i = 0, m = selectors.size(); i < m; i++)
-                    {
-                        selectors.get(i).reset();
-                    }
+                    for (Selector selector : selectors)
+                        selector.reset();
                 }
 
                 public boolean isAggregate()
@@ -529,20 +534,16 @@ public abstract class Selection
                 {
                     List<ByteBuffer> outputRow = new ArrayList<>(selectors.size());
 
-                    for (int i = 0, m = selectors.size(); i < m; i++)
-                    {
-                        outputRow.add(selectors.get(i).getOutput(protocolVersion));
-                    }
+                    for (Selector selector: selectors)
+                        outputRow.add(selector.getOutput(protocolVersion));
 
-                    return isJson ? rowToJson(outputRow, protocolVersion) : outputRow;
+                    return outputRow;
                 }
 
                 public void addInputRow(int protocolVersion, ResultSetBuilder rs) throws InvalidRequestException
                 {
-                    for (int i = 0, m = selectors.size(); i < m; i++)
-                    {
-                        selectors.get(i).addInput(protocolVersion, rs);
-                    }
+                    for (Selector selector : selectors)
+                        selector.addInput(protocolVersion, rs);
                 }
             };
         }
