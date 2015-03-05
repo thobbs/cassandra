@@ -119,7 +119,6 @@ public class UpdateStatement extends ModificationStatement
     {
         private final List<ColumnIdentifier.Raw> columnNames;
         private final List<Term.Raw> columnValues;
-        private final boolean isJson;
 
         /**
          * A parsed <code>INSERT</code> statement.
@@ -129,19 +128,16 @@ public class UpdateStatement extends ModificationStatement
          * @param columnNames list of column names
          * @param columnValues list of column values (corresponds to names)
          * @param ifNotExists true if an IF NOT EXISTS condition was specified, false otherwise
-         * @param isJson true if INSERT ... JSON syntax was used, false otherwise
          */
         public ParsedInsert(CFName name,
                             Attributes.Raw attrs,
                             List<ColumnIdentifier.Raw> columnNames,
                             List<Term.Raw> columnValues,
-                            boolean ifNotExists,
-                            boolean isJson)
+                            boolean ifNotExists)
         {
             super(name, attrs, null, ifNotExists, false);
             this.columnNames = columnNames;
             this.columnValues = columnValues;
-            this.isJson = isJson;
         }
 
         protected ModificationStatement prepareInternal(CFMetaData cfm, VariableSpecifications boundNames, Attributes attrs) throws InvalidRequestException
@@ -150,73 +146,34 @@ public class UpdateStatement extends ModificationStatement
 
             // Created from an INSERT
             if (stmt.isCounter())
-                throw new InvalidRequestException("INSERT statement are not allowed on counter tables, use UPDATE instead");
+                throw new InvalidRequestException("INSERT statements are not allowed on counter tables, use UPDATE instead");
 
-            if (isJson)
-                assert columnValues.size() == 1;
-
-            ColumnDefinition[] defs;
             if (columnNames == null)
-            {
-                if (!isJson)
-                    throw new InvalidRequestException("Column names for INSERT must be provided when using VALUES");
-
-                int numColumns = cfm.allColumns().size();
-                defs = new ColumnDefinition[numColumns];
-                Iterator<ColumnDefinition> iterator = cfm.allColumnsInSelectOrder();
-                for (int i = 0; i < numColumns; i++)
-                    defs[i] = iterator.next();
-            }
-            else if (columnNames.isEmpty())
-            {
+                throw new InvalidRequestException("Column names for INSERT must be provided when using VALUES");
+            if (columnNames.isEmpty())
                 throw new InvalidRequestException("No columns provided to INSERT");
-            }
-            else if (columnNames.size() != columnValues.size())
-            {
+            if (columnNames.size() != columnValues.size())
                 throw new InvalidRequestException("Unmatched column names/values");
-            }
-            else
-            {
-                // we were provided a list of column names in the query
-                defs = new ColumnDefinition[columnNames.size()];
-                for (int i = 0; i < columnNames.size(); i++)
-                {
-                    ColumnIdentifier id = columnNames.get(i).prepare(cfm);
-                    ColumnDefinition def = cfm.getColumnDefinition(id);
-                    if (def == null)
-                        throw new InvalidRequestException(String.format("Unknown identifier %s", id));
-
-                    defs[i] = def;
-
-                    for (int j = 0; j < i; j++)
-                    {
-                        if (id.equals(defs[j].name))
-                            throw new InvalidRequestException(String.format("Multiple definitions found for column %s", id));
-                    }
-                }
-            }
 
             String ks = keyspace();
-            if (isJson)
+            for (int i = 0; i < columnNames.size(); i++)
             {
-                Json.Raw jsonValue = (Json.Raw) columnValues.get(0);
+                ColumnIdentifier id = columnNames.get(i).prepare(cfm);
+                ColumnDefinition def = cfm.getColumnDefinition(id);
+                if (def == null)
+                    throw new InvalidRequestException(String.format("Unknown identifier %s", id));
 
-                HashSet<ColumnDefinition> expectedReceivers = new HashSet<>(defs.length);
-                expectedReceivers.addAll(Arrays.asList(defs));
-                jsonValue.setExpectedReceivers(expectedReceivers);
+                for (int j = 0; j < i; j++)
+                {
+                    ColumnIdentifier otherId = columnNames.get(j).prepare(cfm);
+                    if (id.equals(otherId))
+                        throw new InvalidRequestException(String.format("Multiple definitions found for column %s", id));
+                }
 
-                for (ColumnDefinition def : defs)
-                    handleTerm(stmt, jsonValue, def, ks, boundNames);
-
-                return stmt;
+                handleTerm(stmt, columnValues.get(i), def, ks, boundNames);
             }
-            else
-            {
-                for (int i = 0; i < columnValues.size(); i++)
-                    handleTerm(stmt, columnValues.get(i), defs[i], ks, boundNames);
 
-                return stmt;
-            }
+            return stmt;
         }
     }
 
@@ -234,6 +191,36 @@ public class UpdateStatement extends ModificationStatement
                 Operation operation = new Operation.SetValue(value).prepare(keyspace, def);
                 operation.collectMarkerSpecification(boundNames);
                 stmt.addOperation(operation);
+        }
+    }
+
+    /**
+     * A parsed INSERT JSON statement.
+     */
+    public static class ParsedInsertJson extends ModificationStatement.Parsed
+    {
+        private final Json.Raw jsonValue;
+
+        public ParsedInsertJson(CFName name, Attributes.Raw attrs, Json.Raw jsonValue, boolean ifNotExists)
+        {
+            super(name, attrs, null, ifNotExists, false);
+            this.jsonValue = jsonValue;
+        }
+
+        protected ModificationStatement prepareInternal(CFMetaData cfm, VariableSpecifications boundNames, Attributes attrs) throws InvalidRequestException
+        {
+            UpdateStatement stmt = new UpdateStatement(ModificationStatement.StatementType.INSERT, boundNames.size(), cfm, attrs);
+            if (stmt.isCounter())
+                throw new InvalidRequestException("INSERT statements are not allowed on counter tables, use UPDATE instead");
+
+            Collection<ColumnDefinition> defs = cfm.allColumns();
+            jsonValue.setExpectedReceivers(new HashSet<>(defs));
+
+            String ks = keyspace();
+            for (ColumnDefinition def : defs)
+                handleTerm(stmt, jsonValue, def, ks, boundNames);
+
+            return stmt;
         }
     }
 
