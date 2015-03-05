@@ -135,7 +135,7 @@ public class SelectStatement implements CQLStatement
 
     public ResultSet.Metadata getResultMetadata()
     {
-        return selection.getResultMetadata();
+        return selection.getResultMetadata(parameters.isJson);
     }
 
     public int getBoundTerms()
@@ -231,7 +231,7 @@ public class SelectStatement implements CQLStatement
     private ResultMessage.Rows pageAggregateQuery(QueryPager pager, QueryOptions options, int pageSize, long now)
             throws RequestValidationException, RequestExecutionException
     {
-        Selection.ResultSetBuilder result = selection.resultSetBuilder(now);
+        Selection.ResultSetBuilder result = selection.resultSetBuilder(now, parameters.isJson);
         while (!pager.isExhausted())
         {
             for (org.apache.cassandra.db.Row row : pager.fetchPage(pageSize))
@@ -575,7 +575,7 @@ public class SelectStatement implements CQLStatement
 
     private ResultSet process(List<Row> rows, QueryOptions options, int limit, long now) throws InvalidRequestException
     {
-        Selection.ResultSetBuilder result = selection.resultSetBuilder(now);
+        Selection.ResultSetBuilder result = selection.resultSetBuilder(now, parameters.isJson);
         for (org.apache.cassandra.db.Row row : rows)
         {
             // Not columns match the query, skip
@@ -735,8 +735,8 @@ public class SelectStatement implements CQLStatement
             VariableSpecifications boundNames = getBoundVariables();
 
             Selection selection = selectClause.isEmpty()
-                                  ? Selection.wildcard(cfm, parameters.isJson)
-                                  : Selection.fromSelectors(cfm, selectClause, parameters.isJson);
+                                  ? Selection.wildcard(cfm)
+                                  : Selection.fromSelectors(cfm, selectClause);
 
             StatementRestrictions restrictions = prepareRestrictions(cfm, boundNames, selection);
 

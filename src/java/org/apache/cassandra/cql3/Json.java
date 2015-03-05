@@ -34,6 +34,8 @@ public class Json
 
     public static final JsonStringEncoder JSON_STRING_ENCODER = new JsonStringEncoder();
 
+    public static final ColumnIdentifier JSON_COLUMN_ID = new ColumnIdentifier("[json]", true);
+
     public interface Raw extends Term.Raw
     {
         public void setExpectedReceivers(Set<? extends ColumnSpecification> receivers);
@@ -94,8 +96,6 @@ public class Json
         private DelayedAllValues allJsonValues;
         private Set<? extends ColumnSpecification> expectedReceivers;
 
-        private static final ColumnIdentifier JSON_IDENTIFIER = new ColumnIdentifier("[json]", true);
-
         public Marker(int bindIndex)
         {
             super(bindIndex);
@@ -103,7 +103,7 @@ public class Json
 
         private static ColumnSpecification makeReceiver(ColumnSpecification receiver) throws InvalidRequestException
         {
-            return new ColumnSpecification(receiver.ksName, receiver.cfName, JSON_IDENTIFIER, UTF8Type.instance);
+            return new ColumnSpecification(receiver.ksName, receiver.cfName, JSON_COLUMN_ID, UTF8Type.instance);
         }
 
         /**
