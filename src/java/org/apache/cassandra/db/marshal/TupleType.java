@@ -254,7 +254,7 @@ public class TupleType extends AbstractType<ByteBuffer>
             }
             else
             {
-                buffers.add(typeIterator.next().fromJSONObject(element, protocolVersion));
+                buffers.add(typeIterator.next().fromJSONObject(element, Server.VERSION_3));
             }
         }
 

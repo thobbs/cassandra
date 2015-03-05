@@ -29,6 +29,7 @@ import org.apache.cassandra.cql3.Json;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
 
@@ -181,11 +182,11 @@ public class UserType extends TupleType
 
         int size = 0;
         for (ByteBuffer bb : buffers)
-            size += CollectionSerializer.sizeOfValue(bb, protocolVersion);
+            size += CollectionSerializer.sizeOfValue(bb, Server.VERSION_3);
 
         ByteBuffer result = ByteBuffer.allocate(size);
         for (ByteBuffer bb : buffers)
-            CollectionSerializer.writeValue(result, bb, protocolVersion);
+            CollectionSerializer.writeValue(result, bb, Server.VERSION_3);
         return (ByteBuffer)result.flip();
     }
 
