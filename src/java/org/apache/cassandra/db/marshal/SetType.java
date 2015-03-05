@@ -166,7 +166,7 @@ public class SetType<T> extends CollectionType<Set<T>>
                 throw new MarshalException(String.format("List representation of set contained duplicate elements: %s", element));
         }
 
-        return CollectionSerializer.pack(buffers, buffers.size(), CollectionSerializer.Format.forProtocolVersion(protocolVersion));
+        return CollectionSerializer.pack(buffers, buffers.size(), protocolVersion);
     }
 
     @Override

@@ -135,14 +135,13 @@ public class ListType<T> extends CollectionType<List<T>>
         ByteBuffer bb1 = o1.duplicate();
         ByteBuffer bb2 = o2.duplicate();
 
-        CollectionSerializer.Format format = CollectionSerializer.Format.V3;
-        int size1 = CollectionSerializer.readCollectionSize(bb1, format);
-        int size2 = CollectionSerializer.readCollectionSize(bb2, format);
+        int size1 = CollectionSerializer.readCollectionSize(bb1, 3);
+        int size2 = CollectionSerializer.readCollectionSize(bb2, 3);
 
         for (int i = 0; i < Math.min(size1, size2); i++)
         {
-            ByteBuffer v1 = CollectionSerializer.readValue(bb1, format);
-            ByteBuffer v2 = CollectionSerializer.readValue(bb2, format);
+            ByteBuffer v1 = CollectionSerializer.readValue(bb1, 3);
+            ByteBuffer v2 = CollectionSerializer.readValue(bb2, 3);
             int cmp = elementsComparator.compare(v1, v2);
             if (cmp != 0)
                 return cmp;
@@ -190,19 +189,18 @@ public class ListType<T> extends CollectionType<List<T>>
                 throw new MarshalException("Invalid null element in list");
             buffers.add(elements.fromJSONObject(element, protocolVersion));
         }
-        return CollectionSerializer.pack(buffers, list.size(), CollectionSerializer.Format.forProtocolVersion(protocolVersion));
+        return CollectionSerializer.pack(buffers, list.size(), protocolVersion);
     }
 
     public static String setOrListToJsonString(ByteBuffer buffer, AbstractType elementsType, int protocolVersion)
     {
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
         StringBuilder sb = new StringBuilder("[");
-        int size = CollectionSerializer.readCollectionSize(buffer, format);
+        int size = CollectionSerializer.readCollectionSize(buffer, protocolVersion);
         for (int i = 0; i < size; i++)
         {
             if (i > 0)
                 sb.append(", ");
-            sb.append(elementsType.toJSONString(CollectionSerializer.readValue(buffer, format), protocolVersion));
+            sb.append(elementsType.toJSONString(CollectionSerializer.readValue(buffer, protocolVersion), protocolVersion));
         }
         return sb.append("]").toString();
     }

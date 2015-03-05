@@ -258,28 +258,26 @@ public class TupleType extends AbstractType<ByteBuffer>
             }
         }
 
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
         int size = 0;
         for (ByteBuffer bb : buffers)
-            size += CollectionSerializer.sizeOfValue(bb, format);
+            size += CollectionSerializer.sizeOfValue(bb, protocolVersion);
 
         ByteBuffer result = ByteBuffer.allocate(size);
         for (ByteBuffer bb : buffers)
-            CollectionSerializer.writeValue(result, bb, format);
+            CollectionSerializer.writeValue(result, bb, protocolVersion);
         return (ByteBuffer)result.flip();
     }
 
     @Override
     public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < types.size(); i++)
         {
             if (i > 0)
                 sb.append(", ");
 
-            ByteBuffer value = CollectionSerializer.readValue(buffer, format);
+            ByteBuffer value = CollectionSerializer.readValue(buffer, protocolVersion);
             if (value == null)
                 sb.append("null");
             else

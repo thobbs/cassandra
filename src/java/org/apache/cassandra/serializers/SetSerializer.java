@@ -58,14 +58,14 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
         return value.size();
     }
 
-    public void validate(ByteBuffer bytes, Format format)
+    public void validateForNativeProtocol(ByteBuffer bytes, int version)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, format);
+            int n = readCollectionSize(input, version);
             for (int i = 0; i < n; i++)
-                elements.validate(readValue(input, format));
+                elements.validate(readValue(input, version));
             if (input.hasRemaining())
                 throw new MarshalException("Unexpected extraneous bytes after set value");
         }
@@ -75,16 +75,16 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
         }
     }
 
-    public Set<T> deserialize(ByteBuffer bytes, Format format)
+    public Set<T> deserializeForNativeProtocol(ByteBuffer bytes, int version)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, format);
+            int n = readCollectionSize(input, version);
             Set<T> l = new LinkedHashSet<T>(n);
             for (int i = 0; i < n; i++)
             {
-                ByteBuffer databb = readValue(input, format);
+                ByteBuffer databb = readValue(input, version);
                 elements.validate(databb);
                 l.add(elements.deserialize(databb));
             }
@@ -101,13 +101,13 @@ public class SetSerializer<T> extends CollectionSerializer<Set<T>>
     /**
      * Deserializes a serialized set and returns a set of unserialized (ByteBuffer) elements.
      */
-    public Set<ByteBuffer> deserializeToByteBufferCollection(ByteBuffer bytes, Format format)
+    public Set<ByteBuffer> deserializeToByteBufferCollection(ByteBuffer bytes, int version)
     {
         ByteBuffer input = bytes.duplicate();
-        int n = readCollectionSize(input, format);
+        int n = readCollectionSize(input, version);
         Set<ByteBuffer> s = new LinkedHashSet<>(n);
         for (int i = 0; i < n; i++)
-            s.add(readValue(input, format));
+            s.add(readValue(input, version));
         return s;
     }
 

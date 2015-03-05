@@ -26,6 +26,7 @@ import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.MapSerializer;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
 import org.jdom.output.Format;
 
@@ -136,20 +137,20 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
         ByteBuffer bb1 = o1.duplicate();
         ByteBuffer bb2 = o2.duplicate();
 
-        CollectionSerializer.Format format = CollectionSerializer.Format.V3;
-        int size1 = CollectionSerializer.readCollectionSize(bb1, format);
-        int size2 = CollectionSerializer.readCollectionSize(bb2, format);
+        int protocolVersion = Server.VERSION_3;
+        int size1 = CollectionSerializer.readCollectionSize(bb1, protocolVersion);
+        int size2 = CollectionSerializer.readCollectionSize(bb2, protocolVersion);
 
         for (int i = 0; i < Math.min(size1, size2); i++)
         {
-            ByteBuffer k1 = CollectionSerializer.readValue(bb1, format);
-            ByteBuffer k2 = CollectionSerializer.readValue(bb2, format);
+            ByteBuffer k1 = CollectionSerializer.readValue(bb1, protocolVersion);
+            ByteBuffer k2 = CollectionSerializer.readValue(bb2, protocolVersion);
             int cmp = keysComparator.compare(k1, k2);
             if (cmp != 0)
                 return cmp;
 
-            ByteBuffer v1 = CollectionSerializer.readValue(bb1, format);
-            ByteBuffer v2 = CollectionSerializer.readValue(bb2, format);
+            ByteBuffer v1 = CollectionSerializer.readValue(bb1, protocolVersion);
+            ByteBuffer v2 = CollectionSerializer.readValue(bb2, protocolVersion);
             cmp = valuesComparator.compare(v1, v2);
             if (cmp != 0)
                 return cmp;
@@ -240,23 +241,22 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             }
         }
 
-        return CollectionSerializer.pack(buffers, map.size(), CollectionSerializer.Format.forProtocolVersion(protocolVersion));
+        return CollectionSerializer.pack(buffers, map.size(), protocolVersion);
     }
 
     @Override
     public String toJSONString(ByteBuffer buffer, int protocolVersion)
     {
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
         StringBuilder sb = new StringBuilder("{");
-        int size = CollectionSerializer.readCollectionSize(buffer, format);
+        int size = CollectionSerializer.readCollectionSize(buffer, protocolVersion);
         for (int i = 0; i < size; i++)
         {
             if (i > 0)
                 sb.append(", ");
 
-            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, format), protocolVersion));
+            sb.append(keys.toJSONString(CollectionSerializer.readValue(buffer, protocolVersion), protocolVersion));
             sb.append(": ");
-            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, format), protocolVersion));
+            sb.append(values.toJSONString(CollectionSerializer.readValue(buffer, protocolVersion), protocolVersion));
         }
         return sb.append("}").toString();
     }

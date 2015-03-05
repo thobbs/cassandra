@@ -141,7 +141,7 @@ public abstract class Maps
         }
     }
 
-    public static class Value extends Term.Terminal implements Term.CollectionTerminal
+    public static class Value extends Term.Terminal
     {
         public final Map<ByteBuffer, ByteBuffer> map;
 
@@ -170,18 +170,13 @@ public abstract class Maps
 
         public ByteBuffer get(int protocolVersion)
         {
-            return getWithSerializationFormat(CollectionSerializer.Format.forProtocolVersion(protocolVersion));
-        }
-
-        public ByteBuffer getWithSerializationFormat(CollectionSerializer.Format format)
-        {
             List<ByteBuffer> buffers = new ArrayList<>(2 * map.size());
             for (Map.Entry<ByteBuffer, ByteBuffer> entry : map.entrySet())
             {
                 buffers.add(entry.getKey());
                 buffers.add(entry.getValue());
             }
-            return CollectionSerializer.pack(buffers, map.size(), format);
+            return CollectionSerializer.pack(buffers, map.size(), protocolVersion);
         }
 
         public boolean equals(MapType mt, Value v)
@@ -276,8 +271,7 @@ public abstract class Maps
 
         ByteBuffer serializedMap = value.get(options.getProtocolVersion());
         MapSerializer<?, ?> mapSerializer = (MapSerializer<?, ?>) columnType.getSerializer();
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
-        return mapSerializer.deserializeToByteBufferCollection(serializedMap, format);
+        return mapSerializer.deserializeToByteBufferCollection(serializedMap, options.getProtocolVersion());
     }
 
     public static class Setter extends Operation

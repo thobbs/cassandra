@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.serializers;
 
+import org.apache.cassandra.transport.Server;
+
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -58,14 +60,14 @@ public class ListSerializer<T> extends CollectionSerializer<List<T>>
         return value.size();
     }
 
-    public void validate(ByteBuffer bytes, Format format)
+    public void validateForNativeProtocol(ByteBuffer bytes, int version)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, format);
+            int n = readCollectionSize(input, version);
             for (int i = 0; i < n; i++)
-                elements.validate(readValue(input, format));
+                elements.validate(readValue(input, version));
 
             if (input.hasRemaining())
                 throw new MarshalException("Unexpected extraneous bytes after list value");
@@ -76,17 +78,17 @@ public class ListSerializer<T> extends CollectionSerializer<List<T>>
         }
     }
 
-    public List<T> deserialize(ByteBuffer bytes, Format format)
+    public List<T> deserializeForNativeProtocol(ByteBuffer bytes, int version)
     {
         try
         {
             ByteBuffer input = bytes.duplicate();
-            int n = readCollectionSize(input, format);
+            int n = readCollectionSize(input, version);
             List<T> l = new ArrayList<T>(n);
             for (int i = 0; i < n; i++)
             {
                 // We can have nulls in lists that are used for IN values
-                ByteBuffer databb = readValue(input, format);
+                ByteBuffer databb = readValue(input, version);
                 if (databb != null)
                 {
                     elements.validate(databb);
@@ -112,13 +114,13 @@ public class ListSerializer<T> extends CollectionSerializer<List<T>>
     /**
      * Deserializes a serialized list and returns a list of unserialized (ByteBuffer) elements.
      */
-    public List<ByteBuffer> deserializeToByteBufferCollection(ByteBuffer bytes, Format format)
+    public List<ByteBuffer> deserializeToByteBufferCollection(ByteBuffer bytes, int version)
     {
         ByteBuffer input = bytes.duplicate();
-        int n = readCollectionSize(input, format);
+        int n = readCollectionSize(input, version);
         List<ByteBuffer> l = new ArrayList<>(n);
         for (int i = 0; i < n; i++)
-            l.add(readValue(input, format));
+            l.add(readValue(input, version));
 
         return l;
     }
@@ -134,7 +136,7 @@ public class ListSerializer<T> extends CollectionSerializer<List<T>>
         try
         {
             ByteBuffer input = serializedList.duplicate();
-            int n = readCollectionSize(input, Format.V3);
+            int n = readCollectionSize(input, Server.VERSION_3);
             if (n <= index)
                 return null;
 
@@ -143,7 +145,7 @@ public class ListSerializer<T> extends CollectionSerializer<List<T>>
                 int length = input.getInt();
                 input.position(input.position() + length);
             }
-            return readValue(input, Format.V3);
+            return readValue(input, Server.VERSION_3);
         }
         catch (BufferUnderflowException e)
         {

@@ -510,11 +510,11 @@ public class ColumnCondition
             // make sure we use v3 serialization format for comparison
             ByteBuffer conditionValue;
             if (type.kind == CollectionType.Kind.LIST)
-                conditionValue = ((Lists.Value) value).getWithSerializationFormat(CollectionSerializer.Format.V3);
+                conditionValue = ((Lists.Value) value).get(Server.VERSION_3);
             else if (type.kind == CollectionType.Kind.SET)
-                conditionValue = ((Sets.Value) value).getWithSerializationFormat(CollectionSerializer.Format.V3);
+                conditionValue = ((Sets.Value) value).get(Server.VERSION_3);
             else
-                conditionValue = ((Maps.Value) value).getWithSerializationFormat(CollectionSerializer.Format.V3);
+                conditionValue = ((Maps.Value) value).get(Server.VERSION_3);
 
             return compareWithOperator(operator, type, conditionValue, cell.value());
         }
@@ -524,7 +524,6 @@ public class ColumnCondition
             if (value == null)
                 return !iter.hasNext();
 
-            CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
             switch (type.kind)
             {
                 case LIST:
@@ -707,7 +706,7 @@ public class ColumnCondition
                         if (cell == null || !cell.isLive(now))
                             return true;
                     }
-                    else if (type.compare(((Term.CollectionTerminal)value).getWithSerializationFormat(CollectionSerializer.Format.V3), cell.value()) == 0)
+                    else if (type.compare(value.get(Server.VERSION_3), cell.value()) == 0)
                     {
                         return true;
                     }

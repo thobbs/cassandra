@@ -132,7 +132,7 @@ public abstract class Sets
         }
     }
 
-    public static class Value extends Term.Terminal implements Term.CollectionTerminal
+    public static class Value extends Term.Terminal
     {
         public final SortedSet<ByteBuffer> elements;
 
@@ -161,12 +161,7 @@ public abstract class Sets
 
         public ByteBuffer get(int protocolVersion)
         {
-            return getWithSerializationFormat(CollectionSerializer.Format.forProtocolVersion(protocolVersion));
-        }
-
-        public ByteBuffer getWithSerializationFormat(CollectionSerializer.Format format)
-        {
-            return CollectionSerializer.pack(elements, elements.size(), format);
+            return CollectionSerializer.pack(elements, elements.size(), protocolVersion);
         }
 
         public boolean equals(SetType st, Value v)
@@ -250,9 +245,8 @@ public abstract class Sets
             return ((Value) value).elements;
 
         ByteBuffer serializedList = value.get(options.getProtocolVersion());
-        SetSerializer<?> listSerializer = (SetSerializer<?>) columnType.getSerializer();
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
-        return listSerializer.deserializeToByteBufferCollection(serializedList, format);
+        SetSerializer<?> setSerializer = (SetSerializer<?>) columnType.getSerializer();
+        return setSerializer.deserializeToByteBufferCollection(serializedList, options.getProtocolVersion());
     }
 
     public static class Setter extends Operation

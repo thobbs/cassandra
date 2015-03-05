@@ -179,14 +179,13 @@ public class UserType extends TupleType
             }
         }
 
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(protocolVersion);
         int size = 0;
         for (ByteBuffer bb : buffers)
-            size += CollectionSerializer.sizeOfValue(bb, format);
+            size += CollectionSerializer.sizeOfValue(bb, protocolVersion);
 
         ByteBuffer result = ByteBuffer.allocate(size);
         for (ByteBuffer bb : buffers)
-            CollectionSerializer.writeValue(result, bb, format);
+            CollectionSerializer.writeValue(result, bb, protocolVersion);
         return (ByteBuffer)result.flip();
     }
 

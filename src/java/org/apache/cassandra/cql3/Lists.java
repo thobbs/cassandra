@@ -125,7 +125,7 @@ public abstract class Lists
         }
     }
 
-    public static class Value extends Term.MultiItemTerminal implements Term.CollectionTerminal
+    public static class Value extends Term.MultiItemTerminal
     {
         public final List<ByteBuffer> elements;
 
@@ -155,12 +155,7 @@ public abstract class Lists
 
         public ByteBuffer get(int protocolVersion)
         {
-            return getWithSerializationFormat(CollectionSerializer.Format.forProtocolVersion(protocolVersion));
-        }
-
-        public ByteBuffer getWithSerializationFormat(CollectionSerializer.Format format)
-        {
-            return CollectionSerializer.pack(elements, elements.size(), format);
+            return CollectionSerializer.pack(elements, elements.size(), protocolVersion);
         }
 
         public boolean equals(ListType lt, Value v)
@@ -256,8 +251,7 @@ public abstract class Lists
 
         ByteBuffer serializedList = value.get(options.getProtocolVersion());
         ListSerializer<?> listSerializer = (ListSerializer<?>) columnType.getSerializer();
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(options.getProtocolVersion());
-        return listSerializer.deserializeToByteBufferCollection(serializedList, format);
+        return listSerializer.deserializeToByteBufferCollection(serializedList, options.getProtocolVersion());
     }
 
     /*

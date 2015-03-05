@@ -51,8 +51,6 @@ public class SerDeserTest
 
     public void collectionSerDeserTest(int version) throws Exception
     {
-        CollectionSerializer.Format format = CollectionSerializer.Format.forProtocolVersion(version);
-
         // Lists
         ListType<?> lt = ListType.getInstance(Int32Type.instance, true);
         List<Integer> l = Arrays.asList(2, 6, 1, 9);
@@ -61,7 +59,7 @@ public class SerDeserTest
         for (Integer i : l)
             lb.add(Int32Type.instance.decompose(i));
 
-        assertEquals(l, lt.getSerializer().deserialize(CollectionSerializer.pack(lb, lb.size(), format), format));
+        assertEquals(l, lt.getSerializer().deserializeForNativeProtocol(CollectionSerializer.pack(lb, lb.size(), version), version));
 
         // Sets
         SetType<?> st = SetType.getInstance(UTF8Type.instance, true);
@@ -72,7 +70,7 @@ public class SerDeserTest
         for (String t : s)
             sb.add(UTF8Type.instance.decompose(t));
 
-        assertEquals(s, st.getSerializer().deserialize(CollectionSerializer.pack(sb, sb.size(), format), format));
+        assertEquals(s, st.getSerializer().deserializeForNativeProtocol(CollectionSerializer.pack(sb, sb.size(), version), version));
 
         // Maps
         MapType<?, ?> mt = MapType.getInstance(UTF8Type.instance, LongType.instance, true);
@@ -88,7 +86,7 @@ public class SerDeserTest
             mb.add(LongType.instance.decompose(entry.getValue()));
         }
 
-        assertEquals(m, mt.getSerializer().deserialize(CollectionSerializer.pack(mb, m.size(), format), format));
+        assertEquals(m, mt.getSerializer().deserializeForNativeProtocol(CollectionSerializer.pack(mb, m.size(), version), version));
     }
 
     @Test
@@ -218,15 +216,15 @@ public class SerDeserTest
         // a UDT should alway be serialized with version 3 of the protocol. Which is why we don't use 'version'
         // on purpose below.
 
-        assertEquals(Arrays.asList(3, 1), lt.getSerializer().deserialize(fields[1], CollectionSerializer.Format.V3));
+        assertEquals(Arrays.asList(3, 1), lt.getSerializer().deserializeForNativeProtocol(fields[1], 3));
 
         LinkedHashSet<String> s = new LinkedHashSet<>();
         s.addAll(Arrays.asList("bar", "foo"));
-        assertEquals(s, st.getSerializer().deserialize(fields[2], CollectionSerializer.Format.V3));
+        assertEquals(s, st.getSerializer().deserializeForNativeProtocol(fields[2], 3));
 
         LinkedHashMap<String, Long> m = new LinkedHashMap<>();
         m.put("bar", 12L);
         m.put("foo", 24L);
-        assertEquals(m, mt.getSerializer().deserialize(fields[3], CollectionSerializer.Format.V3));
+        assertEquals(m, mt.getSerializer().deserializeForNativeProtocol(fields[3], 3));
     }
 }
