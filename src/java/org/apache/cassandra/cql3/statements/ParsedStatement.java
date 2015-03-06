@@ -53,11 +53,6 @@ public abstract class ParsedStatement
             this.partitionKeyBindIndexes = partitionKeyBindIndexes;
         }
 
-        public Prepared(CQLStatement statement, VariableSpecifications names)
-        {
-            this(statement, names.getSpecifications(), null);
-        }
-
         public Prepared(CQLStatement statement, VariableSpecifications names, Short[] partitionKeyBindIndexes)
         {
             this(statement, names.getSpecifications(), partitionKeyBindIndexes);
