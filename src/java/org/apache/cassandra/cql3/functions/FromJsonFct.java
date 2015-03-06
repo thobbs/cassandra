@@ -22,7 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.codehaus.jackson.map.ObjectMapper;
+import org.apache.cassandra.cql3.Json;
 
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -33,8 +33,6 @@ public class FromJsonFct extends NativeScalarFunction
     public static final FunctionName NAME = FunctionName.nativeFunction("fromjson");
 
     private static final Map<AbstractType<?>, FromJsonFct> instances = new ConcurrentHashMap<>();
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     public static FromJsonFct getInstance(AbstractType<?> returnType)
     {
@@ -62,7 +60,7 @@ public class FromJsonFct extends NativeScalarFunction
         String jsonArg = UTF8Type.instance.getSerializer().deserialize(argument);
         try
         {
-            Object object = objectMapper.readValue(jsonArg, Object.class);
+            Object object = Json.JSON_OBJECT_MAPPER.readValue(jsonArg, Object.class);
             if (object == null)
                 return null;
             return returnType.fromJSONObject(object, protocolVersion);

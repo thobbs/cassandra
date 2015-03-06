@@ -32,7 +32,7 @@ import java.util.*;
 /** Term-related classes for INSERT JSON support. */
 public class Json
 {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    public static final ObjectMapper JSON_OBJECT_MAPPER = new ObjectMapper();
 
     public static final JsonStringEncoder JSON_STRING_ENCODER = new JsonStringEncoder();
 
@@ -278,7 +278,7 @@ public class Json
     {
         try
         {
-            Map<String, Object> valueMap = objectMapper.readValue(jsonString, Map.class);
+            Map<String, Object> valueMap = JSON_OBJECT_MAPPER.readValue(jsonString, Map.class);
 
             if (valueMap == null)
                 throw new InvalidRequestException("Got null for INSERT JSON values");
