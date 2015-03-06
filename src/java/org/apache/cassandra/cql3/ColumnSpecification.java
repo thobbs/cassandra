@@ -74,4 +74,17 @@ public class ColumnSpecification
         }
         return true;
     }
+
+    @Override
+    public boolean equals(Object other)
+    {
+        if (!(other instanceof ColumnSpecification))
+            return false;
+
+        ColumnSpecification that = (ColumnSpecification) other;
+        return this.ksName.equals(that.ksName) &&
+               this.cfName.equals(that.cfName) &&
+               this.name.equals(that.name) &&
+               this.type.equals(that.type);
+    }
 }
