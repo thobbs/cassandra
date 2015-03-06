@@ -26,7 +26,6 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.composites.Composite;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
-import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -170,27 +169,22 @@ public class UpdateStatement extends ModificationStatement
                         throw new InvalidRequestException(String.format("Multiple definitions found for column %s", id));
                 }
 
-                handleTerm(stmt, columnValues.get(i), def, ks, boundNames);
+                Term.Raw value = columnValues.get(i);
+                if (def.isPrimaryKeyColumn())
+                {
+                    Term t = value.prepare(ks, def);
+                    t.collectMarkerSpecification(boundNames);
+                    stmt.addKeyValue(def, t);
+                }
+                else
+                {
+                    Operation operation = new Operation.SetValue(value).prepare(ks, def);
+                    operation.collectMarkerSpecification(boundNames);
+                    stmt.addOperation(operation);
+                }
             }
 
             return stmt;
-        }
-    }
-
-    private static void handleTerm(UpdateStatement stmt, Term.Raw value, ColumnDefinition def, String keyspace, VariableSpecifications boundNames)
-    {
-        switch (def.kind)
-        {
-            case PARTITION_KEY:
-            case CLUSTERING_COLUMN:
-                Term t = value.prepare(keyspace, def);
-                t.collectMarkerSpecification(boundNames);
-                stmt.addKeyValue(def, t);
-                break;
-            default:
-                Operation operation = new Operation.SetValue(value).prepare(keyspace, def);
-                operation.collectMarkerSpecification(boundNames);
-                stmt.addOperation(operation);
         }
     }
 
@@ -214,11 +208,15 @@ public class UpdateStatement extends ModificationStatement
                 throw new InvalidRequestException("INSERT statements are not allowed on counter tables, use UPDATE instead");
 
             Collection<ColumnDefinition> defs = cfm.allColumns();
-            jsonValue.setExpectedReceivers(new HashSet<>(defs));
+            Json.Prepared prepared = jsonValue.prepareAndCollectMarkers(cfm, defs, boundNames);
 
-            String ks = keyspace();
             for (ColumnDefinition def : defs)
-                handleTerm(stmt, jsonValue, def, ks, boundNames);
+            {
+                if (def.isPrimaryKeyColumn())
+                    stmt.addKeyValue(def, prepared.getPrimaryKeyValueForColumn(def));
+                else
+                    stmt.addOperation(prepared.getSetOperationForColumn(def));
+            }
 
             return stmt;
         }
