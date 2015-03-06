@@ -59,8 +59,9 @@ public class VariableSpecifications
     /**
      * Returns an array with the same length as the number of partition key columns for the table corresponding
      * to cfm.  Each short in the array represents the bind index of the marker that holds the value for that
-     * partition key column.  If there are no bind markers for any of the partition key columns, or if there are
-     * bind markers for partition keys in multiple tables, null is returned.
+     * partition key column.  If there are no bind markers for any of the partition key columns, null is returned.
+     *
+     * Callers of this method should ensure that all statements operate on the same table.
      */
     public Short[] getPartitionKeyBindIndexes(CFMetaData cfm)
     {
@@ -70,10 +71,7 @@ public class VariableSpecifications
             ColumnDefinition targetColumn = targetColumns[i];
             if (targetColumn != null && targetColumn.isPartitionKey())
             {
-                // if this statement is for a different table, give up
-                if (!targetColumn.ksName.equals(cfm.ksName) || !targetColumn.cfName.equals(cfm.cfName))
-                    return null;
-
+                assert targetColumn.ksName.equals(cfm.ksName) && targetColumn.cfName.equals(cfm.cfName);
                 partitionKeyPositions[targetColumn.position()] = (short) i;
             }
         }
@@ -83,6 +81,7 @@ public class VariableSpecifications
             if (bindIndex == null)
                 return null;
         }
+
         return partitionKeyPositions;
     }
 

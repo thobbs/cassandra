@@ -403,9 +403,25 @@ public class BatchStatement implements CQLStatement
         {
             VariableSpecifications boundNames = getBoundVariables();
 
+            String firstKS = null;
+            String firstCF = null;
+            boolean haveMultipleCFs = false;
+
             List<ModificationStatement> statements = new ArrayList<>(parsedStatements.size());
             for (ModificationStatement.Parsed parsed : parsedStatements)
+            {
+                if (firstKS == null)
+                {
+                    firstKS = parsed.keyspace();
+                    firstCF = parsed.columnFamily();
+                }
+                else if (!haveMultipleCFs)
+                {
+                    haveMultipleCFs = !firstKS.equals(parsed.keyspace()) || !firstCF.equals(parsed.columnFamily());
+                }
+
                 statements.add(parsed.prepare(boundNames));
+            }
 
             Attributes prepAttrs = attrs.prepare("[batch]", "[batch]");
             prepAttrs.collectMarkerSpecification(boundNames);
@@ -415,9 +431,10 @@ public class BatchStatement implements CQLStatement
 
             // Use the CFMetadata of the first statement for partition key bind indexes.  If the statements affect
             // multiple tables, we won't send partition key bind indexes.
-            ModificationStatement firstStatement = batchStatement.statements.get(0);
+            Short[] partitionKeyBindIndexes = haveMultipleCFs ? null
+                                                              : boundNames.getPartitionKeyBindIndexes(batchStatement.statements.get(0).cfm);
 
-            return new ParsedStatement.Prepared(batchStatement, boundNames, boundNames.getPartitionKeyBindIndexes(firstStatement.cfm));
+            return new ParsedStatement.Prepared(batchStatement, boundNames, partitionKeyBindIndexes);
         }
     }
 }
