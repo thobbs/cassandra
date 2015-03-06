@@ -518,10 +518,10 @@ public class JsonTest extends CQLTester
 
         // ================ decimal ================
         execute("INSERT INTO %s (k, decimalval) VALUES (?, ?)", 0, new BigDecimal("123123.123123"));
-        assertRows(execute("SELECT k, toJson(decimalval) FROM %s WHERE k = ?", 0), row(0, "\"123123.123123\""));
+        assertRows(execute("SELECT k, toJson(decimalval) FROM %s WHERE k = ?", 0), row(0, "123123.123123"));
 
         execute("INSERT INTO %s (k, decimalval) VALUES (?, ?)", 0, new BigDecimal("-1.23E-12"));
-        assertRows(execute("SELECT k, toJson(decimalval) FROM %s WHERE k = ?", 0), row(0, "\"-1.23E-12\""));
+        assertRows(execute("SELECT k, toJson(decimalval) FROM %s WHERE k = ?", 0), row(0, "-1.23E-12"));
 
         // ================ double ================
         execute("INSERT INTO %s (k, doubleval) VALUES (?, ?)", 0, 123123.123123d);
@@ -581,7 +581,7 @@ public class JsonTest extends CQLTester
 
         // ================ varint ================
         execute("INSERT INTO %s (k, varintval) VALUES (?, ?)", 0, new BigInteger("123123123123123123123"));
-        assertRows(execute("SELECT k, toJson(varintval) FROM %s WHERE k = ?", 0), row(0, "\"123123123123123123123\""));
+        assertRows(execute("SELECT k, toJson(varintval) FROM %s WHERE k = ?", 0), row(0, "123123123123123123123"));
 
         // ================ lists ================
         execute("INSERT INTO %s (k, listval) VALUES (?, ?)", 0, list(1, 2, 3));

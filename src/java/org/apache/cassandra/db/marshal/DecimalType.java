@@ -72,6 +72,12 @@ public class DecimalType extends AbstractType<BigDecimal>
         }
     }
 
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        return getSerializer().deserialize(buffer).toString();
+    }
+
     public CQL3Type asCQL3Type()
     {
         return CQL3Type.Native.DECIMAL;
