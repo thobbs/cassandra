@@ -71,7 +71,7 @@ public class VariableSpecifications
             if (targetColumn != null && targetColumn.isPartitionKey())
             {
                 // if this statement is for a different table, give up
-                if (!targetColumn.ksName.equals(cfm.cfName) || !targetColumn.cfName.equals(cfm.ksName))
+                if (!targetColumn.ksName.equals(cfm.ksName) || !targetColumn.cfName.equals(cfm.cfName))
                     return null;
 
                 partitionKeyPositions[targetColumn.position()] = (short) i;
