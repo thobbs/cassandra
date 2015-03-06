@@ -238,7 +238,7 @@ public class ResultSet
         public ResultMetadata(List<ColumnSpecification> names)
         {
             this(EnumSet.noneOf(Flag.class), names, names.size(), null);
-            if (!names.isEmpty() && allInSameCF(names))
+            if (!names.isEmpty() && ColumnSpecification.allInSameTable(names))
                 flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 
@@ -266,24 +266,6 @@ public class ResultSet
             // See comment above. Because columnCount doesn't account the newly added name, it
             // won't be serialized.
             names.add(name);
-        }
-
-        static boolean allInSameCF(List<ColumnSpecification> names)
-        {
-            if (names == null)
-                return false;
-
-            assert !names.isEmpty();
-
-            Iterator<ColumnSpecification> iter = names.iterator();
-            ColumnSpecification first = iter.next();
-            while (iter.hasNext())
-            {
-                ColumnSpecification name = iter.next();
-                if (!name.ksName.equals(first.ksName) || !name.cfName.equals(first.cfName))
-                    return false;
-            }
-            return true;
         }
 
         public void setHasMorePages(PagingState pagingState)
@@ -448,7 +430,7 @@ public class ResultSet
         public PreparedMetadata(List<ColumnSpecification> names, Short[] partitionKeyBindIndexes)
         {
             this(EnumSet.noneOf(Flag.class), names, partitionKeyBindIndexes);
-            if (!names.isEmpty() && ResultMetadata.allInSameCF(names))
+            if (!names.isEmpty() && ColumnSpecification.allInSameTable(names))
                 flags.add(Flag.GLOBAL_TABLES_SPEC);
         }
 

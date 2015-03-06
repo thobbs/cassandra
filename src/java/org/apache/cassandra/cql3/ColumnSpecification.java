@@ -20,6 +20,9 @@ package org.apache.cassandra.cql3;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ReversedType;
 
+import java.util.Collection;
+import java.util.Iterator;
+
 public class ColumnSpecification
 {
     public final String ksName;
@@ -49,5 +52,26 @@ public class ColumnSpecification
     public boolean isReversedType()
     {
         return type instanceof ReversedType;
+    }
+
+    /**
+     * Returns true if all ColumnSpecifications are in the same table, false otherwise.
+     */
+    public static boolean allInSameTable(Collection<ColumnSpecification> names)
+    {
+        if (names == null)
+            return false;
+
+        assert !names.isEmpty();
+
+        Iterator<ColumnSpecification> iter = names.iterator();
+        ColumnSpecification first = iter.next();
+        while (iter.hasNext())
+        {
+            ColumnSpecification name = iter.next();
+            if (!name.ksName.equals(first.ksName) || !name.cfName.equals(first.cfName))
+                return false;
+        }
+        return true;
     }
 }
