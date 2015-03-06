@@ -75,8 +75,12 @@ public class LongType extends AbstractType<Long>
         {
             if (parsed instanceof String)
                 return fromString((String) parsed);
-            else
-                return getSerializer().serialize(((Number) parsed).longValue());
+
+            Number parsedNumber = (Number) parsed;
+            if (!(parsedNumber instanceof Integer || parsedNumber instanceof Long))
+                throw new MarshalException(String.format("Expected a bigint value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+            return getSerializer().serialize(parsedNumber.longValue());
         }
         catch (ClassCastException exc)
         {

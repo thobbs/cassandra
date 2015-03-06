@@ -1485,20 +1485,20 @@ Where possible, Cassandra will represent and accept data types in their native @
 
 |_. type    |_. formats accepted   |_. return format |_. notes|
 |@ascii@    |string                |string           |Uses JSON's @\u@ character escape|
-|@bigint@   |integer, float, string|integer          |Floats are truncated; String must be valid integer; subject to overflow|
+|@bigint@   |integer, string       |integer          |String must be valid 64 bit integer|
 |@blob@     |string                |string           |String should be 0x followed by an even number of hex digits|
 |@boolean@  |boolean, string       |boolean          |String must be "true" or "false"|
-|@decimal@  |integer, float, string|float            |May exceed 32 or 64-bit IEEE-754 floating point precision|
+|@decimal@  |integer, float, string|float            |May exceed 32 or 64-bit IEEE-754 floating point precision in client-side decoder|
 |@double@   |integer, float, string|float            |String must be valid integer or float|
 |@float@    |integer, float, string|float            |String must be valid integer or float|
 |@inet@     |string                |string           |IPv4 or IPv6 address|
-|@int@      |integer, float, string|integer          |Floats are truncated; String must be valid integer; subject to overflow|
+|@int@      |integer, string       |integer          |String must be valid 32 bit integer|
 |@text@     |string                |string           |Uses JSON's @\u@ character escape|
 |@timestamp@|integer, string       |string           |A timestamp. Strings constant are allow to input timestamps as dates, see "Working with dates":#usingdates below for more information.  Datestamps with format @YYYY-MM-DD HH:MM:SS.SSS@ are returned.|
 |@timeuuid@ |string                |string           |Type 1 UUID. See "Constants":#constants for the UUID format|
 |@uuid@     |string                |string           |See "Constants":#constants for the UUID format|
 |@varchar@  |string                |string           |Uses JSON's @\u@ character escape|
-|@varint@   |integer, float, string|integer          |Variable length; may overflow 32 or 64 bit integers|
+|@varint@   |integer, string       |integer          |Variable length; may overflow 32 or 64 bit integers in client-side decoder|
 
 h3(#fromJson). The fromJson() Function
 

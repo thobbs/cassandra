@@ -72,8 +72,12 @@ public class Int32Type extends AbstractType<Integer>
         {
             if (parsed instanceof String)
                 return fromString((String) parsed);
-            else
-                return getSerializer().serialize(((Number) parsed).intValue());
+
+            Number parsedNumber = (Number) parsed;
+            if (!(parsedNumber instanceof Integer))
+                throw new MarshalException(String.format("Expected an int value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+            return getSerializer().serialize(parsedNumber.intValue());
         }
         catch (ClassCastException exc)
         {

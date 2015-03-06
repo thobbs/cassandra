@@ -107,11 +107,12 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "\"123123123123\"");
         assertRows(execute("SELECT k, bigintval FROM %s WHERE k = ?", 0), row(0, 123123123123L));
 
-        // floats get truncated
-        execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "123.456");
-        assertRows(execute("SELECT k, bigintval FROM %s WHERE k = ?", 0), row(0, 123L));
-        execute("INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "123.999");
-        assertRows(execute("SELECT k, bigintval FROM %s WHERE k = ?", 0), row(0, 123L));
+        // overflow (Long.MAX_VALUE + 1)
+        assertInvalidMessage("Expected a bigint value, but got a",
+                "INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "9223372036854775808");
+
+        assertInvalidMessage("Expected a bigint value, but got a",
+                "INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "123.456");
 
         assertInvalidMessage("Unable to make long from",
                 "INSERT INTO %s (k, bigintval) VALUES (?, fromJson(?))", 0, "\"abc\"");
@@ -228,12 +229,11 @@ public class JsonTest extends CQLTester
         assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 123123));
 
         // int overflow (2 ^ 32, or Integer.MAX_INT + 1)
-        execute("INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "2147483648");
-        assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, -2147483648));
+        assertInvalidMessage("Expected an int value, but got a",
+                "INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "2147483648");
 
-        // floats get truncated
-        execute("INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "123123.456");
-        assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 123123));
+        assertInvalidMessage("Expected an int value, but got a",
+                "INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "123.456");
 
         assertInvalidMessage("Unable to make int from",
                 "INSERT INTO %s (k, intval) VALUES (?, fromJson(?))", 0, "\"xyzz\"");
