@@ -1478,31 +1478,12 @@ class Shell(cmd.Cmd):
 
                 # check for any errors reported by the children
                 if (current_record % 100) == 0:
-                    for pipe in pipes:
-                        if pipe.poll():
-                            try:
-                                (record_num, error) = pipe.recv()
-                                self.printerr("\n" + str(error))
-                                self.printerr(
-                                    "Aborting import at record #%d. "
-                                    "Previously inserted records are still present, "
-                                    "and some records after that may be present as well."
-                                    % (record_num,))
-                                break
-                            except EOFError:
-                                # pipe is closed, nothing to read
-                                self.printerr("\nChild process died without notification, "
-                                              "aborting import at record #%d. Previously "
-                                              "inserted records are probably still present, "
-                                              "and some records afters that may be present "
-                                              "as well." % (current_record,))
-                                break
-                    else:
+                    if self._check_child_pipes(current_record, pipes):
                         # no errors seen, continue with outer loop
                         continue
-
-                    # errors seen, break out of outer loop
-                    break
+                    else:
+                        # errors seen, break out of outer loop
+                        break
         except Exception, exc:
             if current_record is None:
                 # we failed before we started
@@ -1520,13 +1501,16 @@ class Shell(cmd.Cmd):
                     traceback.print_exc()
         finally:
             # send a message that indicates we're done
-            for i in range(num_processes):
-                pipe = pipes[i]
+            for pipe in pipes:
                 pipe.send((None, None))
-                pipe.close()
 
             for process in processes:
                 process.join()
+
+            self._check_child_pipes(current_record, pipes)
+
+            for pipe in pipes:
+                pipe.close()
 
             if do_close:
                 linesource.close()
@@ -1535,12 +1519,33 @@ class Shell(cmd.Cmd):
 
         return current_record
 
+    def _check_child_pipes(self, current_record, pipes):
+        # check the pipes for errors from child processes
+        for pipe in pipes:
+            if pipe.poll():
+                try:
+                    (record_num, error) = pipe.recv()
+                    self.printerr("\n" + str(error))
+                    self.printerr(
+                        "Aborting import at record #%d. "
+                        "Previously inserted records are still present, "
+                        "and some records after that may be present as well."
+                        % (record_num,))
+                    return False
+                except EOFError:
+                    # pipe is closed, nothing to read
+                    self.printerr("\nChild process died without notification, "
+                                  "aborting import at record #%d. Previously "
+                                  "inserted records are probably still present, "
+                                  "and some records after that may be present "
+                                  "as well." % (current_record,))
+                    return False
+        return True
+
     def multiproc_import(self, pipe, ks, cf, columns, nullval):
         """
         This method is where child processes start when doing a COPY FROM
-        operation.  The child process will pre-build as much of the binary
-        QueryMessage as possible, replacing only the query string and request ID
-        for each row. The child process will open one connection to the node and
+        operation.  The child process will open one connection to the node and
         interact directly with the connection, bypassing most of the driver
         code.  Because we don't need retries, connection pooling, thread safety,
         and other fancy features, this is okay.
@@ -1572,16 +1577,7 @@ class Shell(cmd.Cmd):
         # we need to handle some types specially
         should_escape = [t in ('ascii', 'text', 'timestamp', 'inet') for t in cqltypes]
 
-        # convert a mostly-complete QueryMessage to it's binary format
-        base_query_message = QueryMessage(
-                "", self.consistency_level, serial_consistency_level=None,
-                fetch_size=None, paging_state=None, timestamp=int(time.time() * 1e6))
-
-        base_binary_message = base_query_message.to_binary(stream_id=0, protocol_version=3, compression=None)
-
-        header_prefix = base_binary_message[:2]  # version, header flags
-        header_suffix = base_binary_message[4]  # opcode
-        message_suffix = base_binary_message[13:]  # query flags, timestamp
+        insert_timestamp = int(time.time() * 1e6)
 
         def callback(record_num, response):
             # This is the callback we register for all inserts.  Because this
@@ -1601,7 +1597,6 @@ class Shell(cmd.Cmd):
         insert_num = 0
         try:
             while True:
-
                 # To avoid totally maxing out the connection,
                 # defer to the reactor thread when we're close
                 # to capacity
@@ -1637,28 +1632,25 @@ class Shell(cmd.Cmd):
                         if nullval == '':
                             message += " If you want to insert empty strings, consider using " \
                                        "the WITH NULL=<marker> option for COPY."
-                        self.printerr(message)
-                        return False
+                        pipe.send((current_record, message))
+                        return
                     else:
                         row[i] = 'null'
 
-                # update our partially complete binary message with the actual
-                # values and request ID
                 full_query = query % (','.join(row),)
-                query_len = len(full_query)
+                query_message = QueryMessage(
+                    full_query, self.consistency_level, serial_consistency_level=None,
+                    fetch_size=None, paging_state=None, timestamp=insert_timestamp)
 
                 request_id = conn.get_request_id()
-
-                message_len = 4 + query_len + len(message_suffix)
-                formatted_message = ''.join((
-                    header_prefix, int16_pack(request_id), header_suffix, int32_pack(message_len),
-                    int32_pack(query_len), full_query, message_suffix))
+                binary_message = query_message.to_binary(
+                    stream_id=request_id, protocol_version=DEFAULT_PROTOCOL_VERSION, compression=None)
 
                 # add the message directly to the connection's queue
                 with conn.lock:
                     conn.in_flight += 1
                 conn._callbacks[request_id] = partial(callback, current_record)
-                conn.deque.append(formatted_message)
+                conn.deque.append(binary_message)
 
                 # every 50 records, clear the pending writes queue and read
                 # any responses we have
