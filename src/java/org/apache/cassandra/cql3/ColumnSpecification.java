@@ -48,7 +48,7 @@ public class ColumnSpecification
     {
         return new ColumnSpecification(ksName, cfName, alias, type);
     }
-    
+
     public boolean isReversedType()
     {
         return type instanceof ReversedType;
@@ -59,10 +59,8 @@ public class ColumnSpecification
      */
     public static boolean allInSameTable(Collection<ColumnSpecification> names)
     {
-        if (names == null)
+        if (names == null || names.isEmpty())
             return false;
-
-        assert !names.isEmpty();
 
         Iterator<ColumnSpecification> iter = names.iterator();
         ColumnSpecification first = iter.next();

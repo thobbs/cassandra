@@ -1,4 +1,6 @@
 3.0
+ * Indicate partition key columns in response metadata for prepared
+   statements (CASSANDRA-7660)
  * Add role based access control (CASSANDRA-7653, 8650)
  * Avoid accessing partitioner through StorageProxy (CASSANDRA-8244, 8268)
  * Upgrade Metrics library and remove depricated metrics (CASSANDRA-5657)
