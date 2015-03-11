@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.service.QueryState;
 
 public abstract class BatchQueryOptions
@@ -98,6 +99,11 @@ public abstract class BatchQueryOptions
                     public List<ByteBuffer> getValues()
                     {
                         return vars;
+                    }
+
+                    public List<AbstractType> getValueTypes()
+                    {
+                        return wrapped.getValueTypes();
                     }
                 });
             }

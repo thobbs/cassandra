@@ -31,6 +31,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.transport.*;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Options for a query.
@@ -80,6 +81,7 @@ public abstract class QueryOptions
 
     public abstract ConsistencyLevel getConsistency();
     public abstract List<ByteBuffer> getValues();
+    public abstract List<AbstractType> getValueTypes();
     public abstract boolean skipMetadata();
 
     /**  The pageSize for this query. Will be <= 0 if not relevant for the query.  */
@@ -124,19 +126,19 @@ public abstract class QueryOptions
     {
         private final ConsistencyLevel consistency;
         private final List<ByteBuffer> values;
-        private final List<AbstractType> declaredTypes;
+        private final List<AbstractType> valueTypes;
         private final boolean skipMetadata;
 
         private final SpecificOptions options;
 
         private final transient int protocolVersion;
 
-        DefaultQueryOptions(ConsistencyLevel consistency, List<ByteBuffer> values, List<AbstractType> declaredTypes,
+        DefaultQueryOptions(ConsistencyLevel consistency, List<ByteBuffer> values, List<AbstractType> valueTypes,
                             boolean skipMetadata, SpecificOptions options, int protocolVersion)
         {
             this.consistency = consistency;
             this.values = values;
-            this.declaredTypes = declaredTypes;
+            this.valueTypes = valueTypes;
             this.skipMetadata = skipMetadata;
             this.options = options;
             this.protocolVersion = protocolVersion;
@@ -144,20 +146,20 @@ public abstract class QueryOptions
 
         public DefaultQueryOptions prepare(List<ColumnSpecification> specs)
         {
-            if (declaredTypes == null)
+            if (valueTypes == null)
                 return this;
 
-            if (specs.size() != declaredTypes.size())
+            if (specs.size() != valueTypes.size())
                 throw new InvalidRequestException(String.format(
-                        "Expected values for %d query parameters, but only got %d", specs.size(), declaredTypes.size()));
+                        "Expected values for %d query parameters, but only got %d", specs.size(), valueTypes.size()));
 
             for (int i = 0; i < specs.size(); i++)
             {
                 ColumnSpecification spec = specs.get(i);
-                if (!spec.type.equals(declaredTypes.get(i)))
+                if (!spec.type.equals(valueTypes.get(i)))
                     throw new InvalidRequestException(String.format(
                             "Expected value of type %s for query parameter %d, but got type %s",
-                            spec.type, i, declaredTypes.get(i)
+                            spec.type, i, valueTypes.get(i)
                     ));
             }
 
@@ -172,6 +174,11 @@ public abstract class QueryOptions
         public List<ByteBuffer> getValues()
         {
             return values;
+        }
+
+        public List<AbstractType> getValueTypes()
+        {
+            return valueTypes;
         }
 
         public boolean skipMetadata()
@@ -264,6 +271,11 @@ public abstract class QueryOptions
             assert orderedValues != null; // We should have called prepare first!
             return orderedValues;
         }
+
+        public List<AbstractType> getValueTypes()
+        {
+            return wrapped.getValueTypes();
+        }
     }
 
     // Options that are likely to not be present in most queries
@@ -285,154 +297,39 @@ public abstract class QueryOptions
         }
     }
 
-    private static class Codec implements CBCodec<QueryOptions>
+    private static enum Flag
     {
-        protected boolean expectTypeCode = true;
+        // The order of that enum matters!!
+        VALUES,
+        SKIP_METADATA,
+        PAGE_SIZE,
+        PAGING_STATE,
+        SERIAL_CONSISTENCY,
+        TIMESTAMP,
+        NAMES_FOR_VALUES;
 
-        private static enum Flag
+        private static final Flag[] ALL_VALUES = values();
+
+        public static EnumSet<Flag> deserialize(int flags)
         {
-            // The order of that enum matters!!
-            VALUES,
-            SKIP_METADATA,
-            PAGE_SIZE,
-            PAGING_STATE,
-            SERIAL_CONSISTENCY,
-            TIMESTAMP,
-            NAMES_FOR_VALUES;
-
-            private static final Flag[] ALL_VALUES = values();
-
-            public static EnumSet<Flag> deserialize(int flags)
+            EnumSet<Flag> set = EnumSet.noneOf(Flag.class);
+            for (int n = 0; n < ALL_VALUES.length; n++)
             {
-                EnumSet<Flag> set = EnumSet.noneOf(Flag.class);
-                for (int n = 0; n < ALL_VALUES.length; n++)
-                {
-                    if ((flags & (1 << n)) != 0)
-                        set.add(ALL_VALUES[n]);
-                }
-                return set;
+                if ((flags & (1 << n)) != 0)
+                    set.add(ALL_VALUES[n]);
             }
-
-            public static int serialize(EnumSet<Flag> flags)
-            {
-                int i = 0;
-                for (Flag flag : flags)
-                    i |= 1 << flag.ordinal();
-                return i;
-            }
+            return set;
         }
 
-        public QueryOptions decode(ByteBuf body, int version)
+        public static int serialize(EnumSet<Flag> flags)
         {
-            assert version >= 2;
-
-            boolean haveTypeCodes = version >= Server.VERSION_4 && expectTypeCode;
-
-            ConsistencyLevel consistency = CBUtil.readConsistencyLevel(body);
-            EnumSet<Flag> flags = Flag.deserialize((int)body.readByte());
-
-            List<ByteBuffer> values = Collections.<ByteBuffer>emptyList();
-            List<String> names = null;
-            List<AbstractType> types = null;
-            if (flags.contains(Flag.VALUES))
-            {
-                int size = body.readUnsignedShort();
-                boolean haveNames = flags.contains(Flag.NAMES_FOR_VALUES);
-                if (size > 0)
-                {
-                    values = new ArrayList<>(size);
-                    if (haveNames)
-                        names = new ArrayList<>(size);
-                    if (haveTypeCodes)
-                        types = new ArrayList<>(size);
-                }
-
-                for (int i = 0; i < size; i++)
-                {
-                    if (haveNames)
-                        names.add(CBUtil.readString(body));
-
-                    if (haveTypeCodes)
-                        types.add(DataType.toType(DataType.codec.decodeOne(body, version)));
-
-                    values.add(CBUtil.readValue(body));
-                }
-            }
-
-            boolean skipMetadata = flags.contains(Flag.SKIP_METADATA);
-            flags.remove(Flag.VALUES);
-            flags.remove(Flag.SKIP_METADATA);
-
-            SpecificOptions options = SpecificOptions.DEFAULT;
-            if (!flags.isEmpty())
-            {
-                int pageSize = flags.contains(Flag.PAGE_SIZE) ? body.readInt() : -1;
-                PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValue(body)) : null;
-                ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : ConsistencyLevel.SERIAL;
-                long timestamp = Long.MIN_VALUE;
-                if (flags.contains(Flag.TIMESTAMP))
-                {
-                    long ts = body.readLong();
-                    if (ts == Long.MIN_VALUE)
-                        throw new ProtocolException(String.format("Out of bound timestamp, must be in [%d, %d] (got %d)", Long.MIN_VALUE + 1, Long.MAX_VALUE, ts));
-                    timestamp = ts;
-                }
-
-                options = new SpecificOptions(pageSize, pagingState, serialConsistency, timestamp);
-            }
-            DefaultQueryOptions opts = new DefaultQueryOptions(consistency, values, types, skipMetadata, options, version);
-            return names == null ? opts : new OptionsWithNames(opts, names);
+            int i = 0;
+            for (Flag flag : flags)
+                i |= 1 << flag.ordinal();
+            return i;
         }
 
-        public void encode(QueryOptions options, ByteBuf dest, int version)
-        {
-            assert version >= 2;
-
-            CBUtil.writeConsistencyLevel(options.getConsistency(), dest);
-
-            EnumSet<Flag> flags = gatherFlags(options);
-            dest.writeByte((byte)Flag.serialize(flags));
-
-            if (flags.contains(Flag.VALUES))
-                CBUtil.writeValueList(options.getValues(), dest);
-            if (flags.contains(Flag.PAGE_SIZE))
-                dest.writeInt(options.getPageSize());
-            if (flags.contains(Flag.PAGING_STATE))
-                CBUtil.writeValue(options.getPagingState().serialize(), dest);
-            if (flags.contains(Flag.SERIAL_CONSISTENCY))
-                CBUtil.writeConsistencyLevel(options.getSerialConsistency(), dest);
-            if (flags.contains(Flag.TIMESTAMP))
-                dest.writeLong(options.getSpecificOptions().timestamp);
-
-            // Note that we don't really have to bother with NAMES_FOR_VALUES server side,
-            // and in fact we never really encode QueryOptions, only decode them, so we
-            // don't bother.
-        }
-
-        public int encodedSize(QueryOptions options, int version)
-        {
-            int size = 0;
-
-            size += CBUtil.sizeOfConsistencyLevel(options.getConsistency());
-
-            EnumSet<Flag> flags = gatherFlags(options);
-            size += 1;
-
-            if (flags.contains(Flag.VALUES))
-                size += CBUtil.sizeOfValueList(options.getValues());
-            if (flags.contains(Flag.PAGE_SIZE))
-                size += 4;
-            if (flags.contains(Flag.PAGING_STATE))
-                size += CBUtil.sizeOfValue(options.getPagingState().serialize());
-            if (flags.contains(Flag.SERIAL_CONSISTENCY))
-                size += CBUtil.sizeOfConsistencyLevel(options.getSerialConsistency());
-            if (flags.contains(Flag.TIMESTAMP))
-                size += 8;
-
-            return size;
-        }
-
-        private EnumSet<Flag> gatherFlags(QueryOptions options)
+        public static EnumSet<Flag> gatherFlags(QueryOptions options)
         {
             EnumSet<Flag> flags = EnumSet.noneOf(Flag.class);
             if (options.getValues().size() > 0)
@@ -451,17 +348,187 @@ public abstract class QueryOptions
         }
     }
 
-    // TODO this isn't right
+    private static QueryOptions decodeQueryOptions(ByteBuf body, int version, boolean forExecute)
+    {
+        assert version >= 2;
+
+        boolean haveTypeCodes = version >= Server.VERSION_4 && !forExecute;
+
+        ConsistencyLevel consistency = CBUtil.readConsistencyLevel(body);
+        EnumSet<Flag> flags = Flag.deserialize((int)body.readByte());
+
+        List<ByteBuffer> values = Collections.<ByteBuffer>emptyList();
+        List<String> names = null;
+        List<AbstractType> types = null;
+        if (flags.contains(Flag.VALUES))
+        {
+            int size = body.readUnsignedShort();
+            boolean haveNames = flags.contains(Flag.NAMES_FOR_VALUES);
+            if (size > 0)
+            {
+                values = new ArrayList<>(size);
+                if (haveNames)
+                    names = new ArrayList<>(size);
+                if (haveTypeCodes)
+                    types = new ArrayList<>(size);
+
+                for (int i = 0; i < size; i++)
+                {
+                    if (haveNames)
+                        names.add(CBUtil.readString(body));
+
+                    if (haveTypeCodes)
+                        types.add(DataType.toType(DataType.codec.decodeOne(body, version)));
+
+                    values.add(CBUtil.readValue(body));
+                }
+            }
+        }
+
+        boolean skipMetadata = flags.contains(Flag.SKIP_METADATA);
+        flags.remove(Flag.VALUES);
+        flags.remove(Flag.SKIP_METADATA);
+
+        SpecificOptions options = SpecificOptions.DEFAULT;
+        if (!flags.isEmpty())
+        {
+            int pageSize = flags.contains(Flag.PAGE_SIZE) ? body.readInt() : -1;
+            PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValue(body)) : null;
+            ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : ConsistencyLevel.SERIAL;
+            long timestamp = Long.MIN_VALUE;
+            if (flags.contains(Flag.TIMESTAMP))
+            {
+                long ts = body.readLong();
+                if (ts == Long.MIN_VALUE)
+                    throw new ProtocolException(String.format("Out of bound timestamp, must be in [%d, %d] (got %d)", Long.MIN_VALUE + 1, Long.MAX_VALUE, ts));
+                timestamp = ts;
+            }
+
+            options = new SpecificOptions(pageSize, pagingState, serialConsistency, timestamp);
+        }
+
+        DefaultQueryOptions opts = forExecute
+                                 ? new ExecuteOptions(consistency, values, skipMetadata, options, version)
+                                 : new DefaultQueryOptions(consistency, values, types, skipMetadata, options, version);
+
+        return names == null ? opts : new OptionsWithNames(opts, names);
+    }
+
+    private static void encodeQueryOptions(QueryOptions options, ByteBuf dest, int version, boolean forExecute)
+    {
+        assert version >= 2;
+
+        CBUtil.writeConsistencyLevel(options.getConsistency(), dest);
+
+        EnumSet<Flag> flags = Flag.gatherFlags(options);
+        dest.writeByte((byte)Flag.serialize(flags));
+
+        if (flags.contains(Flag.VALUES))
+        {
+            CBUtil.writeValueList(options.getValues(), dest);
+
+            // handle type codes
+            if (version >= Server.VERSION_4 && !forExecute)
+            {
+                for (AbstractType type : options.getValueTypes())
+                {
+                    Pair<DataType, Object> dataType = DataType.fromType(type, version);
+                    dataType.left.writeValue(dataType.right, dest, version);
+                }
+            }
+        }
+        if (flags.contains(Flag.PAGE_SIZE))
+            dest.writeInt(options.getPageSize());
+        if (flags.contains(Flag.PAGING_STATE))
+            CBUtil.writeValue(options.getPagingState().serialize(), dest);
+        if (flags.contains(Flag.SERIAL_CONSISTENCY))
+            CBUtil.writeConsistencyLevel(options.getSerialConsistency(), dest);
+        if (flags.contains(Flag.TIMESTAMP))
+            dest.writeLong(options.getSpecificOptions().timestamp);
+
+        // Note that we don't really have to bother with NAMES_FOR_VALUES server side,
+        // and in fact we never really encode QueryOptions, only decode them, so we
+        // don't bother.
+    }
+
+    private static int encodedQueryOptionsSize(QueryOptions options, int version, boolean forExecute)
+    {
+        int size = 0;
+
+        size += CBUtil.sizeOfConsistencyLevel(options.getConsistency());
+
+        EnumSet<Flag> flags = Flag.gatherFlags(options);
+        size += 1;
+
+        if (flags.contains(Flag.VALUES))
+        {
+            size += CBUtil.sizeOfValueList(options.getValues());
+
+            // handle type codes
+            if (version >= Server.VERSION_4 && !forExecute)
+            {
+                for (AbstractType type : options.getValueTypes())
+                {
+                    Pair<DataType, Object> dataType = DataType.fromType(type, version);
+                    size += dataType.left.serializedValueSize(dataType.right, version);
+                }
+            }
+        }
+        if (flags.contains(Flag.PAGE_SIZE))
+            size += 4;
+        if (flags.contains(Flag.PAGING_STATE))
+            size += CBUtil.sizeOfValue(options.getPagingState().serialize());
+        if (flags.contains(Flag.SERIAL_CONSISTENCY))
+            size += CBUtil.sizeOfConsistencyLevel(options.getSerialConsistency());
+        if (flags.contains(Flag.TIMESTAMP))
+            size += 8;
+
+        return size;
+    }
+
+    private static class Codec implements CBCodec<QueryOptions>
+    {
+        public QueryOptions decode(ByteBuf body, int version)
+        {
+            return decodeQueryOptions(body, version, false);
+        }
+
+        public void encode(QueryOptions options, ByteBuf dest, int version)
+        {
+            encodeQueryOptions(options, dest, version, false);
+        }
+
+        public int encodedSize(QueryOptions options, int version)
+        {
+            return encodedQueryOptionsSize(options, version, false);
+        }
+    }
+
     public static class ExecuteOptions extends DefaultQueryOptions
     {
-        ExecuteOptions(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, SpecificOptions options, int protocolVersion)
+        public static final CBCodec<QueryOptions> codec = new ExecuteCodec();
+
+        public ExecuteOptions(ConsistencyLevel consistency, List<ByteBuffer> values, boolean skipMetadata, SpecificOptions options, int protocolVersion)
         {
             super(consistency, values, null, skipMetadata, options, protocolVersion);
         }
 
-        private static class Codec extends QueryOptions.Codec
+        private static class ExecuteCodec implements CBCodec<QueryOptions>
         {
-            protected boolean expectTypeCode = false;
+            public QueryOptions decode(ByteBuf body, int version)
+            {
+                return decodeQueryOptions(body, version, true);
+            }
+
+            public void encode(QueryOptions options, ByteBuf dest, int version)
+            {
+                encodeQueryOptions(options, dest, version, true);
+            }
+
+            public int encodedSize(QueryOptions options, int version)
+            {
+                return encodedQueryOptionsSize(options, version, true);
+            }
         }
     }
 }

@@ -66,7 +66,7 @@ public class ExecuteMessage extends Message.Request
             }
             else
             {
-                QueryOptions.codec.encode(msg.options, dest, version);
+                QueryOptions.ExecuteOptions.codec.encode(msg.options, dest, version);
             }
         }
 
@@ -81,7 +81,7 @@ public class ExecuteMessage extends Message.Request
             }
             else
             {
-                size += QueryOptions.codec.encodedSize(msg.options, version);
+                size += QueryOptions.ExecuteOptions.codec.encodedSize(msg.options, version);
             }
             return size;
         }
