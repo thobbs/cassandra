@@ -47,6 +47,8 @@ public class RandomAccessReader extends AbstractDataInput implements FileDataInp
     // channel linked with the file, used to retrieve data and force updates.
     protected final FileChannel channel;
 
+    // this can be overridden at construction to a value shorter than the true length of the file;
+    // if so, it acts as an imposed limit on reads, rather than a convenience property
     private final long fileLength;
 
     protected final PoolingSegmentedFile owner;
@@ -307,7 +309,7 @@ public class RandomAccessReader extends AbstractDataInput implements FileDataInp
         if (newPosition >= length()) // it is save to call length() in read-only mode
         {
             if (newPosition > length())
-                throw new IllegalArgumentException(String.format("unable to seek to position %d in %s (%d bytes) in read-only mode",
+                throw new IllegalArgumentException(String.format("Unable to seek to position %d in %s (%d bytes) in read-only mode",
                                                              newPosition, getPath(), length()));
             buffer.limit(0);
             bufferOffset = newPosition;

@@ -39,7 +39,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.IAllocator;
 import org.apache.cassandra.locator.*;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.scheduler.IRequestScheduler;
@@ -48,7 +47,6 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.thrift.ThriftServer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.memory.*;
 
 public class DatabaseDescriptor
@@ -89,7 +87,6 @@ public class DatabaseDescriptor
 
     private static long keyCacheSizeInMB;
     private static long counterCacheSizeInMB;
-    private static IAllocator memoryAllocator;
     private static long indexSummaryCapacityInMB;
 
     private static String localDC;
@@ -98,9 +95,19 @@ public class DatabaseDescriptor
     public static void forceStaticInitialization() {}
     static
     {
+        // In client mode, we use a default configuration. Note that the fields of this class will be
+        // left unconfigured however (the partitioner or localDC will be null for instance) so this
+        // should be used with care.
         try
         {
-            applyConfig(loadConfig());
+            if (Config.isClientMode())
+            {
+                conf = new Config();
+            }
+            else
+            {
+                applyConfig(loadConfig());
+            }
         }
         catch (Exception e)
         {
@@ -562,8 +569,6 @@ public class DatabaseDescriptor
             throw new ConfigurationException("index_summary_capacity_in_mb option was set incorrectly to '"
                     + conf.index_summary_capacity_in_mb + "', it should be a non-negative integer.", false);
 
-        memoryAllocator = FBUtilities.newOffHeapAllocator(conf.memory_allocator);
-
         if(conf.encryption_options != null)
         {
             logger.warn("Please rename encryption_options as server_encryption_options in the yaml");
@@ -638,6 +643,18 @@ public class DatabaseDescriptor
     public static int getRolesValidity()
     {
         return conf.roles_validity_in_ms;
+    }
+
+    public static int getRolesCacheMaxEntries()
+    {
+        return conf.roles_cache_max_entries;
+    }
+
+    public static int getRolesUpdateInterval()
+    {
+        return conf.roles_update_interval_in_ms == -1
+             ? conf.roles_validity_in_ms
+             : conf.roles_update_interval_in_ms;
     }
 
     public static int getThriftFramedTransportSize()
@@ -1166,6 +1183,25 @@ public class DatabaseDescriptor
         return conf.native_transport_max_frame_size_in_mb * 1024 * 1024;
     }
 
+    public static Long getNativeTransportMaxConcurrentConnections()
+    {
+        return conf.native_transport_max_concurrent_connections;
+    }
+
+    public static void setNativeTransportMaxConcurrentConnections(long nativeTransportMaxConcurrentConnections)
+    {
+        conf.native_transport_max_concurrent_connections = nativeTransportMaxConcurrentConnections;
+    }
+
+    public static Long getNativeTransportMaxConcurrentConnectionsPerIp() {
+        return conf.native_transport_max_concurrent_connections_per_ip;
+    }
+
+    public static void setNativeTransportMaxConcurrentConnectionsPerIp(long native_transport_max_concurrent_connections_per_ip)
+    {
+        conf.native_transport_max_concurrent_connections_per_ip = native_transport_max_concurrent_connections_per_ip;
+    }
+
     public static double getCommitLogSyncBatchWindow()
     {
         return conf.commitlog_sync_batch_window_in_ms;
@@ -1477,11 +1513,6 @@ public class DatabaseDescriptor
     public static void setCounterCacheKeysToSave(int counterCacheKeysToSave)
     {
         conf.counter_cache_keys_to_save = counterCacheKeysToSave;
-    }
-
-    public static IAllocator getoffHeapMemoryAllocator()
-    {
-        return memoryAllocator;
     }
 
     public static int getStreamingSocketTimeout()

@@ -217,7 +217,7 @@ public class OutboundTcpConnection extends Thread
                 {
                     byte[] traceTypeBytes = qm.message.parameters.get(Tracing.TRACE_TYPE);
                     Tracing.TraceType traceType = traceTypeBytes == null ? Tracing.TraceType.QUERY : Tracing.TraceType.deserialize(traceTypeBytes[0]);
-                    TraceState.trace(ByteBuffer.wrap(sessionBytes), message, -1, traceType.getTTL(), null);
+                    TraceState.mutateWithTracing(ByteBuffer.wrap(sessionBytes), message, -1, traceType.getTTL());
                 }
                 else
                 {
@@ -358,6 +358,8 @@ public class OutboundTcpConnection extends Thread
                     // a different target version (targetVersion < MessagingService.VERSION_12)
                     // or if the same version the handshake will finally succeed
                     logger.debug("Target max version is {}; no version information yet, will retry", maxTargetVersion);
+                    if (DatabaseDescriptor.getSeeds().contains(poolReference.endPoint()))
+                        logger.warn("Seed gossip version is {}; will not connect with that version", maxTargetVersion);
                     disconnect();
                     continue;
                 }

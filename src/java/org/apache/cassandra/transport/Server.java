@@ -263,6 +263,7 @@ public class Server implements CassandraDaemon.Server
         private static final Frame.Compressor frameCompressor = new Frame.Compressor();
         private static final Frame.Encoder frameEncoder = new Frame.Encoder();
         private static final Message.Dispatcher dispatcher = new Message.Dispatcher();
+        private static final ConnectionLimitHandler connectionLimitHandler = new ConnectionLimitHandler();
 
         private final Server server;
 
@@ -274,6 +275,14 @@ public class Server implements CassandraDaemon.Server
         protected void initChannel(Channel channel) throws Exception
         {
             ChannelPipeline pipeline = channel.pipeline();
+
+            // Add the ConnectionLimitHandler to the pipeline if configured to do so.
+            if (DatabaseDescriptor.getNativeTransportMaxConcurrentConnections() > 0
+                    || DatabaseDescriptor.getNativeTransportMaxConcurrentConnectionsPerIp() > 0)
+            {
+                // Add as first to the pipeline so the limit is enforced as first action.
+                pipeline.addFirst("connectionLimitHandler", connectionLimitHandler);
+            }
 
             //pipeline.addLast("debug", new LoggingHandler());
 

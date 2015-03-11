@@ -15,34 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.io.util;
+package org.apache.cassandra.utils.progress;
 
-import com.sun.jna.Library;
-import com.sun.jna.Native;
-
-public class JEMallocAllocator implements IAllocator
+/**
+ * Interface for {@link ProgressEvent} publisher.
+ */
+public interface ProgressEventNotifier
 {
-    public interface JEMLibrary extends Library
-    {
-        long malloc(long size);
+    /**
+     * Register progress listener to this publisher.
+     *
+     * @param listener listener to register.
+     */
+    void addProgressListener(ProgressListener listener);
 
-        void free(long pointer);
-    }
-
-    private final JEMLibrary library;
-    
-    public JEMallocAllocator()
-    {
-        library = (JEMLibrary) Native.loadLibrary("jemalloc", JEMLibrary.class);
-    }
-
-    public long allocate(long size)
-    {
-        return library.malloc(size);
-    }
-
-    public void free(long peer)
-    {
-        library.free(peer);
-    }
+    /**
+     * Remove progress listener from this publisher.
+     *
+     * @param listener listener to remove
+     */
+    void removeProgressListener(ProgressListener listener);
 }

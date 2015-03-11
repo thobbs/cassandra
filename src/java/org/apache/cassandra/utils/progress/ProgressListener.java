@@ -15,14 +15,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.utils;
+package org.apache.cassandra.utils.progress;
 
-import java.nio.ByteBuffer;
-import java.util.zip.Checksum;
-
-public interface ICRC32 extends Checksum
+/**
+ * Listener interface to handle {@link org.apache.cassandra.utils.progress.ProgressEvent}
+ */
+public interface ProgressListener
 {
-    void update(ByteBuffer b, int offset, int length);
-    void updateInt(int v);
-    int getCrc();
+    /**
+     * Called when some progress is made by progress publisher.
+     *
+     * @param tag String that identifies progress event.
+     * @param event Current progress
+     */
+    void progress(String tag, ProgressEvent event);
 }

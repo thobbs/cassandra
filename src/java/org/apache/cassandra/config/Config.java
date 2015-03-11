@@ -28,8 +28,6 @@ import com.google.common.collect.Sets;
 import org.apache.cassandra.config.EncryptionOptions.ClientEncryptionOptions;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.util.NativeAllocator;
-import org.apache.cassandra.utils.FBUtilities;
 import org.supercsv.io.CsvListReader;
 import org.supercsv.prefs.CsvPreference;
 
@@ -48,6 +46,8 @@ public class Config
     public int permissions_cache_max_entries = 1000;
     public int permissions_update_interval_in_ms = -1;
     public int roles_validity_in_ms = 2000;
+    public int roles_cache_max_entries = 1000;
+    public int roles_update_interval_in_ms = -1;
 
     /* Hashing strategy Random or OPHF */
     public String partitioner;
@@ -126,6 +126,8 @@ public class Config
     public Integer native_transport_port = 9042;
     public Integer native_transport_max_threads = 128;
     public Integer native_transport_max_frame_size_in_mb = 256;
+    public volatile Long native_transport_max_concurrent_connections = -1L;
+    public volatile Long native_transport_max_concurrent_connections_per_ip = -1L;
 
     @Deprecated
     public Integer thrift_max_message_length_in_mb = 16;
@@ -203,7 +205,10 @@ public class Config
     public volatile int counter_cache_save_period = 7200;
     public volatile int counter_cache_keys_to_save = Integer.MAX_VALUE;
 
-    public String memory_allocator = NativeAllocator.class.getSimpleName();
+    @Deprecated
+    public String memory_allocator;
+
+    private static boolean isClientMode = false;
 
     public Integer file_cache_size_in_mb;
 
@@ -234,6 +239,16 @@ public class Config
     public static void setOutboundBindAny(boolean value)
     {
         outboundBindAny = value;
+    }
+
+    public static boolean isClientMode()
+    {
+        return isClientMode;
+    }
+
+    public static void setClientMode(boolean clientMode)
+    {
+        isClientMode = clientMode;
     }
 
     public void configHintedHandoff() throws ConfigurationException

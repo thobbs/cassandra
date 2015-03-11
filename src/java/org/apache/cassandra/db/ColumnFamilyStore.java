@@ -30,6 +30,7 @@ import javax.management.openmbean.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.*;
+import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
 
@@ -591,6 +592,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             catch (IOException e)
             {
                 throw new FSReadError(e, desc.filenameFor(Component.STATS));
+            }
+            catch (NullPointerException e)
+            {
+                throw new FSReadError(e, "Failed to remove unfinished compaction leftovers (file: " + desc.filenameFor(Component.STATS) + ").  See log for details.");
             }
 
             if (!ancestors.isEmpty()
@@ -1167,7 +1172,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         Memtable mt = data.getMemtableFor(opGroup, replayPosition);
         final long timeDelta = mt.put(key, columnFamily, indexer, opGroup);
         maybeUpdateRowCache(key);
-        metric.samplers.get(Sampler.WRITES).addSample(key.getKey());
+        metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
         metric.writeLatency.addNano(System.nanoTime() - start);
         if(timeDelta < Long.MAX_VALUE)
             metric.colUpdateTimeDeltaHistogram.update(timeDelta);
@@ -1795,7 +1800,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             columns = controller.getTopLevelColumns(Memtable.MEMORY_POOL.needToCopyOnHeap());
         }
         if (columns != null)
-            metric.samplers.get(Sampler.READS).addSample(filter.key.getKey());
+            metric.samplers.get(Sampler.READS).addSample(filter.key.getKey(), filter.key.hashCode(), 1);
         metric.updateSSTableIterated(controller.getSstablesIterated());
         return columns;
     }
@@ -1864,7 +1869,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     private AbstractScanIterator getSequentialIterator(final DataRange range, long now)
     {
-        assert !(range.keyRange() instanceof Range) || !((Range)range.keyRange()).isWrapAround() || range.keyRange().right.isMinimum() : range.keyRange();
+        assert !(range.keyRange() instanceof Range) || !((Range<?>)range.keyRange()).isWrapAround() || range.keyRange().right.isMinimum() : range.keyRange();
 
         final ViewFragment view = select(viewFilter(range.keyRange()));
         Tracing.trace("Executing seq scan across {} sstables for {}", view.sstables.size(), range.keyRange().getString(metadata.getKeyValidator()));
@@ -2494,7 +2499,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             public Iterable<SSTableReader> call() throws Exception
             {
                 assert data.getCompacting().isEmpty() : data.getCompacting();
-                Iterable<SSTableReader> sstables = Lists.newArrayList(AbstractCompactionStrategy.filterSuspectSSTables(getSSTables()));
+                Collection<SSTableReader> sstables = Lists.newArrayList(AbstractCompactionStrategy.filterSuspectSSTables(getSSTables()));
                 if (Iterables.isEmpty(sstables))
                     return Collections.emptyList();
                 boolean success = data.markCompacting(sstables);
@@ -2744,6 +2749,20 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         public List<SSTableReader> apply(DataTracker.View view)
         {
             return new ArrayList<>(view.sstables);
+        }
+    };
+
+    public static final Function<DataTracker.View, List<SSTableReader>> UNREPAIRED_SSTABLES = new Function<DataTracker.View, List<SSTableReader>>()
+    {
+        public List<SSTableReader> apply(DataTracker.View view)
+        {
+            List<SSTableReader> sstables = new ArrayList<>();
+            for (SSTableReader sstable : view.sstables)
+            {
+                if (!sstable.isRepaired())
+                    sstables.add(sstable);
+            }
+            return sstables;
         }
     };
 }

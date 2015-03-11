@@ -133,6 +133,8 @@ public class NodeTool
                 StatusBinary.class,
                 StatusGossip.class,
                 StatusThrift.class,
+                StatusBackup.class,
+                StatusHandoff.class,
                 Stop.class,
                 StopDaemon.class,
                 Version.class,
@@ -634,9 +636,9 @@ public class NodeTool
                     if (!info.receivingSummaries.isEmpty())
                     {
                         if (humanReadable)
-                            System.out.printf("        Receiving %d files, %s total%n", info.getTotalFilesToReceive(), FileUtils.stringifyFileSize(info.getTotalSizeToReceive()));
+                            System.out.printf("        Receiving %d files, %s total. Already received %d files, %s total%n", info.getTotalFilesToReceive(), FileUtils.stringifyFileSize(info.getTotalSizeToReceive()), info.getTotalFilesReceived(), FileUtils.stringifyFileSize(info.getTotalSizeReceived()));
                         else
-                            System.out.printf("        Receiving %d files, %d bytes total%n", info.getTotalFilesToReceive(), info.getTotalSizeToReceive());
+                            System.out.printf("        Receiving %d files, %d bytes total. Already received %d files, %d bytes total%n", info.getTotalFilesToReceive(), info.getTotalSizeToReceive(), info.getTotalFilesReceived(), info.getTotalSizeReceived());
                         for (ProgressInfo progress : info.getReceivingFiles())
                         {
                             System.out.printf("            %s%n", progress.toString());
@@ -645,9 +647,9 @@ public class NodeTool
                     if (!info.sendingSummaries.isEmpty())
                     {
                         if (humanReadable)
-                            System.out.printf("        Sending %d files, %s total%n", info.getTotalFilesToSend(), FileUtils.stringifyFileSize(info.getTotalSizeToSend()));
+                            System.out.printf("        Sending %d files, %s total. Already sent %d files, %s total%n", info.getTotalFilesToSend(), FileUtils.stringifyFileSize(info.getTotalSizeToSend()), info.getTotalFilesSent(), FileUtils.stringifyFileSize(info.getTotalSizeSent()));
                         else
-                            System.out.printf("        Sending %d files, %d bytes total%n", info.getTotalFilesToSend(), info.getTotalSizeToSend());
+                            System.out.printf("        Sending %d files, %d bytes total. Already sent %d files, %d bytes total%n", info.getTotalFilesToSend(), info.getTotalSizeToSend(), info.getTotalFilesSent(), info.getTotalSizeSent());
                         for (ProgressInfo progress : info.getSendingFiles())
                         {
                             System.out.printf("            %s%n", progress.toString());
@@ -838,7 +840,7 @@ public class NodeTool
                     if (offHeapSize != null)
                         System.out.println("\t\tOff heap memory used (total): " + format(offHeapSize, humanReadable));
                     System.out.println("\t\tSSTable Compression Ratio: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "CompressionRatio"));
-                    int numberOfKeys = 0;
+                    long numberOfKeys = 0;
                     for (long keys : (long[]) probe.getColumnFamilyMetric(keyspaceName, cfName, "EstimatedColumnCountHistogram"))
                         numberOfKeys += keys;
                     System.out.println("\t\tNumber of keys (estimate): " + numberOfKeys);
@@ -2388,6 +2390,32 @@ public class NodeTool
         {
             System.out.println(
                     probe.isThriftServerRunning()
+                    ? "running"
+                    : "not running");
+        }
+    }
+
+    @Command(name = "statusbackup", description = "Status of incremental backup")
+    public static class StatusBackup extends NodeToolCmd
+    {
+        @Override
+        public void execute(NodeProbe probe)
+        {
+            System.out.println(
+                    probe.isIncrementalBackupsEnabled()
+                    ? "running"
+                    : "not running");
+        }
+    }
+
+    @Command(name = "statushandoff", description = "Status of storing future hints on the current node")
+    public static class StatusHandoff extends NodeToolCmd
+    {
+        @Override
+        public void execute(NodeProbe probe)
+        {
+            System.out.println(
+                    probe.isHandoffEnabled()
                     ? "running"
                     : "not running");
         }

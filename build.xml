@@ -339,6 +339,7 @@
           <dependency groupId="com.googlecode.json-simple" artifactId="json-simple" version="1.1"/>
           <dependency groupId="com.boundary" artifactId="high-scale-lib" version="1.0.6"/>
           <dependency groupId="com.github.jbellis" artifactId="jamm" version="0.3.0"/>
+	  <dependency groupId="com.github.tjake" artifactId="crc32ex" version="0.1.1"/>
           <dependency groupId="com.thinkaurelius.thrift" artifactId="thrift-server" version="0.3.7">
             <exclusion groupId="org.slf4j" artifactId="slf4j-log4j12"/>
           </dependency>
@@ -378,7 +379,7 @@
           <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2" />
           <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" version="2.1.2" />
           <dependency groupId="org.javassist" artifactId="javassist" version="3.18.2-GA" />
-          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="0.3.2" />
+          <dependency groupId="org.caffinitas.ohc" artifactId="ohc-core" version="0.3.4" />
           <dependency groupId="net.sf.supercsv" artifactId="super-csv" version="2.1.0" />
 	      <dependency groupId="net.ju-n.compile-command-annotations" artifactId="compile-command-annotations" version="1.2.0" />
           <dependency groupId="org.fusesource" artifactId="sigar" version="1.6.4">
@@ -508,6 +509,7 @@
         
         <!-- don't need jamm unless running a server in which case it needs to be a -javagent to be used anyway -->
         <dependency groupId="com.github.jbellis" artifactId="jamm"/>
+	<dependency groupId="com.github.tjake" artifactId="crc32ex"/>
         <dependency groupId="io.netty" artifactId="netty-all"/>
 
         <dependency groupId="org.fusesource" artifactId="sigar" version="1.6.4"/>
@@ -1226,6 +1228,9 @@
     </antcall>
   </target>
 
+  <!-- Use this with an FQDN for test class, and a csv list of methods like this:
+    ant testsome -Dtest.name=org.apache.cassandra.service.StorageServiceServerTest -Dtest.methods=testRegularMode,testGetAllRangesEmpty
+  -->
   <target name="testsome" depends="build-test" description="Execute specific unit tests" >
     <testmacro suitename="unit" inputdir="${test.unit.src}" exclude="**/pig/*.java" timeout="${test.timeout}">
       <test name="${test.name}" methods="${test.methods}"/>

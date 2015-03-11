@@ -93,6 +93,14 @@ role_manager: CassandraRoleManager
 # Will be disabled automatically for AllowAllAuthenticator.
 roles_validity_in_ms: 2000
 
+# Refresh interval for roles cache (if enabled).
+# After this interval, cache entries become eligible for refresh. Upon next
+# access, an async reload is scheduled and the old value returned until it
+# completes. If roles_validity_in_ms is non-zero, then this must be
+# also.
+# Defaults to the same value as roles_validity_in_ms.
+# roles_update_interval_in_ms: 1000
+
 # Validity period for permissions cache (fetching permissions can be an
 # expensive operation depending on the authorizer, CassandraAuthorizer is
 # one example). Defaults to 2000, set to 0 to disable.
@@ -427,6 +435,14 @@ native_transport_port: 9042
 # The maximum size of allowed frame. Frame (requests) larger than this will
 # be rejected as invalid. The default is 256MB.
 # native_transport_max_frame_size_in_mb: 256
+
+# The maximum number of concurrent client connections.
+# The default is -1, which means unlimited.
+# native_transport_max_concurrent_connections: -1
+
+# The maximum number of concurrent client connections per source ip.
+# The default is -1, which means unlimited.
+# native_transport_max_concurrent_connections_per_ip: -1
 
 # Whether to start the thrift rpc server.
 start_rpc: true
