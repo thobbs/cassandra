@@ -311,10 +311,22 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         long remainingSpace = memoryPoolCapacity;
         for (SSTableReader sstable : sstables)
         {
+            double readsPerSec = sstable.getReadMeter() == null ? 0.0 : sstable.getReadMeter().fifteenMinuteRate();
+
+            if (sstable.descriptor.version.hasSamplingLevel)
+            {
+                // We can't change the sampling level of sstables with the old format, because the serialization format
+                // doesn't include the sampling level.  Leave this one as it is.  (See CASSANDRA-8993 for details.)
+                logger.trace("SSTable {} cannot be re-sampled due to old sstable format", sstable);
+                remainingSpace -= sstable.getIndexSummaryOffHeapSize();
+                newSSTables.add(sstable);
+                totalReadsPerSec -= readsPerSec;
+                continue;
+            }
+
             int minIndexInterval = sstable.metadata.getMinIndexInterval();
             int maxIndexInterval = sstable.metadata.getMaxIndexInterval();
 
-            double readsPerSec = sstable.getReadMeter() == null ? 0.0 : sstable.getReadMeter().fifteenMinuteRate();
             long idealSpace = Math.round(remainingSpace * (readsPerSec / totalReadsPerSec));
 
             // figure out how many entries our idealSpace would buy us, and pick a new sampling level based on that

@@ -26,16 +26,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.EnumSet;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -800,11 +791,23 @@ public class SSTableReader extends SSTable implements SelfRefCounted<SSTableRead
         try
         {
             iStream = new DataInputStream(new FileInputStream(summariesFile));
-            indexSummary = IndexSummary.serializer.deserialize(iStream, partitioner, descriptor.version.hasSamplingLevel, metadata.getMinIndexInterval(), metadata.getMaxIndexInterval());
+            indexSummary = IndexSummary.serializer.deserialize(
+                    iStream, partitioner, descriptor.version.hasSamplingLevel,
+                    metadata.getMinIndexInterval(), metadata.getMaxIndexInterval());
             first = partitioner.decorateKey(ByteBufferUtil.readWithLength(iStream));
             last = partitioner.decorateKey(ByteBufferUtil.readWithLength(iStream));
             ibuilder.deserializeBounds(iStream);
             dbuilder.deserializeBounds(iStream);
+
+            // Check for an index summary that was downsampled even though the serialization format doesn't support
+            // that.  If it was downsampled, rebuild it.  See CASSANDRA-8993 for details.
+            if (!descriptor.version.hasSamplingLevel && !validateSummarySamplingLevel())
+            {
+                logger.info("Detected erroneously downsampled index summary; will rebuild summary at full sampling");
+                FileUtils.closeQuietly(iStream);
+                FileUtils.deleteWithConfirm(summariesFile);
+                return false;
+            }
         }
         catch (IOException e)
         {
@@ -820,6 +823,55 @@ public class SSTableReader extends SSTable implements SelfRefCounted<SSTableRead
         finally
         {
             FileUtils.closeQuietly(iStream);
+        }
+
+        return true;
+    }
+
+    /**
+     * Validates that an index summary has full sampling, as expected when the serialization format does not support
+     * persisting the sampling level.
+     * @return true if the summary has full sampling, false otherwise
+     */
+    private boolean validateSummarySamplingLevel()
+    {
+        // We need to check the first BASE_SAMPLING_LEVEL entries in the index summary to verify that none of them
+        // were dropped due to downsampling.
+        Iterator<FileDataInput> segments = ifile.iterator(0);
+        int i = 0;
+        int summaryEntriesChecked = 0;
+        int expectedIndexInterval = getMinIndexInterval();
+        while (segments.hasNext())
+        {
+            FileDataInput in = segments.next();
+            try
+            {
+                while (!in.isEOF())
+                {
+                    ByteBuffer indexKey = ByteBufferUtil.readWithShortLength(in);
+                    if (i % expectedIndexInterval == 0)
+                    {
+                        ByteBuffer summaryKey = ByteBuffer.wrap(indexSummary.getKey(i / expectedIndexInterval));
+                        if (!summaryKey.equals(indexKey))
+                            return false;
+                        summaryEntriesChecked++;
+
+                        if (summaryEntriesChecked == Downsampling.BASE_SAMPLING_LEVEL)
+                            return true;
+                    }
+                    RowIndexEntry.Serializer.skip(in);
+                    i++;
+                }
+            }
+            catch (IOException e)
+            {
+                markSuspect();
+                throw new CorruptSSTableException(e, in.getPath());
+            }
+            finally
+            {
+                FileUtils.closeQuietly(in);
+            }
         }
 
         return true;
@@ -946,6 +998,8 @@ public class SSTableReader extends SSTable implements SelfRefCounted<SSTableRead
      */
     public SSTableReader cloneWithNewSummarySamplingLevel(ColumnFamilyStore parent, int samplingLevel) throws IOException
     {
+        assert descriptor.version.hasSamplingLevel;
+
         synchronized (tidy.global)
         {
             assert openReason != OpenReason.EARLY;
