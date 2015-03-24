@@ -313,7 +313,7 @@ public class IndexSummaryManager implements IndexSummaryManagerMBean
         {
             double readsPerSec = sstable.getReadMeter() == null ? 0.0 : sstable.getReadMeter().fifteenMinuteRate();
 
-            if (sstable.descriptor.version.hasSamplingLevel)
+            if (!sstable.descriptor.version.hasSamplingLevel)
             {
                 // We can't change the sampling level of sstables with the old format, because the serialization format
                 // doesn't include the sampling level.  Leave this one as it is.  (See CASSANDRA-8993 for details.)

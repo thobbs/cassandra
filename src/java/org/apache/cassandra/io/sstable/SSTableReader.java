@@ -699,13 +699,39 @@ public class SSTableReader extends SSTable implements SelfRefCounted<SSTableRead
                                          : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
 
         boolean summaryLoaded = loadSummary(ibuilder, dbuilder);
+        boolean builtSummary = false;
         if (recreateBloomFilter || !summaryLoaded)
+        {
             buildSummary(recreateBloomFilter, ibuilder, dbuilder, summaryLoaded, Downsampling.BASE_SAMPLING_LEVEL);
+            builtSummary = true;
+        }
 
         ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
         dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
-        if (saveSummaryIfCreated && (recreateBloomFilter || !summaryLoaded)) // save summary information to disk
+
+        // Check for an index summary that was downsampled even though the serialization format doesn't support
+        // that.  If it was downsampled, rebuild it.  See CASSANDRA-8993 for details.
+        if (!descriptor.version.hasSamplingLevel && !builtSummary && !validateSummarySamplingLevel())
+        {
+            indexSummary.close();
+            ifile.close();
+            dfile.close();
+
+            logger.info("Detected erroneously downsampled index summary; will rebuild summary at full sampling");
+            FileUtils.deleteWithConfirm(new File(descriptor.filenameFor(Component.SUMMARY)));
+            ibuilder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode());
+            dbuilder = compression
+                       ? SegmentedFile.getCompressedBuilder()
+                       : SegmentedFile.getBuilder(DatabaseDescriptor.getDiskAccessMode());
+            buildSummary(false, ibuilder, dbuilder, false, Downsampling.BASE_SAMPLING_LEVEL);
+            ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
+            dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
             saveSummary(ibuilder, dbuilder);
+        }
+        else if (saveSummaryIfCreated && builtSummary)
+        {
+            saveSummary(ibuilder, dbuilder);
+        }
     }
 
     /**
@@ -798,16 +824,6 @@ public class SSTableReader extends SSTable implements SelfRefCounted<SSTableRead
             last = partitioner.decorateKey(ByteBufferUtil.readWithLength(iStream));
             ibuilder.deserializeBounds(iStream);
             dbuilder.deserializeBounds(iStream);
-
-            // Check for an index summary that was downsampled even though the serialization format doesn't support
-            // that.  If it was downsampled, rebuild it.  See CASSANDRA-8993 for details.
-            if (!descriptor.version.hasSamplingLevel && !validateSummarySamplingLevel())
-            {
-                logger.info("Detected erroneously downsampled index summary; will rebuild summary at full sampling");
-                FileUtils.closeQuietly(iStream);
-                FileUtils.deleteWithConfirm(summariesFile);
-                return false;
-            }
         }
         catch (IOException e)
         {
