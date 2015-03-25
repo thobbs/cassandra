@@ -851,8 +851,10 @@ public class SSTableReader extends SSTable implements SelfRefCounted<SSTableRead
      */
     private boolean validateSummarySamplingLevel()
     {
-        // We need to check the first BASE_SAMPLING_LEVEL entries in the index summary to verify that none of them
-        // were dropped due to downsampling.
+        // We need to check index summary entries against the index to verify that none of them were dropped due to
+        // downsampling.  Downsampling can drop any of the first BASE_SAMPLING_LEVEL entries (repeating that drop pattern
+        // for the remainder of the summary).  Unfortunately, the first entry to be dropped is the entry at
+        // index (BASE_SAMPLING_LEVEL - 1), so we need to check a full set of BASE_SAMPLING_LEVEL entries.
         Iterator<FileDataInput> segments = ifile.iterator(0);
         int i = 0;
         int summaryEntriesChecked = 0;
