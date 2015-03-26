@@ -1519,12 +1519,14 @@ Where possible, Cassandra will represent and accept data types in their native @
 |@bigint@   |integer, string       |integer          |String must be valid 64 bit integer|
 |@blob@     |string                |string           |String should be 0x followed by an even number of hex digits|
 |@boolean@  |boolean, string       |boolean          |String must be "true" or "false"|
+|@date@     |string                |string           |Date in format @YYYY-MM-DD@, timezone UTC|
 |@decimal@  |integer, float, string|float            |May exceed 32 or 64-bit IEEE-754 floating point precision in client-side decoder|
 |@double@   |integer, float, string|float            |String must be valid integer or float|
 |@float@    |integer, float, string|float            |String must be valid integer or float|
 |@inet@     |string                |string           |IPv4 or IPv6 address|
 |@int@      |integer, string       |integer          |String must be valid 32 bit integer|
 |@text@     |string                |string           |Uses JSON's @\u@ character escape|
+|@time@     |string                |string           |Time of day in format @HH-MM-SS[.fffffffff]@|
 |@timestamp@|integer, string       |string           |A timestamp. Strings constant are allow to input timestamps as dates, see "Working with dates":#usingdates below for more information.  Datestamps with format @YYYY-MM-DD HH:MM:SS.SSS@ are returned.|
 |@timeuuid@ |string                |string           |Type 1 UUID. See "Constants":#constants for the UUID format|
 |@uuid@     |string                |string           |See "Constants":#constants for the UUID format|

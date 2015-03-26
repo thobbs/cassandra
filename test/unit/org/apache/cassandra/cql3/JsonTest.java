@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3;
 
+import org.apache.cassandra.serializers.SimpleDateSerializer;
+import org.apache.cassandra.serializers.TimeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.junit.Test;
 
@@ -44,12 +46,14 @@ public class JsonTest extends CQLTester
                 "bigintval bigint, " +
                 "blobval blob, " +
                 "booleanval boolean, " +
+                "dateval date, " +
                 "decimalval decimal, " +
                 "doubleval double, " +
                 "floatval float, " +
                 "inetval inet, " +
                 "intval int, " +
                 "textval text, " +
+                "timeval time, " +
                 "timestampval timestamp, " +
                 "timeuuidval timeuuid, " +
                 "uuidval uuid," +
@@ -152,6 +156,16 @@ public class JsonTest extends CQLTester
 
         assertInvalidMessage("Expected a boolean value, but got a Integer",
                 "INSERT INTO %s (k, booleanval) VALUES (?, fromJson(?))", 0, "123");
+
+        // ================ date ================
+        execute("INSERT INTO %s (k, dateval) VALUES (?, fromJson(?))", 0, "\"1987-03-23\"");
+        assertRows(execute("SELECT k, dateval FROM %s WHERE k = ?", 0), row(0, SimpleDateSerializer.dateStringToDays("1987-03-23")));
+
+        assertInvalidMessage("Expected a string representation of a date",
+                "INSERT INTO %s (k, dateval) VALUES (?, fromJson(?))", 0, "123");
+
+        assertInvalidMessage("Unable to coerce 'xyz' to a formatted date",
+                "INSERT INTO %s (k, dateval) VALUES (?, fromJson(?))", 0, "\"xyz\"");
 
         // ================ decimal ================
         execute("INSERT INTO %s (k, decimalval) VALUES (?, fromJson(?))", 0, "123123.123123");
@@ -256,6 +270,16 @@ public class JsonTest extends CQLTester
 
         assertInvalidMessage("Expected a UTF-8 string, but got a Integer",
                 "INSERT INTO %s (k, textval) VALUES (?, fromJson(?))", 0, "123");
+
+        // ================ time ================
+        execute("INSERT INTO %s (k, timeval) VALUES (?, fromJson(?))", 0, "\"07:35:07.000111222\"");
+        assertRows(execute("SELECT k, timeval FROM %s WHERE k = ?", 0), row(0, TimeSerializer.timeStringToLong("07:35:07.000111222")));
+
+        assertInvalidMessage("Expected a string representation of a time value",
+                "INSERT INTO %s (k, timeval) VALUES (?, fromJson(?))", 0, "123456");
+
+        assertInvalidMessage("Unable to coerce 'xyz' to a formatted time",
+                "INSERT INTO %s (k, timeval) VALUES (?, fromJson(?))", 0, "\"xyz\"");
 
         // ================ timestamp ================
         execute("INSERT INTO %s (k, timestampval) VALUES (?, fromJson(?))", 0, "123123123123");
@@ -460,12 +484,14 @@ public class JsonTest extends CQLTester
                 "bigintval bigint, " +
                 "blobval blob, " +
                 "booleanval boolean, " +
+                "dateval date, " +
                 "decimalval decimal, " +
                 "doubleval double, " +
                 "floatval float, " +
                 "inetval inet, " +
                 "intval int, " +
                 "textval text, " +
+                "timeval time, " +
                 "timestampval timestamp, " +
                 "timeuuidval timeuuid, " +
                 "uuidval uuid," +
@@ -519,6 +545,10 @@ public class JsonTest extends CQLTester
         execute("INSERT INTO %s (k, booleanval) VALUES (?, ?)", 0, false);
         assertRows(execute("SELECT k, toJson(booleanval) FROM %s WHERE k = ?", 0), row(0, "false"));
 
+        // ================ date ================
+        execute("INSERT INTO %s (k, dateval) VALUES (?, ?)", 0, SimpleDateSerializer.dateStringToDays("1987-03-23"));
+        assertRows(execute("SELECT k, toJson(dateval) FROM %s WHERE k = ?", 0), row(0, "\"1987-03-23\""));
+
         // ================ decimal ================
         execute("INSERT INTO %s (k, decimalval) VALUES (?, ?)", 0, new BigDecimal("123123.123123"));
         assertRows(execute("SELECT k, toJson(decimalval) FROM %s WHERE k = ?", 0), row(0, "123123.123123"));
@@ -569,6 +599,10 @@ public class JsonTest extends CQLTester
 
         execute("INSERT INTO %s (k, textval) VALUES (?, ?)", 0, "\u0000");
         assertRows(execute("SELECT k, toJson(textval) FROM %s WHERE k = ?", 0), row(0, "\"\\u0000\""));
+
+        // ================ timestamp ================
+        execute("INSERT INTO %s (k, timeval) VALUES (?, ?)", 0, 123L);
+        assertRows(execute("SELECT k, toJson(timeval) FROM %s WHERE k = ?", 0), row(0, "\"00:00:00.000000123\""));
 
         // ================ timestamp ================
         execute("INSERT INTO %s (k, timestampval) VALUES (?, ?)", 0, new SimpleDateFormat("y-M-d").parse("2014-01-01"));
