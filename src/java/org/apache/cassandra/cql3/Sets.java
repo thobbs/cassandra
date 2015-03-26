@@ -239,16 +239,6 @@ public abstract class Sets
         }
     }
 
-    public static Set<ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
-    {
-        if (value instanceof Value)
-            return ((Value) value).elements;
-
-        ByteBuffer serializedList = value.get(options.getProtocolVersion());
-        SetSerializer<?> setSerializer = (SetSerializer<?>) columnType.getSerializer();
-        return setSerializer.deserializeToByteBufferCollection(serializedList, options.getProtocolVersion());
-    }
-
     public static class Setter extends Operation
     {
         public Setter(ColumnDefinition column, Term t)
@@ -290,7 +280,7 @@ public abstract class Sets
                 if (value == null)
                     return;
 
-                for (ByteBuffer bb : getElementsFromValue(value, column.type, params.options))
+                for (ByteBuffer bb : ((Value) value).elements)
                 {
                     CellName cellName = cf.getComparator().create(prefix, column, bb);
                     cf.addColumn(params.makeColumn(cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER));
@@ -327,7 +317,7 @@ public abstract class Sets
             // This can be either a set or a single element
             Set<ByteBuffer> toDiscard = value instanceof Constants.Value
                                       ? Collections.singleton(((Constants.Value)value).bytes)
-                                      : getElementsFromValue(value, column.type, params.options);
+                                      : ((Value) value).elements;
 
             for (ByteBuffer bb : toDiscard)
                 cf.addColumn(params.makeTombstone(cf.getComparator().create(prefix, column, bb)));

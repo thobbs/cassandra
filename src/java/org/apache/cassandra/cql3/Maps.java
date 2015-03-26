@@ -264,16 +264,6 @@ public abstract class Maps
         }
     }
 
-    public static Map<ByteBuffer, ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
-    {
-        if (value instanceof Value)
-            return ((Maps.Value) value).map;
-
-        ByteBuffer serializedMap = value.get(options.getProtocolVersion());
-        MapSerializer<?, ?> mapSerializer = (MapSerializer<?, ?>) columnType.getSerializer();
-        return mapSerializer.deserializeToByteBufferCollection(serializedMap, options.getProtocolVersion());
-    }
-
     public static class Setter extends Operation
     {
         public Setter(ColumnDefinition column, Term t)
@@ -358,7 +348,7 @@ public abstract class Maps
                 if (value == null)
                     return;
 
-                Map<ByteBuffer, ByteBuffer> elements = getElementsFromValue(value, column.type, params.options);
+                Map<ByteBuffer, ByteBuffer> elements = ((Value) value).map;
                 for (Map.Entry<ByteBuffer, ByteBuffer> entry : elements.entrySet())
                 {
                     CellName cellName = cf.getComparator().create(prefix, column, entry.getKey());

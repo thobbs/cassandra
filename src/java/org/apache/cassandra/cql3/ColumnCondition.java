@@ -527,13 +527,13 @@ public class ColumnCondition
             switch (type.kind)
             {
                 case LIST:
-                    List<ByteBuffer> valueList = Lists.getElementsFromValue(value, type, options);
+                    List<ByteBuffer> valueList = ((Lists.Value) value).elements;
                     return listAppliesTo((ListType)type, iter, valueList, operator);
                 case SET:
-                    Set<ByteBuffer> valueSet = Sets.getElementsFromValue(value, type, options);
+                    Set<ByteBuffer> valueSet = ((Sets.Value) value).elements;
                     return setAppliesTo((SetType)type, iter, valueSet, operator);
                 case MAP:
-                    Map<ByteBuffer, ByteBuffer> valueMap = Maps.getElementsFromValue(value, type, options);
+                    Map<ByteBuffer, ByteBuffer> valueMap = ((Maps.Value) value).map;
                     return mapAppliesTo((MapType)type, iter, valueMap, operator);
             }
             throw new AssertionError();

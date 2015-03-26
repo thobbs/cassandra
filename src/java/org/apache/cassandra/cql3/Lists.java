@@ -244,16 +244,6 @@ public abstract class Lists
         }
     }
 
-    public static List<ByteBuffer> getElementsFromValue(Term.Terminal value, AbstractType<?> columnType, QueryOptions options)
-    {
-        if (value instanceof Value)
-            return ((Value) value).elements;
-
-        ByteBuffer serializedList = value.get(options.getProtocolVersion());
-        ListSerializer<?> listSerializer = (ListSerializer<?>) columnType.getSerializer();
-        return listSerializer.deserializeToByteBufferCollection(serializedList, options.getProtocolVersion());
-    }
-
     /*
      * For prepend, we need to be able to generate unique but decreasing time
      * UUID, which is a bit challenging. To do that, given a time in milliseconds,
@@ -393,7 +383,7 @@ public abstract class Lists
                 if (value == null)
                     return;
 
-                for (ByteBuffer buffer : getElementsFromValue(value, column.type, params.options))
+                for (ByteBuffer buffer : ((Value) value).elements)
                 {
                     ByteBuffer uuid = ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes());
                     cf.addColumn(params.makeColumn(cf.getComparator().create(prefix, column, uuid), buffer));
@@ -427,7 +417,7 @@ public abstract class Lists
 
             long time = PrecisionTime.REFERENCE_TIME - (System.currentTimeMillis() - PrecisionTime.REFERENCE_TIME);
 
-            List<ByteBuffer> toAdd = getElementsFromValue(value, column.type, params.options);
+            List<ByteBuffer> toAdd = ((Value) value).elements;
             for (int i = toAdd.size() - 1; i >= 0; i--)
             {
                 PrecisionTime pt = PrecisionTime.getNext(time);
@@ -467,7 +457,7 @@ public abstract class Lists
             // Meaning that if toDiscard is big, converting it to a HashSet might be more efficient. However,
             // the read-before-write this operation requires limits its usefulness on big lists, so in practice
             // toDiscard will be small and keeping a list will be more efficient.
-            List<ByteBuffer> toDiscard = getElementsFromValue(value, column.type, params.options);
+            List<ByteBuffer> toDiscard = ((Value) value).elements;
             for (Cell cell : existingList)
             {
                 if (toDiscard.contains(cell.value()))
