@@ -63,7 +63,7 @@ public class FromJsonFct extends NativeScalarFunction
             Object object = Json.JSON_OBJECT_MAPPER.readValue(jsonArg, Object.class);
             if (object == null)
                 return null;
-            return returnType.fromJSONObject(object, protocolVersion);
+            return returnType.fromJSONObject(object).get(protocolVersion);
         }
         catch (IOException exc)
         {

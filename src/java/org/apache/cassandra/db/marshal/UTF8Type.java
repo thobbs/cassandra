@@ -21,9 +21,11 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 
+import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Json;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.UTF8Serializer;
@@ -47,11 +49,11 @@ public class UTF8Type extends AbstractType<String>
 
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {
-            return fromString((String) parsed);
+            return new Constants.Value(fromString((String) parsed));
         }
         catch (ClassCastException exc)
         {

@@ -20,6 +20,7 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.List;
 
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -55,7 +56,7 @@ public class FrozenType extends AbstractType<Void>
         throw new UnsupportedOperationException();
     }
 
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         throw new UnsupportedOperationException();
     }

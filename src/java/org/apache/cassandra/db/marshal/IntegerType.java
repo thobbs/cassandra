@@ -21,6 +21,8 @@ import java.math.BigInteger;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.IntegerSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -137,11 +139,11 @@ public final class IntegerType extends AbstractType<BigInteger>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {
-            return getSerializer().serialize(new BigInteger(parsed.toString()));
+            return new Constants.Value(getSerializer().serialize(new BigInteger(parsed.toString())));
         }
         catch (NumberFormatException exc)
         {

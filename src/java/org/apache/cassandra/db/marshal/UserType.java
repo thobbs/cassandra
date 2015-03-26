@@ -24,8 +24,7 @@ import java.util.*;
 
 import com.google.common.base.Objects;
 
-import org.apache.cassandra.cql3.CQL3Type;
-import org.apache.cassandra.cql3.Json;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
@@ -139,7 +138,7 @@ public class UserType extends TupleType
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof Map))
             throw new MarshalException(String.format(
@@ -164,7 +163,7 @@ public class UserType extends TupleType
             }
             else
             {
-                buffers[i] = types.get(i).fromJSONObject(value, protocolVersion);
+                buffers[i] = types.get(i).fromJSONObject(value).get(Server.CURRENT_VERSION);
                 foundValues += 1;
             }
         }
@@ -180,14 +179,7 @@ public class UserType extends TupleType
             }
         }
 
-        int size = 0;
-        for (ByteBuffer bb : buffers)
-            size += CollectionSerializer.sizeOfValue(bb, Server.VERSION_3);
-
-        ByteBuffer result = ByteBuffer.allocate(size);
-        for (ByteBuffer bb : buffers)
-            CollectionSerializer.writeValue(result, bb, Server.VERSION_3);
-        return (ByteBuffer)result.flip();
+        return new Constants.Value(buildValue(buffers));
     }
 
     @Override

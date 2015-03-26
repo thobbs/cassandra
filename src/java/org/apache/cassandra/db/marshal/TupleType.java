@@ -26,6 +26,8 @@ import java.util.List;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.Tuples;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
@@ -228,7 +230,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
@@ -241,31 +243,23 @@ public class TupleType extends AbstractType<ByteBuffer>
         else if (types.size() > list.size())
             throw new MarshalException(String.format("Tuple is missing items (expected %s): %s", types.size(), parsed));
 
-        List<ByteBuffer> buffers = new ArrayList<>(list.size());
+        ByteBuffer[] buffers = new ByteBuffer[list.size()];
         Iterator<AbstractType<?>> typeIterator = types.iterator();
-        for (Object element : list)
+        for (int i = 0; i < list.size(); i++)
         {
+            Object element = list.get(i);
             if (element == null)
             {
-                if (protocolVersion < Server.VERSION_3)
-                    throw new MarshalException("Tuples cannot contain nulls when the protocol version is < 3");
                 typeIterator.next();
-                buffers.add(null);
+                buffers[i] = (null);
             }
             else
             {
-                buffers.add(typeIterator.next().fromJSONObject(element, Server.VERSION_3));
+                buffers[i] = typeIterator.next().fromJSONObject(element).get(Server.CURRENT_VERSION);
             }
         }
 
-        int size = 0;
-        for (ByteBuffer bb : buffers)
-            size += CollectionSerializer.sizeOfValue(bb, protocolVersion);
-
-        ByteBuffer result = ByteBuffer.allocate(size);
-        for (ByteBuffer bb : buffers)
-            CollectionSerializer.writeValue(result, bb, protocolVersion);
-        return (ByteBuffer)result.flip();
+        return new Tuples.Value(buffers);
     }
 
     @Override

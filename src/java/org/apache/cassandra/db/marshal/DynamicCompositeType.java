@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.cassandra.cql3.Term;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -373,7 +374,7 @@ public class DynamicCompositeType extends AbstractCompositeType
         }
 
         @Override
-        public ByteBuffer fromJSONObject(Object parsed, int protocolVersion)
+        public Term.Terminal fromJSONObject(Object parsed)
         {
             throw new UnsupportedOperationException();
         }

@@ -23,6 +23,7 @@ import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
 
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -92,7 +93,7 @@ public class ColumnToCollectionType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         throw new UnsupportedOperationException();
     }

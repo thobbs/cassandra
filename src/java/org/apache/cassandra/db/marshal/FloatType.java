@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.FloatSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -58,14 +60,14 @@ public class FloatType extends AbstractType<Float>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {
             if (parsed instanceof String)
-                return fromString((String) parsed);
+                return new Constants.Value(fromString((String) parsed));
             else
-                return getSerializer().serialize(((Number) parsed).floatValue());
+                return new Constants.Value(getSerializer().serialize(((Number) parsed).floatValue()));
         }
         catch (ClassCastException exc)
         {

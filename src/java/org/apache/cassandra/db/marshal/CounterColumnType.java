@@ -20,6 +20,7 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.CounterSerializer;
@@ -69,7 +70,7 @@ public class CounterColumnType extends AbstractType<Long>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion)
+    public Term.Terminal fromJSONObject(Object parsed)
     {
         throw new UnsupportedOperationException();
     }

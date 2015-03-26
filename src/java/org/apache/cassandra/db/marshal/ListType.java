@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.cql3.Lists;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
@@ -27,6 +29,7 @@ import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.ListSerializer;
 
+import org.apache.cassandra.transport.Server;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -175,7 +178,7 @@ public class ListType<T> extends CollectionType<List<T>>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
@@ -187,9 +190,10 @@ public class ListType<T> extends CollectionType<List<T>>
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in list");
-            buffers.add(elements.fromJSONObject(element, protocolVersion));
+            buffers.add(elements.fromJSONObject(element).get(Server.CURRENT_VERSION));
         }
-        return CollectionSerializer.pack(buffers, list.size(), protocolVersion);
+
+        return new Lists.Value(buffers);
     }
 
     public static String setOrListToJsonString(ByteBuffer buffer, AbstractType elementsType, int protocolVersion)

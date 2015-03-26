@@ -20,12 +20,14 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.cql3.Sets;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
-import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.SetSerializer;
+import org.apache.cassandra.transport.Server;
 
 public class SetType<T> extends CollectionType<Set<T>>
 {
@@ -150,7 +152,7 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
@@ -162,11 +164,11 @@ public class SetType<T> extends CollectionType<Set<T>>
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in set");
-            if (!buffers.add(elements.fromJSONObject(element, protocolVersion)))
+            if (!buffers.add(elements.fromJSONObject(element).get(Server.CURRENT_VERSION)))
                 throw new MarshalException(String.format("List representation of set contained duplicate elements: %s", element));
         }
 
-        return CollectionSerializer.pack(buffers, buffers.size(), protocolVersion);
+        return new Sets.Value(buffers);
     }
 
     @Override

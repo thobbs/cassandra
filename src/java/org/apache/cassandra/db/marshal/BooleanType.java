@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.BooleanSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -61,15 +63,15 @@ public class BooleanType extends AbstractType<Boolean>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         if (parsed instanceof String)
-            return fromString((String) parsed);
+            return new Constants.Value(fromString((String) parsed));
         else if (!(parsed instanceof Boolean))
             throw new MarshalException(String.format(
                     "Expected a boolean value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
-        return getSerializer().serialize((Boolean) parsed);
+        return new Constants.Value(getSerializer().serialize((Boolean) parsed));
     }
 
     @Override

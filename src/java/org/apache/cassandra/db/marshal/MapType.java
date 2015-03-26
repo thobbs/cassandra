@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import org.apache.cassandra.cql3.Maps;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.db.Cell;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
@@ -28,7 +30,6 @@ import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.MapSerializer;
 import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.Pair;
-import org.jdom.output.Format;
 
 public class MapType<K, V> extends CollectionType<Map<K, V>>
 {
@@ -197,7 +198,7 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof Map))
             throw new MarshalException(String.format(
@@ -213,8 +214,8 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             if (entry.getValue() == null)
                 throw new MarshalException("Invalid null value in map");
 
-            buffers.add(keys.fromJSONObject(entry.getKey(), protocolVersion));
-            buffers.add(values.fromJSONObject(entry.getValue(), protocolVersion));
+            buffers.add(keys.fromJSONObject(entry.getKey()).get(Server.CURRENT_VERSION));
+            buffers.add(values.fromJSONObject(entry.getValue()).get(Server.CURRENT_VERSION));
         }
 
         if (!isMultiCell)
@@ -241,7 +242,11 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             }
         }
 
-        return CollectionSerializer.pack(buffers, map.size(), protocolVersion);
+        Map<ByteBuffer, ByteBuffer> bufferMap = new TreeMap<ByteBuffer, ByteBuffer>(keys);
+        for (int i = 0; i < buffers.size(); i += 2)
+            bufferMap.put(buffers.get(i), buffers.get(i + 1));
+
+        return new Maps.Value(bufferMap);
     }
 
     @Override

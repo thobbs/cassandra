@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.BytesSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -50,7 +52,7 @@ public class BytesType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {
@@ -58,7 +60,7 @@ public class BytesType extends AbstractType<ByteBuffer>
             if (!parsedString.startsWith("0x"))
                 throw new MarshalException(String.format("String representation of blob is missing 0x prefix: %s", parsedString));
 
-            return BytesType.instance.fromString(parsedString.substring(2));
+            return new Constants.Value(BytesType.instance.fromString(parsedString.substring(2)));
         }
         catch (ClassCastException | MarshalException exc)
         {

@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 import java.util.Date;
 
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,14 +57,14 @@ public class DateType extends AbstractType<Date>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         if (parsed instanceof Long)
-            return ByteBufferUtil.bytes((Long) parsed);
+            return new Constants.Value(ByteBufferUtil.bytes((Long) parsed));
 
         try
         {
-            return TimestampType.instance.fromString((String) parsed);
+            return new Constants.Value(TimestampType.instance.fromString((String) parsed));
         }
         catch (ClassCastException exc)
         {

@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.List;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.MarshalException;
@@ -85,9 +86,9 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
-        return baseType.fromJSONObject(parsed, protocolVersion);
+        return baseType.fromJSONObject(parsed);
     }
 
     @Override

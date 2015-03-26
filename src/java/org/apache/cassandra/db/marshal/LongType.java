@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.LongSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -69,18 +71,18 @@ public class LongType extends AbstractType<Long>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {
             if (parsed instanceof String)
-                return fromString((String) parsed);
+                return new Constants.Value(fromString((String) parsed));
 
             Number parsedNumber = (Number) parsed;
             if (!(parsedNumber instanceof Integer || parsedNumber instanceof Long))
                 throw new MarshalException(String.format("Expected a bigint value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
-            return getSerializer().serialize(parsedNumber.longValue());
+            return new Constants.Value(getSerializer().serialize(parsedNumber.longValue()));
         }
         catch (ClassCastException exc)
         {

@@ -20,6 +20,8 @@ package org.apache.cassandra.db.marshal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.Int32Serializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -66,18 +68,18 @@ public class Int32Type extends AbstractType<Integer>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {
             if (parsed instanceof String)
-                return fromString((String) parsed);
+                return new Constants.Value(fromString((String) parsed));
 
             Number parsedNumber = (Number) parsed;
             if (!(parsedNumber instanceof Integer))
                 throw new MarshalException(String.format("Expected an int value, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
-            return getSerializer().serialize(parsedNumber.intValue());
+            return new Constants.Value(getSerializer().serialize(parsedNumber.intValue()));
         }
         catch (ClassCastException exc)
         {

@@ -21,6 +21,8 @@ import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.DecimalSerializer;
 import org.apache.cassandra.serializers.MarshalException;
@@ -60,11 +62,11 @@ public class DecimalType extends AbstractType<BigDecimal>
     }
 
     @Override
-    public ByteBuffer fromJSONObject(Object parsed, int protocolVersion) throws MarshalException
+    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {
-            return getSerializer().serialize(new BigDecimal(parsed.toString()));
+            return new Constants.Value(getSerializer().serialize(new BigDecimal(parsed.toString())));
         }
         catch (NumberFormatException exc)
         {

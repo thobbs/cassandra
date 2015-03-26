@@ -120,9 +120,9 @@ public class Json
      */
     private static class PreparedLiteral extends Prepared
     {
-        private final Map<ColumnIdentifier, Object> columnMap;
+        private final Map<ColumnIdentifier, Term.Terminal> columnMap;
 
-        public PreparedLiteral(String keyspace, Map<ColumnIdentifier, Object> columnMap)
+        public PreparedLiteral(String keyspace, Map<ColumnIdentifier, Term.Terminal> columnMap)
         {
             super(keyspace);
             this.columnMap = columnMap;
@@ -130,11 +130,8 @@ public class Json
 
         protected Term.Raw getRawTermForColumn(ColumnDefinition def)
         {
-            Object value = columnMap.get(def.name);
-            if (value == null)
-                return Constants.NULL_LITERAL;
-
-            return new ColumnValue(value, def);
+            Term.Terminal value = columnMap.get(def.name);
+            return value == null ? Constants.NULL_LITERAL : new ColumnValue(value);
         }
     }
 
@@ -146,7 +143,7 @@ public class Json
         private final int bindIndex;
         private final Collection<ColumnDefinition> columns;
 
-        private Map<ColumnIdentifier, Object> columnMap;
+        private Map<ColumnIdentifier, Term.Terminal> columnMap;
 
         public PreparedMarker(String keyspace, int bindIndex, Collection<ColumnDefinition> columns)
         {
@@ -173,7 +170,7 @@ public class Json
             columnMap = parseJson(UTF8Type.instance.getSerializer().deserialize(value), columns);
         }
 
-        public Object getValue(ColumnDefinition def)
+        public Term.Terminal getValue(ColumnDefinition def)
         {
             return columnMap.get(def.name);
         }
@@ -185,40 +182,25 @@ public class Json
      * Note that this is intrinsically an already prepared term, but this still implements Term.Raw so that we can
      * easily use it to create raw operations.
      */
-    private static class ColumnValue extends Term.Terminal implements Term.Raw
+    private static class ColumnValue implements Term.Raw
     {
-        private final ColumnDefinition column;
-        private final Object parsedJsonValue;
+        private final Term.Terminal terminalValue;
 
-        public ColumnValue(Object parsedJsonValue, ColumnDefinition column)
+        public ColumnValue(Term.Terminal terminalValue)
         {
-            this.parsedJsonValue = parsedJsonValue;
-            this.column = column;
+            this.terminalValue = terminalValue;
         }
 
         @Override
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            return this;
+            return terminalValue;
         }
 
         @Override
         public TestResult testAssignment(String keyspace, ColumnSpecification receiver)
         {
             return TestResult.NOT_ASSIGNABLE;
-        }
-
-        @Override
-        public ByteBuffer get(int protocolVersion) throws InvalidRequestException
-        {
-            try
-            {
-                return column.type.fromJSONObject(parsedJsonValue, protocolVersion);
-            }
-            catch (MarshalException exc)
-            {
-                throw new InvalidRequestException(String.format("Error decoding JSON value for %s: %s", column.name, exc.getMessage()));
-            }
         }
     }
 
@@ -266,15 +248,14 @@ public class Json
         public Terminal bind(QueryOptions options) throws InvalidRequestException
         {
             marker.bind(options);
-            Object value = marker.getValue(column);
-            return value == null ? null : new ColumnValue(value, column);
+            return marker.getValue(column);
         }
     }
 
     /**
      * Given a JSON string, return a map of columns to their values for the insert.
      */
-    private static Map<ColumnIdentifier, Object> parseJson(String jsonString, Collection<ColumnDefinition> expectedReceivers)
+    private static Map<ColumnIdentifier, Term.Terminal> parseJson(String jsonString, Collection<ColumnDefinition> expectedReceivers)
     {
         try
         {
@@ -285,14 +266,25 @@ public class Json
 
             handleCaseSensitivity(valueMap);
 
-            Map<ColumnIdentifier, Object> columnMap = new HashMap<>(expectedReceivers.size());
+            Map<ColumnIdentifier, Term.Terminal> columnMap = new HashMap<>(expectedReceivers.size());
             for (ColumnSpecification spec : expectedReceivers)
             {
                 Object parsedJsonObject = valueMap.remove(spec.name.toString());
                 if (parsedJsonObject == null)
+                {
                     columnMap.put(spec.name, null);
+                }
                 else
-                    columnMap.put(spec.name, parsedJsonObject);
+                {
+                    try
+                    {
+                        columnMap.put(spec.name, spec.type.fromJSONObject(parsedJsonObject));
+                    }
+                    catch(MarshalException exc)
+                    {
+                        throw new InvalidRequestException(String.format("Error decoding JSON value for %s: %s", spec.name, exc.getMessage()));
+                    }
+                }
             }
 
             if (!valueMap.isEmpty())
