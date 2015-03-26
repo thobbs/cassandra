@@ -54,7 +54,7 @@ public abstract class Selection
 
     private final CFMetaData cfm;
     private final Collection<ColumnDefinition> columns;
-    private final ResultSet.Metadata metadata;
+    private final ResultSet.ResultMetadata metadata;
     private final boolean collectTimestamps;
     private final boolean collectTTLs;
 
@@ -66,7 +66,7 @@ public abstract class Selection
     {
         this.cfm = cfm;
         this.columns = columns;
-        this.metadata = new ResultSet.Metadata(metadata);
+        this.metadata = new ResultSet.ResultMetadata(metadata);
         this.collectTimestamps = collectTimestamps;
         this.collectTTLs = collectTTLs;
     }
@@ -147,14 +147,14 @@ public abstract class Selection
            });
     }
 
-    public ResultSet.Metadata getResultMetadata(boolean isJson)
+    public ResultSet.ResultMetadata getResultMetadata(boolean isJson)
     {
         if (!isJson)
             return metadata;
 
         ColumnSpecification firstColumn = metadata.names.get(0);
         ColumnSpecification jsonSpec = new ColumnSpecification(firstColumn.ksName, firstColumn.cfName, Json.JSON_COLUMN_ID, UTF8Type.instance);
-        return new ResultSet.Metadata(Arrays.asList(jsonSpec));
+        return new ResultSet.ResultMetadata(Arrays.asList(jsonSpec));
     }
 
     public static Selection wildcard(CFMetaData cfm)

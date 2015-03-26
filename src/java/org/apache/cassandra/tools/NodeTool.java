@@ -133,6 +133,8 @@ public class NodeTool
                 StatusBinary.class,
                 StatusGossip.class,
                 StatusThrift.class,
+                StatusBackup.class,
+                StatusHandoff.class,
                 Stop.class,
                 StopDaemon.class,
                 Version.class,
@@ -154,11 +156,19 @@ public class NodeTool
                 GetLoggingLevels.class
         );
 
-        Cli<Runnable> parser = Cli.<Runnable>builder("nodetool")
-                .withDescription("Manage your Cassandra cluster")
+        Cli.CliBuilder<Runnable> builder = Cli.builder("nodetool");
+
+        builder.withDescription("Manage your Cassandra cluster")
+                 .withDefaultCommand(Help.class)
+                 .withCommands(commands);
+
+        // bootstrap commands
+        builder.withGroup("bootstrap")
+                .withDescription("Monitor/manage node's bootstrap process")
                 .withDefaultCommand(Help.class)
-                .withCommands(commands)
-                .build();
+                .withCommand(BootstrapResume.class);
+
+        Cli<Runnable> parser = builder.build();
 
         int status = 0;
         try
@@ -252,7 +262,7 @@ public class NodeTool
             try (NodeProbe probe = connect())
             {
                 execute(probe);
-            } 
+            }
             catch (IOException e)
             {
                 throw new RuntimeException("Error while closing JMX connection", e);
@@ -507,20 +517,20 @@ public class NodeTool
             try
             {
                 ownerships = probe.effectiveOwnership(keyspace);
-            } 
+            }
             catch (IllegalStateException ex)
             {
                 ownerships = probe.getOwnership();
                 errors.append("Note: " + ex.getMessage() + "%n");
                 showEffectiveOwnership = false;
-            } 
+            }
             catch (IllegalArgumentException ex)
             {
                 System.out.printf("%nError: " + ex.getMessage() + "%n");
                 return;
             }
 
-            
+
             System.out.println();
             for (Entry<String, SetHostStat> entry : getOwnershipByDc(probe, resolveIp, tokensToEndpoints, ownerships).entrySet())
                 printDc(probe, format, entry.getKey(), endpointsToTokens, entry.getValue(),showEffectiveOwnership);
@@ -634,9 +644,9 @@ public class NodeTool
                     if (!info.receivingSummaries.isEmpty())
                     {
                         if (humanReadable)
-                            System.out.printf("        Receiving %d files, %s total%n", info.getTotalFilesToReceive(), FileUtils.stringifyFileSize(info.getTotalSizeToReceive()));
+                            System.out.printf("        Receiving %d files, %s total. Already received %d files, %s total%n", info.getTotalFilesToReceive(), FileUtils.stringifyFileSize(info.getTotalSizeToReceive()), info.getTotalFilesReceived(), FileUtils.stringifyFileSize(info.getTotalSizeReceived()));
                         else
-                            System.out.printf("        Receiving %d files, %d bytes total%n", info.getTotalFilesToReceive(), info.getTotalSizeToReceive());
+                            System.out.printf("        Receiving %d files, %d bytes total. Already received %d files, %d bytes total%n", info.getTotalFilesToReceive(), info.getTotalSizeToReceive(), info.getTotalFilesReceived(), info.getTotalSizeReceived());
                         for (ProgressInfo progress : info.getReceivingFiles())
                         {
                             System.out.printf("            %s%n", progress.toString());
@@ -645,9 +655,9 @@ public class NodeTool
                     if (!info.sendingSummaries.isEmpty())
                     {
                         if (humanReadable)
-                            System.out.printf("        Sending %d files, %s total%n", info.getTotalFilesToSend(), FileUtils.stringifyFileSize(info.getTotalSizeToSend()));
+                            System.out.printf("        Sending %d files, %s total. Already sent %d files, %s total%n", info.getTotalFilesToSend(), FileUtils.stringifyFileSize(info.getTotalSizeToSend()), info.getTotalFilesSent(), FileUtils.stringifyFileSize(info.getTotalSizeSent()));
                         else
-                            System.out.printf("        Sending %d files, %d bytes total%n", info.getTotalFilesToSend(), info.getTotalSizeToSend());
+                            System.out.printf("        Sending %d files, %d bytes total. Already sent %d files, %d bytes total%n", info.getTotalFilesToSend(), info.getTotalSizeToSend(), info.getTotalFilesSent(), info.getTotalSizeSent());
                         for (ProgressInfo progress : info.getSendingFiles())
                         {
                             System.out.printf("            %s%n", progress.toString());
@@ -670,20 +680,20 @@ public class NodeTool
                 long completed;
 
                 pending = 0;
-                for (int n : ms.getCommandPendingTasks().values())
+                for (int n : ms.getLargeMessagePendingTasks().values())
                     pending += n;
                 completed = 0;
-                for (long n : ms.getCommandCompletedTasks().values())
+                for (long n : ms.getLargeMessageCompletedTasks().values())
                     completed += n;
-                System.out.printf("%-25s%10s%10s%15s%n", "Commands", "n/a", pending, completed);
+                System.out.printf("%-25s%10s%10s%15s%n", "Large messages", "n/a", pending, completed);
 
                 pending = 0;
-                for (int n : ms.getResponsePendingTasks().values())
+                for (int n : ms.getSmallMessagePendingTasks().values())
                     pending += n;
                 completed = 0;
-                for (long n : ms.getResponseCompletedTasks().values())
+                for (long n : ms.getSmallMessageCompletedTasks().values())
                     completed += n;
-                System.out.printf("%-25s%10s%10s%15s%n", "Responses", "n/a", pending, completed);
+                System.out.printf("%-25s%10s%10s%15s%n", "Small messages", "n/a", pending, completed);
             }
         }
     }
@@ -838,7 +848,7 @@ public class NodeTool
                     if (offHeapSize != null)
                         System.out.println("\t\tOff heap memory used (total): " + format(offHeapSize, humanReadable));
                     System.out.println("\t\tSSTable Compression Ratio: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "CompressionRatio"));
-                    int numberOfKeys = 0;
+                    long numberOfKeys = 0;
                     for (long keys : (long[]) probe.getColumnFamilyMetric(keyspaceName, cfName, "EstimatedColumnCountHistogram"))
                         numberOfKeys += keys;
                     System.out.println("\t\tNumber of keys (estimate): " + numberOfKeys);
@@ -1277,9 +1287,12 @@ public class NodeTool
                 try
                 {
                     probe.scrub(System.out, disableSnapshot, skipCorrupted, keyspace, cfnames);
+                } catch (IllegalArgumentException e)
+                {
+                    throw e;
                 } catch (Exception e)
                 {
-                    throw new RuntimeException("Error occurred during flushing", e);
+                    throw new RuntimeException("Error occurred during scrubbing", e);
                 }
             }
         }
@@ -2140,7 +2153,7 @@ public class NodeTool
             unreachableNodes = probe.getUnreachableNodes();
             hostIDMap = probe.getHostIdMap();
             epSnitchInfo = probe.getEndpointSnitchInfoProxy();
-            
+
             StringBuffer errors = new StringBuffer();
 
             Map<InetAddress, Float> ownerships = null;
@@ -2193,9 +2206,9 @@ public class NodeTool
                     printNode(endpoint.getHostAddress(), owns, tokens, hasEffectiveOwns, isTokenPerNode);
                 }
             }
-            
+
             System.out.printf("%n" + errors.toString());
-            
+
         }
 
         private void findMaxAddressLength(Map<String, SetHostStat> dcs)
@@ -2281,7 +2294,7 @@ public class NodeTool
         }
     }
 
-    private static Map<String, SetHostStat> getOwnershipByDc(NodeProbe probe, boolean resolveIp, 
+    private static Map<String, SetHostStat> getOwnershipByDc(NodeProbe probe, boolean resolveIp,
                                                              Map<String, String> tokenToEndpoint,
                                                              Map<InetAddress, Float> ownerships)
     {
@@ -2388,6 +2401,32 @@ public class NodeTool
         {
             System.out.println(
                     probe.isThriftServerRunning()
+                    ? "running"
+                    : "not running");
+        }
+    }
+
+    @Command(name = "statusbackup", description = "Status of incremental backup")
+    public static class StatusBackup extends NodeToolCmd
+    {
+        @Override
+        public void execute(NodeProbe probe)
+        {
+            System.out.println(
+                    probe.isIncrementalBackupsEnabled()
+                    ? "running"
+                    : "not running");
+        }
+    }
+
+    @Command(name = "statushandoff", description = "Status of storing future hints on the current node")
+    public static class StatusHandoff extends NodeToolCmd
+    {
+        @Override
+        public void execute(NodeProbe probe)
+        {
+            System.out.println(
+                    probe.isHandoffEnabled()
                     ? "running"
                     : "not running");
         }
@@ -2640,7 +2679,7 @@ public class NodeTool
                 probe.truncateHints(endpoint);
         }
     }
-    
+
     @Command(name = "setlogginglevel", description = "Set the log level threshold for a given class. If both class and level are empty/null, it will reset to the initial configuration")
     public static class SetLoggingLevel extends NodeToolCmd
     {
@@ -2655,7 +2694,7 @@ public class NodeTool
             probe.setLoggingLevel(classQualifier, level);
         }
     }
-    
+
     @Command(name = "getlogginglevels", description = "Get the runtime logging levels")
     public static class GetLoggingLevels extends NodeToolCmd
     {
@@ -2669,4 +2708,20 @@ public class NodeTool
         }
     }
 
+    @Command(name = "resume", description = "Resume bootstrap streaming")
+    public static class BootstrapResume extends NodeToolCmd
+    {
+        @Override
+        protected void execute(NodeProbe probe)
+        {
+            try
+            {
+                probe.resumeBootstrap(System.out);
+            }
+            catch (IOException e)
+            {
+                throw new IOError(e);
+            }
+        }
+    }
 }

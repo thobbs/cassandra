@@ -50,7 +50,6 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.compress.CompressionParameters;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.io.util.IAllocator;
 import org.apache.cassandra.net.AsyncOneResponse;
 import org.apache.thrift.*;
 import org.codehaus.jackson.JsonFactory;
@@ -60,7 +59,7 @@ public class FBUtilities
 {
     private static final Logger logger = LoggerFactory.getLogger(FBUtilities.class);
 
-    private static ObjectMapper jsonMapper = new ObjectMapper(new JsonFactory());
+    private static final ObjectMapper jsonMapper = new ObjectMapper(new JsonFactory());
 
     public static final BigInteger TWO = new BigInteger("2");
     private static final String DEFAULT_TRIGGER_DIR = "triggers";
@@ -413,13 +412,6 @@ public class FBUtilities
         return FBUtilities.instanceOrConstruct(partitionerClassName, "partitioner");
     }
 
-    public static IAllocator newOffHeapAllocator(String offheap_allocator) throws ConfigurationException
-    {
-        if (!offheap_allocator.contains("."))
-            offheap_allocator = "org.apache.cassandra.io.util." + offheap_allocator;
-        return FBUtilities.construct(offheap_allocator, "off-heap allocator");
-    }
-
     public static IAuthorizer newAuthorizer(String className) throws ConfigurationException
     {
         if (!className.contains("."))
@@ -540,19 +532,16 @@ public class FBUtilities
      */
     public static Field getProtectedField(Class klass, String fieldName)
     {
-        Field field;
-
         try
         {
-            field = klass.getDeclaredField(fieldName);
+            Field field = klass.getDeclaredField(fieldName);
             field.setAccessible(true);
+            return field;
         }
         catch (Exception e)
         {
             throw new AssertionError(e);
         }
-
-        return field;
     }
 
     public static <T> CloseableIterator<T> closeableIterator(Iterator<T> iterator)
@@ -675,7 +664,8 @@ public class FBUtilities
             {
                 directUpdate.invoke(checksum, bb);
                 return;
-            } catch (IllegalAccessException e)
+            }
+            catch (IllegalAccessException e)
             {
                 directUpdate = null;
                 logger.warn("JVM doesn't support Adler32 byte buffer access");

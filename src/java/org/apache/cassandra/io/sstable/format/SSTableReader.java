@@ -62,6 +62,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
+import org.apache.cassandra.utils.concurrent.SelfRefCounted;
 
 import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR;
 
@@ -121,7 +122,7 @@ import static org.apache.cassandra.db.Directories.SECONDARY_INDEX_NAME_SEPARATOR
  *
  * TODO: fill in details about DataTracker and lifecycle interactions for tools, and for compaction strategies
  */
-public abstract class SSTableReader extends SSTable implements RefCounted<SSTableReader>
+public abstract class SSTableReader extends SSTable implements SelfRefCounted<SSTableReader>
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableReader.class);
 
@@ -278,11 +279,11 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
                 if (cardinality != null)
                     cardinalities.add(cardinality);
                 else
-                    logger.debug("Got a null cardinality estimator in: "+sstable.getFilename());
+                    logger.debug("Got a null cardinality estimator in: {}", sstable.getFilename());
             }
             catch (IOException e)
             {
-                logger.warn("Could not read up compaction metadata for " + sstable, e);
+                logger.warn("Could not read up compaction metadata for {}", sstable, e);
             }
         }
         long totalKeyCountBefore = 0;
@@ -343,9 +344,9 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
         return open(descriptor, components, metadata, partitioner, true);
     }
 
-    public static SSTableReader openNoValidation(Descriptor descriptor, Set<Component> components, CFMetaData metadata) throws IOException
+    public static SSTableReader openNoValidation(Descriptor descriptor, Set<Component> components, ColumnFamilyStore cfs) throws IOException
     {
-        return open(descriptor, components, metadata, StorageService.getPartitioner(), false);
+        return open(descriptor, components, cfs.metadata, cfs.partitioner, false);
     }
 
     /**
@@ -682,36 +683,35 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
             if (recreateBloomFilter)
                 bf = FilterFactory.getFilter(estimatedKeys, metadata.getBloomFilterFpChance(), true);
 
-            IndexSummaryBuilder summaryBuilder = null;
-            if (!summaryLoaded)
-                summaryBuilder = new IndexSummaryBuilder(estimatedKeys, metadata.getMinIndexInterval(), samplingLevel);
-
-            long indexPosition;
-            RowIndexEntry.IndexSerializer rowIndexSerializer = descriptor.getFormat().getIndexSerializer(metadata);
-
-            while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
+            try (IndexSummaryBuilder summaryBuilder = summaryLoaded ? null : new IndexSummaryBuilder(estimatedKeys, metadata.getMinIndexInterval(), samplingLevel))
             {
-                ByteBuffer key = ByteBufferUtil.readWithShortLength(primaryIndex);
-                RowIndexEntry indexEntry = rowIndexSerializer.deserialize(primaryIndex, descriptor.version);
-                DecoratedKey decoratedKey = partitioner.decorateKey(key);
-                if (first == null)
-                    first = decoratedKey;
-                last = decoratedKey;
+                long indexPosition;
+                RowIndexEntry.IndexSerializer rowIndexSerializer = descriptor.getFormat().getIndexSerializer(metadata);
 
-                if (recreateBloomFilter)
-                    bf.add(decoratedKey);
-
-                // if summary was already read from disk we don't want to re-populate it using primary index
-                if (!summaryLoaded)
+                while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
                 {
-                    summaryBuilder.maybeAddEntry(decoratedKey, indexPosition);
-                    ibuilder.addPotentialBoundary(indexPosition);
-                    dbuilder.addPotentialBoundary(indexEntry.position);
-                }
-            }
+                    ByteBuffer key = ByteBufferUtil.readWithShortLength(primaryIndex);
+                    RowIndexEntry indexEntry = rowIndexSerializer.deserialize(primaryIndex, descriptor.version);
+                    DecoratedKey decoratedKey = partitioner.decorateKey(key);
+                    if (first == null)
+                        first = decoratedKey;
+                    last = decoratedKey;
 
-            if (!summaryLoaded)
-                indexSummary = summaryBuilder.build(partitioner);
+                    if (recreateBloomFilter)
+                        bf.add(decoratedKey);
+
+                    // if summary was already read from disk we don't want to re-populate it using primary index
+                    if (!summaryLoaded)
+                    {
+                        summaryBuilder.maybeAddEntry(decoratedKey, indexPosition);
+                        ibuilder.addPotentialBoundary(indexPosition);
+                        dbuilder.addPotentialBoundary(indexEntry.position);
+                    }
+                }
+
+                if (!summaryLoaded)
+                    indexSummary = summaryBuilder.build(partitioner);
+            }
         }
         finally
         {
@@ -838,8 +838,8 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
                 {
                     public void run()
                     {
-                        CLibrary.trySkipCache(dfile.path, 0, dataStart);
-                        CLibrary.trySkipCache(ifile.path, 0, indexStart);
+                        dfile.dropPageCache(dataStart);
+                        ifile.dropPageCache(indexStart);
                         if (runOnClose != null)
                             runOnClose.run();
                     }
@@ -862,8 +862,8 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
             {
                 public void run()
                 {
-                    CLibrary.trySkipCache(dfile.path, 0, 0);
-                    CLibrary.trySkipCache(ifile.path, 0, 0);
+                    dfile.dropPageCache(0);
+                    ifile.dropPageCache(0);
                     runOnClose.run();
                 }
             };
@@ -946,16 +946,17 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
         try
         {
             long indexSize = primaryIndex.length();
-            IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata.getMinIndexInterval(), newSamplingLevel);
-
-            long indexPosition;
-            while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
+            try (IndexSummaryBuilder summaryBuilder = new IndexSummaryBuilder(estimatedKeys(), metadata.getMinIndexInterval(), newSamplingLevel))
             {
-                summaryBuilder.maybeAddEntry(partitioner.decorateKey(ByteBufferUtil.readWithShortLength(primaryIndex)), indexPosition);
-                RowIndexEntry.Serializer.skip(primaryIndex);
-            }
+                long indexPosition;
+                while ((indexPosition = primaryIndex.getFilePointer()) != indexSize)
+                {
+                    summaryBuilder.maybeAddEntry(partitioner.decorateKey(ByteBufferUtil.readWithShortLength(primaryIndex)), indexPosition);
+                    RowIndexEntry.Serializer.skip(primaryIndex);
+                }
 
-            return summaryBuilder.build(partitioner);
+                return summaryBuilder.build(partitioner);
+            }
         }
         finally
         {
@@ -1015,7 +1016,8 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
         return getIndexScanPositionFromBinarySearchResult(indexSummary.binarySearch(key), indexSummary);
     }
 
-    protected static long getIndexScanPositionFromBinarySearchResult(int binarySearchResult, IndexSummary referencedIndexSummary)
+    @VisibleForTesting
+    public static long getIndexScanPositionFromBinarySearchResult(int binarySearchResult, IndexSummary referencedIndexSummary)
     {
         if (binarySearchResult == -1)
             return 0;
@@ -1023,7 +1025,7 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
             return referencedIndexSummary.getPosition(getIndexSummaryIndexFromBinarySearchResult(binarySearchResult));
     }
 
-    protected static int getIndexSummaryIndexFromBinarySearchResult(int binarySearchResult)
+    public static int getIndexSummaryIndexFromBinarySearchResult(int binarySearchResult)
     {
         if (binarySearchResult < 0)
         {
@@ -1117,7 +1119,7 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
             sampleKeyCount += (sampleIndexRange.right - sampleIndexRange.left + 1);
 
         // adjust for the current sampling level: (BSL / SL) * index_interval_at_full_sampling
-        long estimatedKeys = sampleKeyCount * (Downsampling.BASE_SAMPLING_LEVEL * indexSummary.getMinIndexInterval()) / indexSummary.getSamplingLevel();
+        long estimatedKeys = sampleKeyCount * ((long) Downsampling.BASE_SAMPLING_LEVEL * indexSummary.getMinIndexInterval()) / indexSummary.getSamplingLevel();
         return Math.max(1, estimatedKeys);
     }
 
@@ -1248,7 +1250,7 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
         {
             assert !range.isWrapAround() || range.right.isMinimum();
             // truncate the range so it at most covers the sstable
-            AbstractBounds<RowPosition> bounds = range.toRowBounds();
+            AbstractBounds<RowPosition> bounds = Range.makeRowRange(range);
             RowPosition leftBound = bounds.left.compareTo(first) > 0 ? bounds.left : first.getToken().minKeyBound();
             RowPosition rightBound = bounds.right.isMinimum() ? last.getToken().maxKeyBound() : bounds.right;
 
@@ -1838,12 +1840,12 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
                     if (barrier != null)
                         barrier.await();
                     bf.close();
-                    dfile.close();
-                    ifile.close();
                     if (summary != null)
                         summary.close();
                     if (runOnClose != null)
                         runOnClose.run();
+                    dfile.close();
+                    ifile.close();
                     typeRef.release();
                 }
             });
@@ -1991,8 +1993,8 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
             if (isCompacted.get())
                 SystemKeyspace.clearSSTableReadMeter(desc.ksname, desc.cfname, desc.generation);
             // don't ideally want to dropPageCache for the file until all instances have been released
-            dropPageCache(desc.filenameFor(Component.DATA));
-            dropPageCache(desc.filenameFor(Component.PRIMARY_INDEX));
+            CLibrary.trySkipCache(desc.filenameFor(Component.DATA), 0, 0);
+            CLibrary.trySkipCache(desc.filenameFor(Component.PRIMARY_INDEX), 0, 0);
         }
 
         public String name()
@@ -2012,34 +2014,6 @@ public abstract class SSTableReader extends SSTable implements RefCounted<SSTabl
             Ref<?> ex = lookup.putIfAbsent(descriptor, refc);
             assert ex == null;
             return refc;
-        }
-    }
-
-    private static void dropPageCache(String filePath)
-    {
-        RandomAccessFile file = null;
-
-        try
-        {
-            file = new RandomAccessFile(filePath, "r");
-
-            int fd = CLibrary.getfd(file.getFD());
-
-            if (fd > 0)
-            {
-                if (logger.isDebugEnabled())
-                    logger.debug(String.format("Dropping page cache of file %s.", filePath));
-
-                CLibrary.trySkipCache(fd, 0, 0);
-            }
-        }
-        catch (IOException e)
-        {
-            // we don't care if cache cleanup fails
-        }
-        finally
-        {
-            FileUtils.closeQuietly(file);
         }
     }
 

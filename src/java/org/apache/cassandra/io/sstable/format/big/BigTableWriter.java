@@ -115,7 +115,7 @@ public class BigTableWriter extends SSTableWriter
         return (lastWrittenKey == null) ? 0 : dataFile.getFilePointer();
     }
 
-    private void afterAppend(DecoratedKey decoratedKey, long dataPosition, RowIndexEntry index)
+    private void afterAppend(DecoratedKey decoratedKey, long dataEnd, RowIndexEntry index)
     {
         metadataCollector.addKey(decoratedKey.getKey());
         lastWrittenKey = decoratedKey;
@@ -124,9 +124,9 @@ public class BigTableWriter extends SSTableWriter
             first = lastWrittenKey;
 
         if (logger.isTraceEnabled())
-            logger.trace("wrote {} at {}", decoratedKey, dataPosition);
-        iwriter.append(decoratedKey, index, dataPosition);
-        dbuilder.addPotentialBoundary(dataPosition);
+            logger.trace("wrote {} at {}", decoratedKey, dataEnd);
+        iwriter.append(decoratedKey, index, dataEnd);
+        dbuilder.addPotentialBoundary(dataEnd);
     }
 
     /**
@@ -164,16 +164,18 @@ public class BigTableWriter extends SSTableWriter
         }
 
         long startPosition = beforeAppend(decoratedKey);
+        long endPosition;
         try
         {
             RowIndexEntry entry = rawAppend(cf, startPosition, decoratedKey, dataFile.stream);
-            afterAppend(decoratedKey, startPosition, entry);
+            endPosition = dataFile.getFilePointer();
+            afterAppend(decoratedKey, endPosition, entry);
         }
         catch (IOException e)
         {
             throw new FSWriteError(e, dataFile.getPath());
         }
-        metadataCollector.update(dataFile.getFilePointer() - startPosition, cf.getColumnStats());
+        metadataCollector.update(endPosition - startPosition, cf.getColumnStats());
     }
 
     private static RowIndexEntry rawAppend(ColumnFamily cf, long startPosition, DecoratedKey key, DataOutputPlus out) throws IOException
@@ -346,7 +348,7 @@ public class BigTableWriter extends SSTableWriter
         SSTableReader sstable = SSTableReader.internalOpen(descriptor.asType(Descriptor.Type.FINAL),
                                                            components, metadata,
                                                            partitioner, ifile,
-                                                           dfile, iwriter.summary.build(partitioner, boundary.lastKey),
+                                                           dfile, iwriter.summary.build(partitioner, boundary),
                                                            iwriter.bf.sharedCopy(), maxDataAge, sstableMetadata, SSTableReader.OpenReason.EARLY);
 
         // now it's open, find the ACTUAL last readable key (i.e. for which the data file has also been flushed)
@@ -397,6 +399,7 @@ public class BigTableWriter extends SSTableWriter
         if (finishType.isFinal)
         {
             iwriter.bf.close();
+            iwriter.summary.close();
             // try to save the summaries to disk
             sstable.saveSummary(iwriter.builder, dbuilder);
             iwriter = null;
@@ -533,6 +536,7 @@ public class BigTableWriter extends SSTableWriter
 
         public void abort()
         {
+            summary.close();
             indexFile.abort();
             bf.close();
         }

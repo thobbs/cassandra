@@ -17,13 +17,13 @@
  */
 package org.apache.cassandra.io.util;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
-import com.sun.jna.Native;
 import net.nicoulaj.compilecommand.annotations.Inline;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.FastByteOperations;
+import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 import sun.misc.Unsafe;
 import sun.nio.ch.DirectBuffer;
@@ -33,12 +33,27 @@ import sun.nio.ch.DirectBuffer;
  */
 public class Memory implements AutoCloseable
 {
-    private static final Unsafe unsafe = NativeAllocator.unsafe;
-    static final IAllocator allocator = DatabaseDescriptor.getoffHeapMemoryAllocator();
+    private static final Unsafe unsafe;
+    static
+    {
+        try
+        {
+            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            field.setAccessible(true);
+            unsafe = (sun.misc.Unsafe) field.get(null);
+        }
+        catch (Exception e)
+        {
+            throw new AssertionError(e);
+        }
+    }
+
     private static final long BYTE_ARRAY_BASE_OFFSET = unsafe.arrayBaseOffset(byte[].class);
 
     private static final boolean bigEndian = ByteOrder.nativeOrder().equals(ByteOrder.BIG_ENDIAN);
     private static final boolean unaligned;
+
+    public static final ByteBuffer[] NO_BYTE_BUFFERS = new ByteBuffer[0];
 
     static
     {
@@ -56,7 +71,7 @@ public class Memory implements AutoCloseable
         if (bytes <= 0)
             throw new AssertionError();
         size = bytes;
-        peer = allocator.allocate(size);
+        peer = MemoryUtil.allocate(size);
         // we permit a 0 peer iff size is zero, since such an allocation makes no sense, and an allocator would be
         // justified in returning a null pointer (and permitted to do so: http://www.cplusplus.com/reference/cstdlib/malloc)
         if (peer == 0)
@@ -75,6 +90,9 @@ public class Memory implements AutoCloseable
     {
         if (bytes < 0)
             throw new IllegalArgumentException();
+
+        if (Ref.DEBUG_ENABLED)
+            return new SafeMemory(bytes);
 
         return new Memory(bytes);
     }
@@ -162,6 +180,33 @@ public class Memory implements AutoCloseable
         }
     }
 
+    public void setShort(long offset, short l)
+    {
+        checkBounds(offset, offset + 2);
+        if (unaligned)
+        {
+            unsafe.putShort(peer + offset, l);
+        }
+        else
+        {
+            putShortByByte(peer + offset, l);
+        }
+    }
+
+    private void putShortByByte(long address, short value)
+    {
+        if (bigEndian)
+        {
+            unsafe.putByte(address, (byte) (value >> 8));
+            unsafe.putByte(address + 1, (byte) (value));
+        }
+        else
+        {
+            unsafe.putByte(address + 1, (byte) (value >> 8));
+            unsafe.putByte(address, (byte) (value));
+        }
+    }
+
     public void setBytes(long memoryOffset, ByteBuffer buffer)
     {
         if (buffer == null)
@@ -200,9 +245,7 @@ public class Memory implements AutoCloseable
         else if (count == 0)
             return;
 
-        long end = memoryOffset + count;
-        checkBounds(memoryOffset, end);
-
+        checkBounds(memoryOffset, memoryOffset + count);
         unsafe.copyMemory(buffer, BYTE_ARRAY_BASE_OFFSET + bufferOffset, null, peer + memoryOffset, count);
     }
 
@@ -298,6 +341,8 @@ public class Memory implements AutoCloseable
 
     public void put(long trgOffset, Memory memory, long srcOffset, long size)
     {
+        checkBounds(trgOffset, trgOffset + size);
+        memory.checkBounds(srcOffset, srcOffset + size);
         unsafe.copyMemory(memory.peer + srcOffset, peer + trgOffset, size);
     }
 
@@ -310,7 +355,7 @@ public class Memory implements AutoCloseable
 
     public void free()
     {
-        if (peer != 0) allocator.free(peer);
+        if (peer != 0) MemoryUtil.free(peer);
         else assert size == 0;
         peer = 0;
     }
@@ -339,21 +384,34 @@ public class Memory implements AutoCloseable
         return false;
     }
 
-    public ByteBuffer[] asByteBuffers()
+    public ByteBuffer[] asByteBuffers(long offset, long length)
     {
         if (size() == 0)
-            return new ByteBuffer[0];
+            return NO_BYTE_BUFFERS;
 
-        ByteBuffer[] result = new ByteBuffer[(int) (size() / Integer.MAX_VALUE) + 1];
-        long offset = 0;
+        ByteBuffer[] result = new ByteBuffer[(int) (length / Integer.MAX_VALUE) + 1];
         int size = (int) (size() / result.length);
         for (int i = 0 ; i < result.length - 1 ; i++)
         {
             result[i] = MemoryUtil.getByteBuffer(peer + offset, size);
             offset += size;
+            length -= size;
         }
-        result[result.length - 1] = MemoryUtil.getByteBuffer(peer + offset, (int) (size() - offset));
+        result[result.length - 1] = MemoryUtil.getByteBuffer(peer + offset, (int) length);
         return result;
+    }
+
+    public ByteBuffer asByteBuffer(long offset, int length)
+    {
+        checkBounds(offset, offset + length);
+        return MemoryUtil.getByteBuffer(peer + offset, length);
+    }
+
+    // MUST provide a buffer created via MemoryUtil.getHollowDirectByteBuffer()
+    public void setByteBuffer(ByteBuffer buffer, long offset, int length)
+    {
+        checkBounds(offset, offset + length);
+        MemoryUtil.setByteBuffer(buffer, peer + offset, length);
     }
 
     public String toString()
@@ -365,5 +423,4 @@ public class Memory implements AutoCloseable
     {
         return String.format("Memory@[%x..%x)", peer, peer + size);
     }
-
 }
