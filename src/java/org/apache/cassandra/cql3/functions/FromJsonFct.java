@@ -26,7 +26,7 @@ import org.apache.cassandra.cql3.Json;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.marshal.*;
-import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.FunctionExecutionException;
 import org.apache.cassandra.serializers.MarshalException;
 
 public class FromJsonFct extends NativeScalarFunction
@@ -51,7 +51,7 @@ public class FromJsonFct extends NativeScalarFunction
         super("fromjson", returnType, UTF8Type.instance);
     }
 
-    public ByteBuffer execute(int protocolVersion, List<ByteBuffer> parameters) throws InvalidRequestException
+    public ByteBuffer execute(int protocolVersion, List<ByteBuffer> parameters)
     {
         assert parameters.size() == 1 : "Unexpectedly got " + parameters.size() + " arguments for fromJson()";
         ByteBuffer argument = parameters.get(0);
@@ -68,11 +68,11 @@ public class FromJsonFct extends NativeScalarFunction
         }
         catch (IOException exc)
         {
-            throw new InvalidRequestException(String.format("Could not decode JSON string '%s': %s", jsonArg, exc.toString()));
+            throw new FunctionExecutionException(NAME, Collections.singletonList("text"), String.format("Could not decode JSON string '%s': %s", jsonArg, exc.toString()));
         }
         catch (MarshalException exc)
         {
-            throw new InvalidRequestException(exc.getMessage());
+            throw FunctionExecutionException.create(this, exc);
         }
     }
 }
