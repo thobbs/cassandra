@@ -57,7 +57,7 @@ public class DateType extends AbstractType<Date>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (parsed instanceof Long)
             return new Constants.Value(ByteBufferUtil.bytes((Long) parsed));

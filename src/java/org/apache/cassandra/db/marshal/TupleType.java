@@ -26,6 +26,7 @@ import java.util.List;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.Tuples;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -230,7 +231,7 @@ public class TupleType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
@@ -243,23 +244,22 @@ public class TupleType extends AbstractType<ByteBuffer>
         else if (types.size() > list.size())
             throw new MarshalException(String.format("Tuple is missing items (expected %s): %s", types.size(), parsed));
 
-        ByteBuffer[] buffers = new ByteBuffer[list.size()];
+        List<Term> terms = new ArrayList<>(list.size());
         Iterator<AbstractType<?>> typeIterator = types.iterator();
-        for (int i = 0; i < list.size(); i++)
+        for (Object element : list)
         {
-            Object element = list.get(i);
             if (element == null)
             {
                 typeIterator.next();
-                buffers[i] = (null);
+                terms.add(Constants.NULL_VALUE);
             }
             else
             {
-                buffers[i] = typeIterator.next().fromJSONObject(element).get(Server.CURRENT_VERSION);
+                terms.add(typeIterator.next().fromJSONObject(element));
             }
         }
 
-        return new Tuples.Value(buffers);
+        return new Tuples.DelayedValue(this, terms);
     }
 
     @Override

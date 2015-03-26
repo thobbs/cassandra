@@ -86,7 +86,7 @@ public class ReversedType<T> extends AbstractType<T>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         return baseType.fromJSONObject(parsed);
     }

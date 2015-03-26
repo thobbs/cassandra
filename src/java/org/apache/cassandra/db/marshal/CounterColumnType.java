@@ -70,7 +70,7 @@ public class CounterColumnType extends AbstractType<Long>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed)
+    public Term fromJSONObject(Object parsed)
     {
         throw new UnsupportedOperationException();
     }

@@ -60,7 +60,7 @@ public class InetAddressType extends AbstractType<InetAddress>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {

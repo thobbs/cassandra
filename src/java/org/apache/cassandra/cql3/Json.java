@@ -120,9 +120,9 @@ public class Json
      */
     private static class PreparedLiteral extends Prepared
     {
-        private final Map<ColumnIdentifier, Term.Terminal> columnMap;
+        private final Map<ColumnIdentifier, Term> columnMap;
 
-        public PreparedLiteral(String keyspace, Map<ColumnIdentifier, Term.Terminal> columnMap)
+        public PreparedLiteral(String keyspace, Map<ColumnIdentifier, Term> columnMap)
         {
             super(keyspace);
             this.columnMap = columnMap;
@@ -130,7 +130,7 @@ public class Json
 
         protected Term.Raw getRawTermForColumn(ColumnDefinition def)
         {
-            Term.Terminal value = columnMap.get(def.name);
+            Term value = columnMap.get(def.name);
             return value == null ? Constants.NULL_LITERAL : new ColumnValue(value);
         }
     }
@@ -143,7 +143,7 @@ public class Json
         private final int bindIndex;
         private final Collection<ColumnDefinition> columns;
 
-        private Map<ColumnIdentifier, Term.Terminal> columnMap;
+        private Map<ColumnIdentifier, Term> columnMap;
 
         public PreparedMarker(String keyspace, int bindIndex, Collection<ColumnDefinition> columns)
         {
@@ -170,7 +170,7 @@ public class Json
             columnMap = parseJson(UTF8Type.instance.getSerializer().deserialize(value), columns);
         }
 
-        public Term.Terminal getValue(ColumnDefinition def)
+        public Term getValue(ColumnDefinition def)
         {
             return columnMap.get(def.name);
         }
@@ -184,17 +184,17 @@ public class Json
      */
     private static class ColumnValue implements Term.Raw
     {
-        private final Term.Terminal terminalValue;
+        private final Term term;
 
-        public ColumnValue(Term.Terminal terminalValue)
+        public ColumnValue(Term term)
         {
-            this.terminalValue = terminalValue;
+            this.term = term;
         }
 
         @Override
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
-            return terminalValue;
+            return term;
         }
 
         @Override
@@ -248,14 +248,15 @@ public class Json
         public Terminal bind(QueryOptions options) throws InvalidRequestException
         {
             marker.bind(options);
-            return marker.getValue(column);
+            Term term = marker.getValue(column);
+            return term == null ? null : term.bind(options);
         }
     }
 
     /**
      * Given a JSON string, return a map of columns to their values for the insert.
      */
-    private static Map<ColumnIdentifier, Term.Terminal> parseJson(String jsonString, Collection<ColumnDefinition> expectedReceivers)
+    private static Map<ColumnIdentifier, Term> parseJson(String jsonString, Collection<ColumnDefinition> expectedReceivers)
     {
         try
         {
@@ -266,7 +267,7 @@ public class Json
 
             handleCaseSensitivity(valueMap);
 
-            Map<ColumnIdentifier, Term.Terminal> columnMap = new HashMap<>(expectedReceivers.size());
+            Map<ColumnIdentifier, Term> columnMap = new HashMap<>(expectedReceivers.size());
             for (ColumnSpecification spec : expectedReceivers)
             {
                 Object parsedJsonObject = valueMap.remove(spec.name.toString());

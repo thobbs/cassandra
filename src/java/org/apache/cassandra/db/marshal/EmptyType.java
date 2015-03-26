@@ -55,7 +55,7 @@ public class EmptyType extends AbstractType<Void>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof String))
             throw new MarshalException(String.format("Expected an empty string, but got: %s", parsed));

@@ -152,23 +152,22 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
                     "Expected a list (representing a set), but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
         List list = (List) parsed;
-        TreeSet<ByteBuffer> buffers = new TreeSet<>(elements);
+        Set<Term> terms = new HashSet<>(list.size());
         for (Object element : list)
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in set");
-            if (!buffers.add(elements.fromJSONObject(element).get(Server.CURRENT_VERSION)))
-                throw new MarshalException(String.format("List representation of set contained duplicate elements: %s", element));
+            terms.add(elements.fromJSONObject(element));
         }
 
-        return new Sets.Value(buffers);
+        return new Sets.DelayedValue(elements, terms);
     }
 
     @Override

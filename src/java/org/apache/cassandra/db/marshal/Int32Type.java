@@ -68,7 +68,7 @@ public class Int32Type extends AbstractType<Integer>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         try
         {

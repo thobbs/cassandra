@@ -138,7 +138,7 @@ public class UserType extends TupleType
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof Map))
             throw new MarshalException(String.format(
@@ -148,7 +148,7 @@ public class UserType extends TupleType
 
         Json.handleCaseSensitivity(map);
 
-        ByteBuffer[] buffers = new ByteBuffer[types.size()];
+        List<Term> terms = new ArrayList<>(types.size());
 
         Set keys = map.keySet();
         assert keys.isEmpty() || keys.iterator().next() instanceof String;
@@ -159,11 +159,11 @@ public class UserType extends TupleType
             Object value = map.get(stringFieldNames.get(i));
             if (value == null)
             {
-                buffers[i] = null;
+                terms.add(Constants.NULL_VALUE);
             }
             else
             {
-                buffers[i] = types.get(i).fromJSONObject(value).get(Server.CURRENT_VERSION);
+                terms.add(types.get(i).fromJSONObject(value));
                 foundValues += 1;
             }
         }
@@ -179,7 +179,7 @@ public class UserType extends TupleType
             }
         }
 
-        return new Constants.Value(buildValue(buffers));
+        return new UserTypes.DelayedValue(this, terms);
     }
 
     @Override

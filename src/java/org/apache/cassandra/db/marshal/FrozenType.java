@@ -56,7 +56,7 @@ public class FrozenType extends AbstractType<Void>
         throw new UnsupportedOperationException();
     }
 
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         throw new UnsupportedOperationException();
     }

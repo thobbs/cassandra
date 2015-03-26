@@ -99,7 +99,7 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
     /** Given a parsed JSON string, return a byte representation of the object.
      * @param parsed the result of parsing a json string
      **/
-    public abstract Term.Terminal fromJSONObject(Object parsed) throws MarshalException;
+    public abstract Term fromJSONObject(Object parsed) throws MarshalException;
 
     /** Converts a value to a JSON string. */
     public String toJSONString(ByteBuffer buffer, int protocolVersion)

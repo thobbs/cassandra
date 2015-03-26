@@ -61,7 +61,7 @@ public class LocalByPartionerType extends AbstractType<ByteBuffer>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed)
+    public Term fromJSONObject(Object parsed)
     {
         throw new UnsupportedOperationException();
     }

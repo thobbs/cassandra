@@ -198,14 +198,14 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof Map))
             throw new MarshalException(String.format(
                     "Expected a map, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
         Map<Object, Object> map = (Map<Object, Object>) parsed;
-        List<ByteBuffer> buffers = new ArrayList<>(map.size() * 2);
+        Map<Term, Term> terms = new HashMap<>(map.size());
         for (Map.Entry<Object, Object> entry : map.entrySet())
         {
             if (entry.getKey() == null)
@@ -214,39 +214,9 @@ public class MapType<K, V> extends CollectionType<Map<K, V>>
             if (entry.getValue() == null)
                 throw new MarshalException("Invalid null value in map");
 
-            buffers.add(keys.fromJSONObject(entry.getKey()).get(Server.CURRENT_VERSION));
-            buffers.add(values.fromJSONObject(entry.getValue()).get(Server.CURRENT_VERSION));
+            terms.put(keys.fromJSONObject(entry.getKey()), values.fromJSONObject(entry.getValue()));
         }
-
-        if (!isMultiCell)
-        {
-            // the map keys may not be sorted, so we need to sort them here
-            List<Pair<ByteBuffer, ByteBuffer>> sortableValues = new ArrayList<>(buffers.size() / 2);
-            for (int i = 0; i < buffers.size(); i += 2)
-                sortableValues.add(Pair.create(buffers.get(i), buffers.get(i + 1)));
-
-            Collections.sort(sortableValues, new Comparator<Pair<ByteBuffer, ByteBuffer>>()
-            {
-                @Override
-                public int compare(Pair<ByteBuffer, ByteBuffer> o1, Pair<ByteBuffer, ByteBuffer> o2)
-                {
-                    return keys.compare(o1.left, o2.left);
-                }
-            });
-
-            for (int i = 0; i < buffers.size(); i += 2)
-            {
-                Pair<ByteBuffer, ByteBuffer> buffer = sortableValues.get(i / 2);
-                buffers.set(i, buffer.left);
-                buffers.set(i + 1, buffer.right);
-            }
-        }
-
-        Map<ByteBuffer, ByteBuffer> bufferMap = new TreeMap<ByteBuffer, ByteBuffer>(keys);
-        for (int i = 0; i < buffers.size(); i += 2)
-            bufferMap.put(buffers.get(i), buffers.get(i + 1));
-
-        return new Maps.Value(bufferMap);
+        return new Maps.DelayedValue(keys, terms);
     }
 
     @Override

@@ -63,7 +63,7 @@ public class BooleanType extends AbstractType<Boolean>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (parsed instanceof String)
             return new Constants.Value(fromString((String) parsed));

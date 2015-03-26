@@ -178,22 +178,22 @@ public class ListType<T> extends CollectionType<List<T>>
     }
 
     @Override
-    public Term.Terminal fromJSONObject(Object parsed) throws MarshalException
+    public Term fromJSONObject(Object parsed) throws MarshalException
     {
         if (!(parsed instanceof List))
             throw new MarshalException(String.format(
                     "Expected a list, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
 
         List list = (List) parsed;
-        List<ByteBuffer> buffers = new ArrayList<>(list.size());
+        List<Term> terms = new ArrayList<>(list.size());
         for (Object element : list)
         {
             if (element == null)
                 throw new MarshalException("Invalid null element in list");
-            buffers.add(elements.fromJSONObject(element).get(Server.CURRENT_VERSION));
+            terms.add(elements.fromJSONObject(element));
         }
 
-        return new Lists.Value(buffers);
+        return new Lists.DelayedValue(terms);
     }
 
     public static String setOrListToJsonString(ByteBuffer buffer, AbstractType elementsType, int protocolVersion)

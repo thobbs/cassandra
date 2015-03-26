@@ -343,12 +343,15 @@ public class JsonTest extends CQLTester
                 row(0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))))
         );
 
+        // duplicates are okay, just like in CQL
+        execute("INSERT INTO %s (k, setval) VALUES (?, fromJson(?))",
+                0, "[\"6bddc89a-5644-11e4-97fc-56847afe9798\", \"6bddc89a-5644-11e4-97fc-56847afe9798\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
+        assertRows(execute("SELECT k, setval FROM %s WHERE k = ?", 0),
+                row(0, set(UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9798"), (UUID.fromString("6bddc89a-5644-11e4-97fc-56847afe9799"))))
+        );
+
         execute("INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "[]");
         assertRows(execute("SELECT k, setval FROM %s WHERE k = ?", 0), row(0, null));
-
-        assertInvalidMessage("List representation of set contained duplicate elements",
-                "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))",
-                0, "[\"6bddc89a-5644-11e4-97fc-56847afe9799\", \"6bddc89a-5644-11e4-97fc-56847afe9799\"]");
 
         assertInvalidMessage("Expected a list (representing a set), but got a Integer",
                 "INSERT INTO %s (k, setval) VALUES (?, fromJson(?))", 0, "123");
