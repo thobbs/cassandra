@@ -185,6 +185,8 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
         long timestamp = in.readLong();
 
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
+        if (metadata == null)
+            throw new UnknownColumnFamilyException(String.format("Got range slice command for nonexistent table %s.%s", keyspace, columnFamily), null);
 
         IDiskAtomFilter predicate = metadata.comparator.diskAtomFilterSerializer().deserialize(in, version);
 

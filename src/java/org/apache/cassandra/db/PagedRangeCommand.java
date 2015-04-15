@@ -161,6 +161,8 @@ public class PagedRangeCommand extends AbstractRangeCommand
             AbstractBounds<RowPosition> keyRange = AbstractBounds.serializer.deserialize(in, version).toRowBounds();
 
             CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
+            if (metadata == null)
+                throw new UnknownColumnFamilyException(String.format("Got paged range command for nonexistent table %s.%s", keyspace, columnFamily), null);
 
             SliceQueryFilter predicate = metadata.comparator.sliceQueryFilterSerializer().deserialize(in, version);
 
