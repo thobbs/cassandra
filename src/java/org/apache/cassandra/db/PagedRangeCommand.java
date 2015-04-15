@@ -29,6 +29,7 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 
@@ -156,14 +157,17 @@ public class PagedRangeCommand extends AbstractRangeCommand
         {
             String keyspace = in.readUTF();
             String columnFamily = in.readUTF();
-            long timestamp = in.readLong();
-
-            AbstractBounds<RowPosition> keyRange = AbstractBounds.serializer.deserialize(in, version).toRowBounds();
 
             CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
             if (metadata == null)
-                throw new UnknownColumnFamilyException(String.format("Got paged range command for nonexistent table %s.%s", keyspace, columnFamily), null);
+            {
+                int bytesRead = 2 + keyspace.length() + 2 + columnFamily.length();
+                String message = String.format("Got paged range command for nonexistent table %s.%s", keyspace, columnFamily);
+                throw new MessageIn.RecoverableDeserializationFailure(message, bytesRead);
+            }
 
+            long timestamp = in.readLong();
+            AbstractBounds<RowPosition> keyRange = AbstractBounds.serializer.deserialize(in, version).toRowBounds();
             SliceQueryFilter predicate = metadata.comparator.sliceQueryFilterSerializer().deserialize(in, version);
 
             Composite start = metadata.comparator.serializer().deserialize(in);

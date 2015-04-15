@@ -96,7 +96,18 @@ public class MessageIn<T>
         }
         if (payloadSize == 0 || serializer == null)
             return create(from, null, parameters, verb, version);
-        T2 payload = serializer.deserialize(in, version);
+
+        T2 payload;
+        try
+        {
+            payload = serializer.deserialize(in, version);
+        }
+        catch (RecoverableDeserializationFailure exc)
+        {
+            logger.warn("Failed to deserialize message: " + exc.getMessage());
+            in.skipBytes(payloadSize - exc.bytesRead);
+            return null;
+        }
         return MessageIn.create(from, payload, parameters, verb, version);
     }
 
@@ -125,5 +136,16 @@ public class MessageIn<T>
         StringBuilder sbuf = new StringBuilder();
         sbuf.append("FROM:").append(from).append(" TYPE:").append(getMessageType()).append(" VERB:").append(verb);
         return sbuf.toString();
+    }
+
+    public static class RecoverableDeserializationFailure extends RuntimeException
+    {
+        public final int bytesRead;
+
+        public RecoverableDeserializationFailure(String message, int bytesRead)
+        {
+            super(message);
+            this.bytesRead = bytesRead;
+        }
     }
 }

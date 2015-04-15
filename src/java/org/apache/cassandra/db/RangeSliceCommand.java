@@ -31,6 +31,7 @@ import org.apache.cassandra.db.filter.IDiskAtomFilter;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.pager.Pageable;
@@ -182,11 +183,16 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
     {
         String keyspace = in.readUTF();
         String columnFamily = in.readUTF();
-        long timestamp = in.readLong();
 
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
         if (metadata == null)
-            throw new UnknownColumnFamilyException(String.format("Got range slice command for nonexistent table %s.%s", keyspace, columnFamily), null);
+        {
+            int bytesRead = 2 + keyspace.length() + 2 + columnFamily.length();
+            String message = String.format("Got range slice command for nonexistent table %s.%s", keyspace, columnFamily);
+            throw new MessageIn.RecoverableDeserializationFailure(message, bytesRead);
+        }
+
+        long timestamp = in.readLong();
 
         IDiskAtomFilter predicate = metadata.comparator.diskAtomFilterSerializer().deserialize(in, version);
 

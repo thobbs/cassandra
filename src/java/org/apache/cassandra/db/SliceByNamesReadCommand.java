@@ -27,6 +27,7 @@ import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -92,10 +93,16 @@ class SliceByNamesReadCommandSerializer implements IVersionedSerializer<ReadComm
         String keyspaceName = in.readUTF();
         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
         String cfName = in.readUTF();
-        long timestamp = in.readLong();
+
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, cfName);
         if (metadata == null)
-            throw new UnknownColumnFamilyException(String.format("Got slice read command for nonexistent table %s.%s", keyspaceName, cfName), null);
+        {
+            int bytesRead = 1 + 2 + keyspaceName.length() + 2 + key.limit() + 2 + cfName.length();
+            String message = String.format("Got slice read command for nonexistent table %s.%s", keyspaceName, cfName);
+            throw new MessageIn.RecoverableDeserializationFailure(message, bytesRead);
+        }
+
+        long timestamp = in.readLong();
         NamesQueryFilter filter = metadata.comparator.namesQueryFilterSerializer().deserialize(in, version);
         return new SliceByNamesReadCommand(keyspaceName, key, cfName, timestamp, filter).setIsDigestQuery(isDigest);
     }
