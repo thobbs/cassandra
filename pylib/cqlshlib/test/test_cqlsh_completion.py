@@ -162,7 +162,6 @@ class TestCqlshCompletion(CqlshCompletionCase):
                                      'users',
                                      'has_all_types',
                                      'system.',
-                                     'system_auth.',
                                      'empty_composite_table',
                                      'empty_table',
                                      'undefined_values_table',
@@ -305,14 +304,14 @@ class TestCqlshCompletion(CqlshCompletionCase):
     def test_complete_in_update(self):
         self.trycompletions("UPD", immediate="ATE ")
         self.trycompletions("UPDATE ",
-                            choices=['twenty_rows_table', 'system_auth.',
+                            choices=['twenty_rows_table',
                                      'users', 'has_all_types', 'system.',
                                      'ascii_with_special_chars',
                                      'empty_composite_table', 'empty_table',
                                      'undefined_values_table',
                                      'dynamic_columns',
                                      'twenty_rows_composite_table',
-                                     'utf8_with_special_chars', 'ks.',
+                                     'utf8_with_special_chars',
                                      'system_traces.', 'songs'],
                             other_choices_ok=True)
 
