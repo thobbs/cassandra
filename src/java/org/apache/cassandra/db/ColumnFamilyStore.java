@@ -953,7 +953,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public static long removeDeletedColumnsOnly(ColumnFamily cf, int gcBefore, SecondaryIndexManager.Updater indexer)
     {
-        Iterator<Column> iter = cf.iterator();
+        BatchRemoveIterator<Column> iter = cf.batchRemoveIterator();
         DeletionInfo.InOrderTester tester = cf.inOrderDeletionTester();
         boolean hasDroppedColumns = !cf.metadata.getDroppedColumns().isEmpty();
         long removedBytes = 0;
@@ -971,6 +971,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                 removedBytes += c.dataSize();
             }
         }
+        iter.commit();
         return removedBytes;
     }
 
@@ -993,10 +994,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (cf == null || cf.metadata.getDroppedColumns().isEmpty())
             return;
 
-        Iterator<Column> iter = cf.iterator();
+        BatchRemoveIterator<Column> iter = cf.batchRemoveIterator();
         while (iter.hasNext())
             if (isDroppedColumn(iter.next(), metadata))
                 iter.remove();
+        iter.commit();
     }
 
     /**
@@ -1089,6 +1091,11 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             for (Pair<Long, Long> position : positions)
                 expectedFileSize += position.right - position.left;
         }
+
+        double compressionRatio = getCompressionRatio();
+        if (compressionRatio > 0d)
+            expectedFileSize *= compressionRatio;
+
         return expectedFileSize;
     }
 
@@ -1450,7 +1457,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     private ViewFragment markReferenced(Function<DataTracker.View, List<SSTableReader>> filter)
     {
-        List<SSTableReader> sstables;
+        List<SSTableReader> sstables = null;
+        List<SSTableReader> prevSstables = null;
         DataTracker.View view;
 
         while (true)
@@ -1464,9 +1472,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             }
 
             sstables = filter.apply(view);
+
+            if (null != prevSstables)
+            {
+                // we're trying again so verify we're acquiring something different
+                assert (!new HashSet<>(sstables).containsAll(prevSstables)) : "Next attempt at acquiring " +
+                        "references is trying the same files. There is probably a reference counting bug somewhere.";
+            }
+
             if (SSTableReader.acquireReferences(sstables))
                 break;
             // retry w/ new view
+            prevSstables = sstables;
         }
 
         return new ViewFragment(sstables, Iterables.concat(Collections.singleton(view.memtable), view.memtablesPendingFlush));

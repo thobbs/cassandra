@@ -516,8 +516,21 @@ public class DatabaseDescriptor
         return conf.dynamic_snitch ? new DynamicEndpointSnitch(snitch) : snitch;
     }
 
-    /** load keyspace (keyspace) definitions, but do not initialize the keyspace instances. */
+    /**
+     * load keyspace (keyspace) definitions, but do not initialize the keyspace instances.
+     * Schema version may be updated as the result.
+     */
     public static void loadSchemas()
+    {
+        loadSchemas(true);
+    }
+
+    /**
+     * Load schema definitions.
+     *
+     * @param updateVersion true if schema version needs to be updated
+     */
+    public static void loadSchemas(boolean updateVersion)
     {
         ColumnFamilyStore schemaCFS = SystemKeyspace.schemaCFS(SystemKeyspace.SCHEMA_KEYSPACES_CF);
 
@@ -536,7 +549,8 @@ public class DatabaseDescriptor
             Schema.instance.load(DefsTables.loadFromKeyspace());
         }
 
-        Schema.instance.updateVersion();
+        if (updateVersion)
+            Schema.instance.updateVersion();
     }
 
     private static boolean hasExistingNoSystemTables()
@@ -1092,6 +1106,25 @@ public class DatabaseDescriptor
     public static int getNativeTransportMaxFrameSize()
     {
         return conf.native_transport_max_frame_size_in_mb * 1024 * 1024;
+    }
+
+    public static Long getNativeTransportMaxConcurrentConnections()
+    {
+        return conf.native_transport_max_concurrent_connections;
+    }
+
+    public static void setNativeTransportMaxConcurrentConnections(long nativeTransportMaxConcurrentConnections)
+    {
+        conf.native_transport_max_concurrent_connections = nativeTransportMaxConcurrentConnections;
+    }
+
+    public static Long getNativeTransportMaxConcurrentConnectionsPerIp() {
+        return conf.native_transport_max_concurrent_connections_per_ip;
+    }
+
+    public static void setNativeTransportMaxConcurrentConnectionsPerIp(long native_transport_max_concurrent_connections_per_ip)
+    {
+        conf.native_transport_max_concurrent_connections_per_ip = native_transport_max_concurrent_connections_per_ip;
     }
 
     public static double getCommitLogSyncBatchWindow()

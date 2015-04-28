@@ -1,3 +1,88 @@
+2.0.15:
+ * Ignore gossip SYNs after shutdown (CASSANDRA-9238)
+ * Avoid overflow when calculating max sstable size in LCS (CASSANDRA-9235)
+ * Make sstable blacklisting work with compression (CASSANDRA-9138)
+ * Do not attempt to rebuild indexes if no index accepts any column (CASSANDRA-9196)
+ * Don't initiate snitch reconnection for dead states (CASSANDRA-7292)
+ * Fix ArrayIndexOutOfBoundsException in CQLSSTableWriter (CASSANDRA-8978)
+ * Add shutdown gossip state to prevent timeouts during rolling restarts (CASSANDRA-8336)
+ * Fix running with java.net.preferIPv6Addresses=true (CASSANDRA-9137)
+ * Fix failed bootstrap/replace attempts being persisted in system.peers (CASSANDRA-9180)
+ * Flush system.IndexInfo after marking index built (CASSANDRA-9128)
+ * Fix updates to min/max_compaction_threshold through cassandra-cli
+   (CASSANDRA-8102)
+ * Backport CASSANDRA-6863 without digest updates (CASSANDRA-8989)
+ * Don't include tmp files when doing offline relevel (CASSANDRA-9088)
+ * Use the proper CAS WriteType when finishing a previous round during Paxos
+   preparation (CASSANDRA-8672)
+ * Avoid race in cancelling compactions (CASSANDRA-9070)
+ * More aggressive check for expired sstables in DTCS (CASSANDRA-8359)
+ * Don't set clientMode to true when bulk-loading sstables to avoid
+   a NullPointerException (CASSANDRA-8238)
+ * Fix ignored index_interval change in ALTER TABLE statements (CASSANDRA-7976)
+ * Do more aggressive compaction in old time windows in DTCS (CASSANDRA-8360)
+ * java.lang.AssertionError when reading saved cache (CASSANDRA-8740)
+ * "disk full" when running cleanup (CASSANDRA-9036)
+ * Make PasswordAuthenticator number of hashing rounds configurable (CASSANDRA-8085)
+ * Lower logging level from ERROR to DEBUG when a scheduled schema pull
+   cannot be completed due to a node being down (CASSANDRA-9032)
+ * Fix MOVED_NODE client event (CASSANDRA-8516)
+ * Allow overriding MAX_OUTSTANDING_REPLAY_COUNT (CASSANDRA-7533)
+ * Fix malformed JMX ObjectName containing IPv6 addresses (CASSANDRA-9027)
+ * Fix potential data loss in CompressedSequentialWriter (CASSANDRA-8949)
+ * (cqlsh) Allow increasing CSV field size limit through
+   cqlshrc config option (CASSANDRA-8934)
+ * Stop logging range tombstones when exceeding the threshold
+   (CASSANDRA-8559)
+ * Fix NullPointerException when nodetool getendpoints is run
+   against invalid keyspaces or tables (CASSANDRA-8950)
+ * Allow specifying the tmp dir (CASSANDRA-7712)
+ * Improve compaction estimated tasks estimation (CASSANDRA-8904)
+ * Fix duplicate up/down messages sent to native clients (CASSANDRA-7816)
+ * Expose commit log archive status via JMX (CASSANDRA-8734)
+ * Provide better exceptions for invalid replication strategy parameters
+   (CASSANDRA-8909)
+ * Fix regression in mixed single and multi-column relation support for
+   SELECT statements (CASSANDRA-8613)
+ * Add ability to limit number of native connections (CASSANDRA-8086)
+ * Fix CQLSSTableWriter throwing exception and spawning threads
+   (CASSANDRA-8808)
+ * Fix MT mismatch between empty and GC-able data (CASSANDRA-8979)
+ * Fix incorrect validation when snapshotting single table (CASSANDRA-8056)
+
+2.0.14
+ * Bind JMX to localhost unless explicitly configured otherwise (CASSANDRA-9085)
+
+2.0.13:
+ * Add offline tool to relevel sstables (CASSANDRA-8301)
+ * Preserve stream ID for more protocol errors (CASSANDRA-8848)
+ * Fix combining token() function with multi-column relations on
+   clustering columns (CASSANDRA-8797)
+ * Make CFS.markReferenced() resistant to bad refcounting (CASSANDRA-8829)
+ * Fix StreamTransferTask abort/complete bad refcounting (CASSANDRA-8815)
+ * Fix AssertionError when querying a DESC clustering ordered
+   table with ASC ordering and paging (CASSANDRA-8767)
+ * AssertionError: "Memory was freed" when running cleanup (CASSANDRA-8716)
+ * Make it possible to set max_sstable_age to fractional days (CASSANDRA-8406)
+ * Fix memory leak in SSTableSimple*Writer and SSTableReader.validate()
+   (CASSANDRA-8748)
+ * Fix some multi-column relations with indexes on some clustering
+   columns (CASSANDRA-8275)
+ * Fix IllegalArgumentException in dynamic snitch (CASSANDRA-8448)
+ * Add support for UPDATE ... IF EXISTS (CASSANDRA-8610)
+ * Fix reversal of list prepends (CASSANDRA-8733)
+ * Prevent non-zero default_time_to_live on tables with counters
+   (CASSANDRA-8678)
+ * Fix SSTableSimpleUnsortedWriter ConcurrentModificationException
+   (CASSANDRA-8619)
+ * Round up time deltas lower than 1ms in BulkLoader (CASSANDRA-8645)
+ * Add batch remove iterator to ABSC (CASSANDRA-8414, 8666)
+ * Fix isClientMode check in Keyspace (CASSANDRA-8687)
+ * 'nodetool info' prints exception against older node (CASSANDRA-8796)
+ * Ensure SSTableSimpleUnsortedWriter.close() terminates if
+   disk writer has crashed (CASSANDRA-8807)
+
+
 2.0.12:
  * Use more efficient slice size for querying internal secondary
    index tables (CASSANDRA-8550)
@@ -28,7 +113,7 @@
  * Fix NPE after dropping a keyspace (CASSANDRA-8332)
  * Fix error message on read repair timeouts (CASSANDRA-7947)
  * Default DTCS base_time_seconds changed to 60 (CASSANDRA-8417)
- * Refuse Paxos operation with more than one pending endpoint (CASSANDRA-8346)
+ * Refuse Paxos operation with more than one pending endpoint (CASSANDRA-8346, 8640)
  * Throw correct exception when trying to bind a keyspace or table
    name (CASSANDRA-6952)
  * Make HHOM.compact synchronized (CASSANDRA-8416)

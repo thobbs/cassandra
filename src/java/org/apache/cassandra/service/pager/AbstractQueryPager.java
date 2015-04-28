@@ -212,7 +212,7 @@ abstract class AbstractQueryPager implements QueryPager
         {
             Row first = rows.get(i++);
             firstKey = first.key;
-            firstCf = first.cf.cloneMeShallow();
+            firstCf = first.cf.cloneMeShallow(isReversed());
             toDiscard -= isReversed()
                        ? discardLast(first.cf, toDiscard, firstCf)
                        : discardFirst(first.cf, toDiscard, firstCf);
@@ -252,7 +252,7 @@ abstract class AbstractQueryPager implements QueryPager
         {
             Row last = rows.get(i--);
             lastKey = last.key;
-            lastCf = last.cf.cloneMeShallow();
+            lastCf = last.cf.cloneMeShallow(isReversed());
             toDiscard -= isReversed()
                        ? discardFirst(last.cf, toDiscard, lastCf)
                        : discardLast(last.cf, toDiscard, lastCf);

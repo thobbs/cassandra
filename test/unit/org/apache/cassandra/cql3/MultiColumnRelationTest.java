@@ -65,7 +65,7 @@ public class MultiColumnRelationTest
             executeSchemaChange(
                     "CREATE TABLE IF NOT EXISTS %s.single_partition" + tableSuffix + "(a int PRIMARY KEY, b int)" + compactOption);
             executeSchemaChange(
-                    "CREATE TABLE IF NOT EXISTS %s.compound_partition" +tableSuffix + "(a int, b int, c int, PRIMARY KEY ((a, b)))" + compactOption);
+                    "CREATE TABLE IF NOT EXISTS %s.compound_partition" + tableSuffix + "(a int, b int, c int, PRIMARY KEY ((a, b)))" + compactOption);
             executeSchemaChange(
                     "CREATE TABLE IF NOT EXISTS %s.single_clustering" + tableSuffix + "(a int, b int, c int, PRIMARY KEY (a, b))" + compactOption);
             executeSchemaChange(
@@ -76,6 +76,15 @@ public class MultiColumnRelationTest
                     "CREATE TABLE IF NOT EXISTS %s.multiple_clustering_reversed" + tableSuffix +
                         "(a int, b int, c int, d int, PRIMARY KEY (a, b, c, d)) WITH " + compactOption + " CLUSTERING ORDER BY (b DESC, c ASC, d DESC)");
         }
+
+        executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.multiple_clustering_with_indices (a int, b int, c int, d int, e int, PRIMARY KEY (a, b, c, d))");
+        executeSchemaChange("CREATE INDEX ON %s.multiple_clustering_with_indices (b)");
+        executeSchemaChange("CREATE INDEX ON %s.multiple_clustering_with_indices (e)");
+
+        executeSchemaChange("CREATE TABLE IF NOT EXISTS %s.partition_with_indices (a int, b int, c int, d int, e int, f int, PRIMARY KEY ((a, b), c, d, e))");
+        executeSchemaChange("CREATE INDEX ON %s.partition_with_indices (c)");
+        executeSchemaChange("CREATE INDEX ON %s.partition_with_indices (f)");
+
         clientState = ClientState.forInternalCalls();
     }
 
@@ -124,12 +133,6 @@ public class MultiColumnRelationTest
             return new UntypedResultSet(((ResultMessage.Rows)message).result);
         else
             return null;
-    }
-
-    @Test(expected=InvalidRequestException.class)
-    public void testMixMultiColumnRelationsAndSingleColumn() throws Throwable
-    {
-        execute("SELECT * FROM %s.multiple_clustering WHERE a = 1 AND (b) in ((2),(3)) AND c > 4");
     }
 
     @Test(expected=SyntaxException.class)
@@ -288,15 +291,25 @@ public class MultiColumnRelationTest
     }
 
     @Test
-    public void testMixSingleAndTupleInequalities() throws Throwable
+    public void testInvalidMultiAndSingleColumnRelationMix() throws Throwable
     {
         for (String tableSuffix : new String[]{"", "_compact"})
         {
             String[] queries = new String[]{
-                    "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a=0 AND (b, c, d) > (0, 1, 0) AND b < 1",
-                    "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a=0 AND (b, c, d) > (0, 1, 0) AND c < 1",
-                    "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a=0 AND b > 1 AND (b, c, d) < (1, 1, 0)",
-                    "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a=0 AND c > 1 AND (b, c, d) < (1, 1, 0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (b, c, d) > (0, 1, 0) AND b < 1",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (b, c, d) > (0, 1, 0) AND c < 1",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND b > 1 AND (b, c, d) < (1, 1, 0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND c > 1 AND (b, c, d) < (1, 1, 0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE (a, b, c, d) IN ((0, 1, 2, 3))",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE (c, d) IN ((0, 1))",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0  AND b > 0  AND (c, d) IN ((0, 0))",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND b > 0  AND (c, d) > (0, 0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (c, d) > (0, 0) AND b > 0  ",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (b, c) > (0, 0) AND (b) < (0) AND (c) < (0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (c) < (0) AND (b, c) > (0, 0) AND (b) < (0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (b) < (0) AND (c) < (0) AND (b, c) > (0, 0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (b, c) > (0, 0) AND (c) < (0)",
+                "SELECT * FROM %s.multiple_clustering" + tableSuffix + " WHERE a = 0 AND (b, c) in ((0, 0), (0, 0)) AND d > 0"
             };
 
             for (String query : queries)
@@ -310,6 +323,164 @@ public class MultiColumnRelationTest
                 {
                 }
             }
+        }
+    }
+
+    @Test
+    public void testMultiAndSingleColumnRelationMix() throws Throwable
+    {
+        for (String tableSuffix : new String[]{"", "_compact"})
+        {
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 0, 0, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 0, 1, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 0, 1, 1)");
+
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 1, 0, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 1, 1, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 1, 1, 1)");
+
+            UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c, d) = (0, 0)");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c) IN ((0))");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c) IN ((0), (1))");
+            assertEquals(3, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+            checkRow(1, results, 0, 1, 1, 0);
+            checkRow(2, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c, d) IN ((0, 0))");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c, d) IN ((0, 0), (1, 1))");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+            checkRow(1, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c, d) > (0, 0)");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 1, 0);
+            checkRow(1, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c, d) > (0, 0) and (c) <= (1)");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 1, 0);
+            checkRow(1, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 1 and (c, d) >= (0, 0) and (c, d) < (1, 1)");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+            checkRow(1, results, 0, 1, 1, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b, c) = (0, 1) and d = 0");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 0, 1, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 0 and (c) = (1) and d = 0");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 0, 1, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b, c) = (0, 1) and d IN (0, 2)");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 0, 1, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and b = 0 and (c) = (1) and d IN (0, 2)");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 0, 1, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b, c) = (0, 1) and d >= 0");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 0, 1, 0);
+            checkRow(1, results, 0, 0, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and d < 1 and (b, c) = (0, 1) and d >= 0");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 0, 1, 0);
+        }
+    }
+
+    @Test
+    public void testMultipleMultiColumnRelation() throws Throwable
+    {
+        for (String tableSuffix : new String[]{"", "_compact"})
+        {
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 0, 0, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 0, 1, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 0, 1, 1)");
+
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 1, 0, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 1, 1, 0)");
+            execute("INSERT INTO %s.multiple_clustering" + tableSuffix + " (a, b, c, d) VALUES (0, 1, 1, 1)");
+
+            UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c, d) = (0, 0)");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c) = (0) and (d) = (0)");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c) IN ((0))");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c) IN ((0), (1))");
+            assertEquals(3, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+            checkRow(1, results, 0, 1, 1, 0);
+            checkRow(2, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c, d) IN ((0, 0))");
+            assertEquals(1, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c, d) IN ((0, 0), (1, 1))");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+            checkRow(1, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c, d) > (0, 0)");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 1, 0);
+            checkRow(1, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c, d) > (0, 0) and (c) <= (1)");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 1, 0);
+            checkRow(1, results, 0, 1, 1, 1);
+
+            results = execute("SELECT * FROM %s.multiple_clustering" + tableSuffix
+                    + " WHERE a = 0 and (b) = (1) and (c, d) >= (0, 0) and (c, d) < (1, 1)");
+            assertEquals(2, results.size());
+            checkRow(0, results, 0, 1, 0, 0);
+            checkRow(1, results, 0, 1, 1, 0);
         }
     }
 
@@ -1178,6 +1349,119 @@ public class MultiColumnRelationTest
                     options(list()));
             assertTrue(results.isEmpty());
         }
+    }
+
+    @Test
+    public void testMultipleClusteringWithIndex() throws Throwable
+    {
+        execute("INSERT INTO %s.multiple_clustering_with_indices (a, b, c, d, e) VALUES (0, 0, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering_with_indices (a, b, c, d, e) VALUES (0, 0, 1, 0, 1)");
+        execute("INSERT INTO %s.multiple_clustering_with_indices (a, b, c, d, e) VALUES (0, 0, 1, 1, 2)");
+        execute("INSERT INTO %s.multiple_clustering_with_indices (a, b, c, d, e) VALUES (0, 1, 0, 0, 0)");
+        execute("INSERT INTO %s.multiple_clustering_with_indices (a, b, c, d, e) VALUES (0, 1, 1, 0, 1)");
+        execute("INSERT INTO %s.multiple_clustering_with_indices (a, b, c, d, e) VALUES (0, 1, 1, 1, 2)");
+        execute("INSERT INTO %s.multiple_clustering_with_indices (a, b, c, d, e) VALUES (0, 2, 0, 0, 0)");
+
+        UntypedResultSet results = execute("SELECT * FROM %s.multiple_clustering_with_indices WHERE (b) = (1)");
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 1, 0, 0, 0);
+        checkRow(1, results, 0, 1, 1, 0, 1);
+        checkRow(2, results, 0, 1, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b, c) = (1, 1) ALLOW FILTERING");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 1, 1, 0, 1);
+        checkRow(1, results, 0, 1, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b, c) = (1, 1) AND e = 2 ALLOW FILTERING");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b) IN ((1)) AND e = 2 ALLOW FILTERING");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b) IN ((0), (1)) AND e = 2 ALLOW FILTERING");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 2);
+        checkRow(1, results, 0, 1, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b, c) IN ((0, 1)) AND e = 2 ALLOW FILTERING");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b, c) IN ((0, 1), (1, 1)) AND e = 2 ALLOW FILTERING");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 2);
+        checkRow(1, results, 0, 1, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b) >= (1) AND e = 2 ALLOW FILTERING");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1, 2);
+
+        results = execute("SELECT * FROM %s.multiple_clustering_with_indices  WHERE (b, c) >= (1, 1) AND e = 2 ALLOW FILTERING");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 1, 1, 1, 2);
+    }
+
+    @Test
+    public void testPartitionWithIndex() throws Throwable
+    {
+        execute("INSERT INTO %s.partition_with_indices (a, b, c, d, e, f) VALUES (0, 0, 0, 0, 0, 0)");
+        execute("INSERT INTO %s.partition_with_indices (a, b, c, d, e, f) VALUES (0, 0, 0, 1, 0, 1)");
+        execute("INSERT INTO %s.partition_with_indices (a, b, c, d, e, f) VALUES (0, 0, 0, 1, 1, 2)");
+
+        execute("INSERT INTO %s.partition_with_indices (a, b, c, d, e, f) VALUES (0, 0, 1, 0, 0, 3)");
+        execute("INSERT INTO %s.partition_with_indices (a, b, c, d, e, f) VALUES (0, 0, 1, 1, 0, 4)");
+        execute("INSERT INTO %s.partition_with_indices (a, b, c, d, e, f) VALUES (0, 0, 1, 1, 1, 5)");
+
+        execute("INSERT INTO %s.partition_with_indices (a, b, c, d, e, f) VALUES (0, 0, 2, 0, 0, 5)");
+
+        UntypedResultSet results = execute("SELECT * FROM %s.partition_with_indices WHERE a = 0 AND (c) = (1) ALLOW FILTERING");
+        assertEquals(3, results.size());
+        checkRow(0, results, 0, 0, 1, 0, 0, 3);
+        checkRow(1, results, 0, 0, 1, 1, 0, 4);
+        checkRow(2, results, 0, 0, 1, 1, 1, 5);
+
+        results = execute("SELECT * FROM %s.partition_with_indices WHERE a = 0 AND (c, d) = (1, 1) ALLOW FILTERING");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 0, 4);
+        checkRow(1, results, 0, 0, 1, 1, 1, 5);
+
+        results = execute("SELECT * FROM %s.partition_with_indices WHERE a = 0  AND (c) IN ((1)) AND f = 5 ALLOW FILTERING");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 1, 5);
+
+        results = execute("SELECT * FROM %s.partition_with_indices WHERE a = 0 AND (c) IN ((1), (2)) AND f = 5 ALLOW FILTERING");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 1, 5);
+        checkRow(1, results, 0, 0, 2, 0, 0, 5);
+
+        results = execute("SELECT * FROM %s.partition_with_indices WHERE a = 0  AND (c, d) IN ((1, 0)) AND f = 3 ALLOW FILTERING");
+        assertEquals(1, results.size());
+        checkRow(0, results, 0, 0, 1, 0, 0, 3);
+
+        results = execute("SELECT * FROM %s.partition_with_indices WHERE a = 0 AND (c) >= (1) AND f = 5 ALLOW FILTERING");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 1, 5);
+        checkRow(1, results, 0, 0, 2, 0, 0, 5);
+
+        results = execute("SELECT * FROM %s.partition_with_indices WHERE a = 0 AND (c, d) >= (1, 1) AND f = 5 ALLOW FILTERING");
+        assertEquals(2, results.size());
+        checkRow(0, results, 0, 0, 1, 1, 1, 5);
+        checkRow(1, results, 0, 0, 2, 0, 0, 5);
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testMissingPartitionComponentWithInRestrictionOnIndexedColumn() throws Throwable
+    {
+        execute("SELECT * FROM %s.partition_with_indices WHERE a = 0 AND (c, d) IN ((1, 1)) ALLOW FILTERING");
+    }
+
+    @Test(expected=InvalidRequestException.class)
+    public void testMissingPartitionComponentWithSliceRestrictionOnIndexedColumn() throws Throwable
+    {
+        execute("SELECT * FROM %s.partition_with_indices WHERE a = 0 AND (c, d) >= (1, 1) ALLOW FILTERING");
     }
 
     @Test(expected=InvalidRequestException.class)

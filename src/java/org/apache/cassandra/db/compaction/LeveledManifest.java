@@ -68,14 +68,14 @@ public class LeveledManifest
     private final ColumnFamilyStore cfs;
     private final List<SSTableReader>[] generations;
     private final RowPosition[] lastCompactedKeys;
-    private final int maxSSTableSizeInBytes;
+    private final long maxSSTableSizeInBytes;
     private final SizeTieredCompactionStrategyOptions options;
     private final int [] compactionCounter;
 
     private LeveledManifest(ColumnFamilyStore cfs, int maxSSTableSizeInMB, SizeTieredCompactionStrategyOptions options)
     {
         this.cfs = cfs;
-        this.maxSSTableSizeInBytes = maxSSTableSizeInMB * 1024 * 1024;
+        this.maxSSTableSizeInBytes = maxSSTableSizeInMB * 1024L * 1024L;
         this.options = options;
 
         // allocate enough generations for a PB of data, with a 1-MB sstable size.  (Note that if maxSSTableSize is
@@ -623,7 +623,8 @@ public class LeveledManifest
         for (int i = generations.length - 1; i >= 0; i--)
         {
             List<SSTableReader> sstables = generations[i];
-            estimated[i] = Math.max(0L, SSTableReader.getTotalBytes(sstables) - maxBytesForLevel(i)) / maxSSTableSizeInBytes;
+	    // If there is 1 byte over TBL - (MBL * 1.001), there is still a task left, so we need to round up.
+	    estimated[i] = (long)Math.ceil((double)Math.max(0L, SSTableReader.getTotalBytes(sstables) - (long)(maxBytesForLevel(i) * 1.001)) / (double)maxSSTableSizeInBytes);
             tasks += estimated[i];
         }
 

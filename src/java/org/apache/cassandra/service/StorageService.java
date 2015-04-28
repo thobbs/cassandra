@@ -37,12 +37,10 @@ import javax.management.ObjectName;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
-import com.google.common.util.concurrent.AtomicDouble;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.LogManager;
@@ -205,11 +203,16 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         SystemKeyspace.updateTokens(tokens);
         tokenMetadata.updateNormalTokens(tokens, FBUtilities.getBroadcastAddress());
         Collection<Token> localTokens = getLocalTokens();
-        List<Pair<ApplicationState, VersionedValue>> states = new ArrayList<Pair<ApplicationState, VersionedValue>>();
-        states.add(Pair.create(ApplicationState.TOKENS, valueFactory.tokens(localTokens)));
-        states.add(Pair.create(ApplicationState.STATUS, valueFactory.normal(localTokens)));
-        Gossiper.instance.addLocalApplicationStates(states);
+        setGossipTokens(localTokens);
         setMode(Mode.NORMAL, false);
+    }
+
+    public void setGossipTokens(Collection<Token> tokens)
+    {
+        List<Pair<ApplicationState, VersionedValue>> states = new ArrayList<Pair<ApplicationState, VersionedValue>>();
+        states.add(Pair.create(ApplicationState.TOKENS, valueFactory.tokens(tokens)));
+        states.add(Pair.create(ApplicationState.STATUS, valueFactory.normal(tokens)));
+        Gossiper.instance.addLocalApplicationStates(states);
     }
 
     public StorageService()
@@ -289,6 +292,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (!initialized)
         {
             logger.warn("Starting gossip by operator request");
+            setGossipTokens(getLocalTokens());
+            Gossiper.instance.forceNewerGeneration();
             Gossiper.instance.start((int) (System.currentTimeMillis() / 1000));
             initialized = true;
         }
@@ -1346,7 +1351,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (moveName.equals(VersionedValue.STATUS_BOOTSTRAPPING))
                 handleStateBootstrap(endpoint, pieces);
-            else if (moveName.equals(VersionedValue.STATUS_NORMAL))
+            else if (moveName.equals(VersionedValue.STATUS_NORMAL) || moveName.equals(VersionedValue.SHUTDOWN))
                 handleStateNormal(endpoint, pieces);
             else if (moveName.equals(VersionedValue.REMOVING_TOKEN) || moveName.equals(VersionedValue.REMOVED_TOKEN))
                 handleStateRemoving(endpoint, pieces);
@@ -1366,27 +1371,30 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 return;
             }
 
-            switch (state)
+            if (getTokenMetadata().isMember(endpoint))
             {
-                case RELEASE_VERSION:
-                    SystemKeyspace.updatePeerInfo(endpoint, "release_version", quote(value.value));
-                    break;
-                case DC:
-                    SystemKeyspace.updatePeerInfo(endpoint, "data_center", quote(value.value));
-                    break;
-                case RACK:
-                    SystemKeyspace.updatePeerInfo(endpoint, "rack", quote(value.value));
-                    break;
-                case RPC_ADDRESS:
-                    SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", quote(value.value));
-                    break;
-                case SCHEMA:
-                    SystemKeyspace.updatePeerInfo(endpoint, "schema_version", value.value);
-                    MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
-                    break;
-                case HOST_ID:
-                    SystemKeyspace.updatePeerInfo(endpoint, "host_id", value.value);
-                    break;
+                switch (state)
+                {
+                    case RELEASE_VERSION:
+                        SystemKeyspace.updatePeerInfo(endpoint, "release_version", quote(value.value));
+                        break;
+                    case DC:
+                        SystemKeyspace.updatePeerInfo(endpoint, "data_center", quote(value.value));
+                        break;
+                    case RACK:
+                        SystemKeyspace.updatePeerInfo(endpoint, "rack", quote(value.value));
+                        break;
+                    case RPC_ADDRESS:
+                        SystemKeyspace.updatePeerInfo(endpoint, "rpc_address", quote(value.value));
+                        break;
+                    case SCHEMA:
+                        SystemKeyspace.updatePeerInfo(endpoint, "schema_version", value.value);
+                        MigrationManager.instance.scheduleSchemaPull(endpoint, epState);
+                        break;
+                    case HOST_ID:
+                        SystemKeyspace.updatePeerInfo(endpoint, "host_id", value.value);
+                        break;
+                }
             }
         }
     }
@@ -1618,7 +1626,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (!localTokensToRemove.isEmpty())
             SystemKeyspace.updateLocalTokens(Collections.<Token>emptyList(), localTokensToRemove);
 
-        if (isMoving)
+        if (isMoving || operationMode == Mode.MOVING)
         {
             tokenMetadata.removeFromMoving(endpoint);
 
@@ -2257,10 +2265,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new IOException("You must supply a snapshot name.");
 
         Keyspace keyspace = getValidKeyspace(keyspaceName);
-        if (keyspace.snapshotExists(tag))
+        ColumnFamilyStore columnFamilyStore = keyspace.getColumnFamilyStore(columnFamilyName);
+        if (columnFamilyStore.snapshotExists(tag))
             throw new IOException("Snapshot " + tag + " already exists.");
 
-        keyspace.snapshot(tag, columnFamilyName);
+        columnFamilyStore.snapshot(tag);
     }
 
     private Keyspace getValidKeyspace(String keyspaceName) throws IOException
@@ -2778,7 +2787,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public List<InetAddress> getNaturalEndpoints(String keyspaceName, String cf, String key)
     {
-        CFMetaData cfMetaData = Schema.instance.getKSMetaData(keyspaceName).cfMetaData().get(cf);
+        KSMetaData ksMetaData = Schema.instance.getKSMetaData(keyspaceName);
+        if (ksMetaData == null)
+            throw new IllegalArgumentException("Unknown keyspace '" + keyspaceName + "'");
+
+        CFMetaData cfMetaData = ksMetaData.cfMetaData().get(cf);
+        if (cfMetaData == null)
+            throw new IllegalArgumentException("Unknown table '" + cf + "' in keyspace '" + keyspaceName + "'");
+
         return getNaturalEndpoints(keyspaceName, getPartitioner().getToken(cfMetaData.getKeyValidator().fromString(key)));
     }
 

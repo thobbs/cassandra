@@ -134,23 +134,33 @@ public class LazilyCompactedRow extends AbstractCompactedRow implements Iterable
     {
         assert !closed;
 
+        // create merge iterator for reduced rows
+        Iterator<OnDiskAtom> iter = iterator();
+
         // no special-case for rows.size == 1, we're actually skipping some bytes here so just
         // blindly updating everything wouldn't be correct
         DataOutputBuffer out = new DataOutputBuffer();
 
+        // initialize indexBuilder for the benefit of its tombstoneTracker, used by our reducing iterator
+        indexBuilder = new ColumnIndex.Builder(emptyColumnFamily, key.key, out);
+
         try
         {
             DeletionTime.serializer.serialize(emptyColumnFamily.deletionInfo().getTopLevelDeletion(), out);
-            digest.update(out.getData(), 0, out.getLength());
+            // do not update digest in case of missing or purged row level tombstones, see CASSANDRA-8979
+            // - digest for non-empty rows needs to be updated with deletion in any case to match digest with versions before patch
+            // - empty rows must not update digest in case of LIVE delete status to avoid mismatches with non-existing rows
+            //   this will however introduce in return a digest mismatch for versions before patch (which would update digest in any case)
+            if (iter.hasNext() || emptyColumnFamily.deletionInfo().getTopLevelDeletion() != DeletionTime.LIVE)
+            {
+                digest.update(out.getData(), 0, out.getLength());
+            }
         }
         catch (IOException e)
         {
             throw new AssertionError(e);
         }
 
-        // initialize indexBuilder for the benefit of its tombstoneTracker, used by our reducing iterator
-        indexBuilder = new ColumnIndex.Builder(emptyColumnFamily, key.key, out);
-        Iterator<OnDiskAtom> iter = iterator();
         while (iter.hasNext())
             iter.next().updateDigest(digest);
         close();

@@ -25,7 +25,7 @@
     <property name="debuglevel" value="source,lines,vars"/>
 
     <!-- default version and SCM information -->
-    <property name="base.version" value="2.0.12"/>
+    <property name="base.version" value="2.0.14"/>
     <property name="scm.connection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.developerConnection" value="scm:git://git.apache.org/cassandra.git"/>
     <property name="scm.url" value="http://git-wip-us.apache.org/repos/asf?p=cassandra.git;a=tree"/>
@@ -60,6 +60,7 @@
     <property name="test.long.src" value="${test.dir}/long"/>
     <property name="test.pig.src" value="${test.dir}/pig"/>
     <property name="dist.dir" value="${build.dir}/dist"/>
+    <property name="tmp.dir" value="${java.io.tmpdir}"/>
 	
 	<property name="source.version" value="1.7"/>
 	<property name="target.version" value="1.7"/>
@@ -1098,9 +1099,13 @@
       <jvmarg value="-Dmigration-sstable-root=${test.data}/migration-sstables"/>
       <jvmarg value="-Dcassandra.ring_delay_ms=1000"/>
       <jvmarg value="-Dcassandra.tolerate_sstable_size=true"/>
+      <jvmarg value="-Djava.io.tmpdir=${tmp.dir}"/>
     </testmacro>
   </target>
 
+  <!-- Use this with an FQDN for test class, and a csv list of methods like this:
+    ant testsome -Dtest.name=org.apache.cassandra.service.StorageServiceServerTest -Dtest.methods=testRegularMode,testGetAllRangesEmpty
+  -->
   <target name="testsome" depends="build-test" description="Execute specific unit tests" >
     <testmacro suitename="unit" inputdir="${test.unit.src}" exclude="**/pig/*.java" timeout="${test.timeout}">
       <test name="${test.name}" methods="${test.methods}"/>

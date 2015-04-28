@@ -29,6 +29,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.filter.ColumnSlice;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.utils.Allocator;
+import org.apache.cassandra.utils.BatchRemoveIterator;
 
 /**
  * A ColumnFamily backed by an ArrayList.
@@ -54,14 +55,14 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
     {
         super(metadata);
         this.reversed = reversed;
-        this.columns = new ArrayList<Column>();
+        this.columns = new ArrayList<>();
     }
 
     private ArrayBackedSortedColumns(Collection<Column> columns, CFMetaData metadata, boolean reversed)
     {
         super(metadata);
         this.reversed = reversed;
-        this.columns = new ArrayList<Column>(columns);
+        this.columns = new ArrayList<>(columns);
     }
 
     public ColumnFamily.Factory getFactory()
@@ -290,6 +291,75 @@ public class ArrayBackedSortedColumns extends AbstractThreadUnsafeSortedColumns
     public Iterator<Column> reverseIterator(ColumnSlice[] slices)
     {
         return new SlicesIterator(columns, getComparator(), slices, !reversed);
+    }
+
+    @Override
+    public BatchRemoveIterator<Column> batchRemoveIterator()
+    {
+        return new BatchRemoveIterator<Column>()
+        {
+            private Iterator<Column> iter = iterator();
+            private BitSet removedIndexes = new BitSet(columns.size());
+            private int idx = -1;
+            private boolean shouldCallNext = true;
+            private boolean isCommitted = false;
+            private boolean removedAnything = false;
+
+            public void commit()
+            {
+                if (isCommitted)
+                    throw new IllegalStateException();
+                isCommitted = true;
+
+                if (!removedAnything)
+                    return;
+
+                int size = columns.size();
+                int retainedCount = 0;
+                int clearIdx, setIdx = -1;
+
+                // shift all [clearIdx, setIdx) segments to the left, skipping any removed columns
+                while (true)
+                {
+                    clearIdx = removedIndexes.nextClearBit(setIdx + 1);
+                    if (clearIdx >= size)
+                        break; // nothing left to retain
+
+                    setIdx = removedIndexes.nextSetBit(clearIdx + 1);
+                    if (setIdx < 0)
+                        setIdx = size; // no removals past retainIdx - copy all remaining cells
+
+                    if (retainedCount != clearIdx)
+                        Collections.copy(columns.subList(retainedCount, retainedCount + setIdx - clearIdx),
+                                         columns.subList(clearIdx, setIdx));
+                    retainedCount += (setIdx - clearIdx);
+                }
+
+                columns.subList(retainedCount, size).clear();
+            }
+
+            public boolean hasNext()
+            {
+                return iter.hasNext();
+            }
+
+            public Column next()
+            {
+                idx++;
+                shouldCallNext = false;
+                return iter.next();
+            }
+
+            public void remove()
+            {
+                if (shouldCallNext)
+                    throw new IllegalStateException();
+
+                removedIndexes.set(reversed ? columns.size() - idx - 1 : idx);
+                removedAnything = true;
+                shouldCallNext = true;
+            }
+        };
     }
 
     private static class SlicesIterator extends AbstractIterator<Column>

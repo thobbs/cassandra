@@ -1111,6 +1111,7 @@ public final class CFMetaData
         memtableFlushPeriod = cfm.memtableFlushPeriod;
         caching = cfm.caching;
         defaultTimeToLive = cfm.defaultTimeToLive;
+        indexInterval = cfm.indexInterval;
         speculativeRetry = cfm.speculativeRetry;
         populateIoCacheOnFlush = cfm.populateIoCacheOnFlush;
 
@@ -2190,6 +2191,11 @@ public final class CFMetaData
             return false;
 
         return true;
+    }
+
+    public boolean isCounter()
+    {
+        return defaultValidator.isCounter();
     }
 
     public boolean hasStaticColumns()

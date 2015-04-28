@@ -74,7 +74,12 @@ public abstract class ColumnFamily implements Iterable<Column>, IRowCacheEntry
 
     public ColumnFamily cloneMeShallow()
     {
-        return cloneMeShallow(getFactory(), isInsertReversed());
+        return cloneMeShallow(false);
+    }
+
+    public ColumnFamily cloneMeShallow(boolean reversed)
+    {
+        return cloneMeShallow(getFactory(), reversed);
     }
 
     public ColumnFamilyType getType()
@@ -316,6 +321,8 @@ public abstract class ColumnFamily implements Iterable<Column>, IRowCacheEntry
             }
         }
 
+        cfDiff.setDeletionInfo(deletionInfo().diff(cfComposite.deletionInfo()));
+
         if (!cfDiff.isEmpty())
             return cfDiff;
         return null;
@@ -530,6 +537,38 @@ public abstract class ColumnFamily implements Iterable<Column>, IRowCacheEntry
         DataOutputBuffer out = new DataOutputBuffer();
         serializer.serialize(this, out, MessagingService.current_version);
         return ByteBuffer.wrap(out.getData(), 0, out.getLength());
+    }
+
+
+    /**
+     * @return an iterator where the removes are carried out once everything has been iterated
+     */
+    public BatchRemoveIterator<Column> batchRemoveIterator()
+    {
+        // Default implementation is the ordinary iterator
+        return new BatchRemoveIterator<Column>()
+        {
+            private final Iterator<Column> iter = iterator();
+
+            public void commit()
+            {
+            }
+
+            public boolean hasNext()
+            {
+                return iter.hasNext();
+            }
+
+            public Column next()
+            {
+                return iter.next();
+            }
+
+            public void remove()
+            {
+                iter.remove();
+            }
+        };
     }
 
     public abstract static class Factory <T extends ColumnFamily>

@@ -25,23 +25,24 @@ import java.util.Iterator;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.Files;
+
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
 
-import org.apache.cassandra.SchemaLoader;
-import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.*;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.OutputHandler;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class CQLSSTableWriterTest
 {
@@ -49,6 +50,12 @@ public class CQLSSTableWriterTest
     public static void setup() throws Exception
     {
         StorageService.instance.initServer();
+    }
+
+    @AfterClass
+    public static void tearDown()
+    {
+        Config.setClientMode(false);
     }
 
     @Test
@@ -131,10 +138,12 @@ public class CQLSSTableWriterTest
         // > 1MB and validate that this created more than 1 sstable.
         File tempdir = Files.createTempDir();
         String schema = "CREATE TABLE ks.test ("
-                      + "  k int PRIMARY KEY,"
-                      + "  v blob"
+                      + "  k int,"
+                      + "  c int,"
+                      + "  v blob,"
+                      + "  PRIMARY KEY (k,c)"
                       + ")";
-        String insert = "INSERT INTO ks.test (k, v) VALUES (?, ?)";
+        String insert = "INSERT INTO ks.test (k, c, v) VALUES (?, ?, ?)";
         CQLSSTableWriter writer = CQLSSTableWriter.builder()
                                                   .inDirectory(tempdir)
                                                   .forTable(schema)
@@ -145,8 +154,8 @@ public class CQLSSTableWriterTest
 
         ByteBuffer val = ByteBuffer.allocate(1024 * 1050);
 
-        writer.addRow(0, val);
-        writer.addRow(1, val);
+        writer.addRow(0, 0, val);
+        writer.addRow(0, 1, val);
         writer.close();
 
         FilenameFilter filterDataFiles = new FilenameFilter()
@@ -176,12 +185,12 @@ public class CQLSSTableWriterTest
         @Override
         public void run()
         {
-            String schema = "CREATE TABLE cql_keyspace.table2 ("
+            String schema = "CREATE TABLE cql_keyspace2.table2 ("
                     + "  k int,"
                     + "  v int,"
                     + "  PRIMARY KEY (k, v)"
                     + ")";
-            String insert = "INSERT INTO cql_keyspace.table2 (k, v) VALUES (?, ?)";
+            String insert = "INSERT INTO cql_keyspace2.table2 (k, v) VALUES (?, ?)";
             CQLSSTableWriter writer = CQLSSTableWriter.builder()
                     .inDirectory(dataDir)
                     .forTable(schema)
@@ -206,7 +215,7 @@ public class CQLSSTableWriterTest
     @Test
     public void testConcurrentWriters() throws Exception
     {
-        String KS = "cql_keyspace";
+        String KS = "cql_keyspace2";
         String TABLE = "table2";
 
         File tempdir = Files.createTempDir();
@@ -235,7 +244,7 @@ public class CQLSSTableWriterTest
         {
             public void init(String keyspace)
             {
-                for (Range<Token> range : StorageService.instance.getLocalRanges("cql_keyspace"))
+                for (Range<Token> range : StorageService.instance.getLocalRanges("cql_keyspace2"))
                     addRangeForEndpoint(range, FBUtilities.getBroadcastAddress());
                 setPartitioner(StorageService.getPartitioner());
             }
@@ -248,7 +257,7 @@ public class CQLSSTableWriterTest
 
         loader.stream().get();
 
-        UntypedResultSet rs = QueryProcessor.processInternal("SELECT * FROM cql_keyspace.table2;");
+        UntypedResultSet rs = QueryProcessor.processInternal("SELECT * FROM cql_keyspace2.table2;");
         assertEquals(threads.length * NUMBER_WRITES_IN_RUNNABLE, rs.size());
     }
 }

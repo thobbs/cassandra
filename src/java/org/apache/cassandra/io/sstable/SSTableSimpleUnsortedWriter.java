@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Throwables;
 
@@ -118,7 +119,7 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
 
         // We don't want to sync in writeRow() only as this might blow up the bufferSize for wide rows.
         if (currentSize > bufferSize)
-            sync();
+            replaceColumnFamily();
     }
 
     protected ColumnFamily getColumnFamily() throws IOException
@@ -147,37 +148,50 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
     public void close() throws IOException
     {
         sync();
+        put(SENTINEL);
         try
         {
-            writeQueue.put(SENTINEL);
             diskWriter.join();
         }
         catch (InterruptedException e)
         {
             throw new RuntimeException(e);
         }
-
-        checkForWriterException();
     }
 
-    private void sync() throws IOException
+    // This is overridden by CQLSSTableWriter to hold off replacing column family until the next iteration through
+    protected void replaceColumnFamily() throws IOException
+    {
+        sync();
+    }
+
+    protected void sync() throws IOException
     {
         if (buffer.isEmpty())
             return;
 
-        checkForWriterException();
-
-        try
-        {
-            writeQueue.put(buffer);
-        }
-        catch (InterruptedException e)
-        {
-            throw new RuntimeException(e);
-
-        }
+        columnFamily = null;
+        put(buffer);
         buffer = new Buffer();
         currentSize = 0;
+        columnFamily = getColumnFamily();
+    }
+
+    private void put(Buffer buffer) throws IOException
+    {
+        while (true)
+        {
+            checkForWriterException();
+            try
+            {
+                if (writeQueue.offer(buffer, 1, TimeUnit.SECONDS))
+                    break;
+            }
+            catch (InterruptedException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     private void checkForWriterException() throws IOException
@@ -211,9 +225,16 @@ public class SSTableSimpleUnsortedWriter extends AbstractSSTableSimpleWriter
                         return;
 
                     writer = getWriter();
+                    boolean first = true;
                     for (Map.Entry<DecoratedKey, ColumnFamily> entry : b.entrySet())
-                        writer.append(entry.getKey(), entry.getValue());
-                    writer.close();
+                    {
+                        if (entry.getValue().getColumnCount() > 0)
+                            writer.append(entry.getKey(), entry.getValue());
+                        else if (!first)
+                            throw new AssertionError("Empty partition");
+                        first = false;
+                    }
+                    writer.close(true);
                 }
             }
             catch (Throwable e)
