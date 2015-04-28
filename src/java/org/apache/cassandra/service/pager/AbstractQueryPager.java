@@ -358,8 +358,9 @@ abstract class AbstractQueryPager implements QueryPager
 
     /**
      * Returns the first non-static cell in the ColumnFamily.  This is necessary to avoid recording a static column
-     * as the "last" cell seen in a reversed query.  When we begin the next page, we need to start from the last
-     * non-static cell.
+     * as the "last" cell seen in a reversed query.  Because we will always query static columns alongside the normal
+     * data for a page, they are not a good indicator of where paging should resume.  When we begin the next page, we
+     * need to start from the last non-static cell.
      */
     protected Column firstNonStaticColumn(ColumnFamily cf)
     {
