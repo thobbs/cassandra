@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import com.google.common.base.Objects;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.columniterator.IdentityQueryFilter;
 import org.apache.cassandra.db.composites.Composite;
@@ -43,7 +44,7 @@ import org.apache.cassandra.dht.*;
  */
 public class DataRange
 {
-    private final AbstractBounds<RowPosition> keyRange;
+    protected final AbstractBounds<RowPosition> keyRange;
     protected IDiskAtomFilter columnFilter;
     protected final boolean selectFullRow;
 
@@ -288,6 +289,18 @@ public class DataRange
         {
             columnFilter.updateColumnsLimit(count);
             sliceFilter.updateColumnsLimit(count);
+        }
+
+        @Override
+        public String toString()
+        {
+            return Objects.toStringHelper(this)
+                          .add("keyRange", keyRange)
+                          .add("sliceFilter", sliceFilter)
+                          .add("columnFilter", columnFilter)
+                          .add("firstPartitionColumnStart", firstPartitionColumnStart == null ? "null" : cfm.comparator.getString(firstPartitionColumnStart))
+                          .add("lastPartitionColumnFinish", lastPartitionColumnFinish == null ? "null" : cfm.comparator.getString(lastPartitionColumnFinish))
+                          .toString();
         }
     }
 }
