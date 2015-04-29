@@ -215,10 +215,6 @@ public class DataRange
                 this.lastKeyFilterWasUpdatedFor = rowKey;
                 columnFilter = sliceFilter.withUpdatedSlices(slicesForKey(rowKey));
             }
-            else
-            {
-                columnFilter = sliceFilter;
-            }
 
             return columnFilter;
         }
