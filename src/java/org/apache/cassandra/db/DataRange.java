@@ -211,10 +211,17 @@ public class DataRange
              * Maybe we should just remove that hack, but in the meantime, we
              * need to keep a reference the last returned filter.
              */
-            if ((equals(startKey(), rowKey) || equals(stopKey(), rowKey)) && !rowKey.equals(lastKeyFilterWasUpdatedFor))
+            if (equals(startKey(), rowKey) || equals(stopKey(), rowKey))
             {
-                this.lastKeyFilterWasUpdatedFor = rowKey;
-                columnFilter = sliceFilter.withUpdatedSlices(slicesForKey(rowKey));
+                if (!rowKey.equals(lastKeyFilterWasUpdatedFor))
+                {
+                    this.lastKeyFilterWasUpdatedFor = rowKey;
+                    columnFilter = sliceFilter.withUpdatedSlices(slicesForKey(rowKey));
+                }
+            }
+            else
+            {
+                columnFilter = sliceFilter;
             }
 
             return columnFilter;
