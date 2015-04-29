@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Abstract common class for all non-thread safe Partition implementations.
  */
-public abstract class AbstractPartitionData implements Partition
+public abstract class AbstractPartitionData implements Partition, Iterable<Row>
 {
     private static final Logger logger = LoggerFactory.getLogger(AbstractPartitionData.class);
 
@@ -199,6 +199,24 @@ public abstract class AbstractPartitionData implements Partition
         return createdAtInSec;
     }
 
+    /**
+     * The deletion info for the partition update.
+     *
+     * <b>warning:</b> the returned object should be used in a read-only fashion. In particular,
+     * it should not be used to add new range tombstones to this deletion. For that,
+     * {@link addRangeTombstone} should be used instead. The reason being that adding directly to
+     * the returned object would bypass some stats collection that {@code addRangeTombstone} does.
+     *
+     * @return the deletion info for the partition update for use as read-only.
+     */
+    public DeletionInfo deletionInfo()
+    {
+        // TODO: it is a tad fragile that deletionInfo can be but shouldn't be modified. We
+        // could add the option of providing a read-only view of a DeletionInfo instead.
+        return deletionInfo;
+    }
+
+
     public void addPartitionDeletion(DeletionTime deletionTime)
     {
         collectStats(deletionTime);
@@ -295,6 +313,18 @@ public abstract class AbstractPartitionData implements Partition
         // Note that for statics, this will never return null, this will return an empty row. However,
         // it's more consistent for this method to return null if we don't really have a static row.
         return row == null || (clustering == Clustering.STATIC_CLUSTERING && row.isEmpty()) ? null : row;
+    }
+
+    /**
+     * Returns an iterator that iterators over the rows of this update in clustering order.
+     * <p>
+     * This is equivalent to calling {@code this.iterator(this.nowInSec())}.
+     *
+     * @return an iterator over the rows of this update.
+     */
+    public Iterator<Row> iterator()
+    {
+        return iterator(createdAtInSec);
     }
 
     public Iterator<Row> iterator(int nowInSec)

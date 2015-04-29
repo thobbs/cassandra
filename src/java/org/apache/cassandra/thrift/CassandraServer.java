@@ -411,7 +411,7 @@ public class CassandraServer implements Cassandra.Iface
         // Note that in thrift, the bounds are reversed if the query is reversed, but not internally.
         ByteBuffer start = range.reversed ? range.finish : range.start;
         ByteBuffer finish = range.reversed ? range.start : range.finish;
-        return Slices.with(metadata.comparator, Slice.make(LegacyLayout.decodeBound(metadata, start, true), LegacyLayout.decodeBound(metadata, finish, false)));
+        return Slices.with(metadata.comparator, Slice.make(LegacyLayout.decodeBound(metadata, start, true).bound, LegacyLayout.decodeBound(metadata, finish, false).bound));
     }
 
     private PartitionFilter toInternalFilter(CFMetaData metadata, ColumnParent parent, SlicePredicate predicate)
@@ -855,15 +855,12 @@ public class CassandraServer implements Cassandra.Iface
 
             DecoratedKey dk = StorageService.getPartitioner().decorateKey(key);
             int nowInSec = FBUtilities.nowInSeconds();
-            PartitionUpdate partitionUpdates = new PartitionUpdate(metadata, dk, metadata.partitionColumns(), metadata.isDense() ? updates.size() : 1, nowInSec);
-            RowIterator iter = LegacyLayout.toRowIterator(metadata, dk, toLegacyCells(metadata, updates, nowInSec).iterator(), nowInSec);
-            while (iter.hasNext())
-                iter.next().copyTo(partitionUpdates.writer());
 
+            PartitionUpdate partitionUpdates = RowIterators.toUpdate(LegacyLayout.toRowIterator(metadata, dk, toLegacyCells(metadata, updates, nowInSec).iterator(), nowInSec));
 
             ReadPartition partitionExpected = null;
             if (!expected.isEmpty())
-                partitionExpected = ReadPartition.create(LegacyLayout.toRowIterator(metadata, dk, toLegacyCells(metadata, updates, nowInSec).iterator(), nowInSec));
+                partitionExpected = ReadPartition.create(LegacyLayout.toRowIterator(metadata, dk, toLegacyCells(metadata, expected, nowInSec).iterator(), nowInSec));
 
             schedule(DatabaseDescriptor.getWriteRpcTimeout());
             RowIterator result = StorageProxy.cas(cState.getKeyspace(),
@@ -1031,7 +1028,7 @@ public class CassandraServer implements Cassandra.Iface
                 if (metadata.isCounter())
                     ThriftConversion.fromThrift(consistency_level).validateCounterForWrite(metadata);
 
-                PartitionUpdate update = new PartitionUpdate(metadata, dk, metadata.partitionColumns(), metadata.isDense() ? muts.size() : 1, nowInSec);
+                DeletionInfo delInfo = DeletionInfo.live();
                 List<LegacyLayout.LegacyCell> cells = new ArrayList<>();
                 for (Mutation m : muts)
                 {
@@ -1039,7 +1036,7 @@ public class CassandraServer implements Cassandra.Iface
 
                     if (m.deletion != null)
                     {
-                        deleteColumnOrSuperColumn(update, cells, metadata, m.deletion);
+                        deleteColumnOrSuperColumn(delInfo, cells, metadata, m.deletion, nowInSec);
                     }
                     if (m.column_or_supercolumn != null)
                     {
@@ -1047,16 +1044,7 @@ public class CassandraServer implements Cassandra.Iface
                     }
                 }
 
-                if (!cells.isEmpty())
-                {
-                    sortAndMerge(metadata, cells, nowInSec);
-                    RowIterator iter = LegacyLayout.toRowIterator(metadata, dk, cells.iterator(), nowInSec);
-                    while (iter.hasNext())
-                    {
-                        Row row = iter.next();
-                        row.copyTo(row.isStatic() ? update.staticWriter() : update.writer());
-                    }
-                }
+                PartitionUpdate update = AtomIterators.toUpdate(LegacyLayout.toAtomIterator(metadata, dk, delInfo, cells.iterator(), nowInSec));
 
                 org.apache.cassandra.db.Mutation mutation;
                 if (metadata.isCounter())
@@ -1108,12 +1096,12 @@ public class CassandraServer implements Cassandra.Iface
         }
     }
 
-    private void addRange(PartitionUpdate update, Slice.Bound start, Slice.Bound end, long timestamp)
+    private void addRange(CFMetaData cfm, DeletionInfo delInfo, Slice.Bound start, Slice.Bound end, long timestamp, int nowInSec)
     {
-        update.addRangeTombstone(Slice.make(start, end), new SimpleDeletionTime(timestamp, update.nowInSec()));
+        delInfo.add(new RangeTombstone(Slice.make(start, end), new SimpleDeletionTime(timestamp, nowInSec)), cfm.comparator);
     }
 
-    private void deleteColumnOrSuperColumn(PartitionUpdate update, List<LegacyLayout.LegacyCell> cells, CFMetaData cfm, Deletion del)
+    private void deleteColumnOrSuperColumn(DeletionInfo delInfo, List<LegacyLayout.LegacyCell> cells, CFMetaData cfm, Deletion del, int nowInSec)
     throws InvalidRequestException
     {
         if (del.predicate != null && del.predicate.column_names != null)
@@ -1121,21 +1109,23 @@ public class CassandraServer implements Cassandra.Iface
             for (ByteBuffer c : del.predicate.column_names)
             {
                 if (del.super_column == null && cfm.isSuper())
-                    addRange(update, Slice.Bound.inclusiveStartOf(c), Slice.Bound.inclusiveEndOf(c), del.timestamp);
+                    addRange(cfm, delInfo, Slice.Bound.inclusiveStartOf(c), Slice.Bound.inclusiveEndOf(c), del.timestamp, nowInSec);
                 else if (del.super_column != null)
-                    cells.add(toLegacyDeletion(update.metadata(), del.super_column, c, del.timestamp, update.nowInSec()));
+                    cells.add(toLegacyDeletion(cfm, del.super_column, c, del.timestamp, nowInSec));
                 else
-                    cells.add(toLegacyDeletion(update.metadata(), c, del.timestamp, update.nowInSec()));
+                    cells.add(toLegacyDeletion(cfm, c, del.timestamp, nowInSec));
             }
         }
         else if (del.predicate != null && del.predicate.slice_range != null)
         {
             if (del.super_column == null)
             {
-                addRange(update,
-                         LegacyLayout.decodeBound(update.metadata(), del.predicate.getSlice_range().start, true),
-                         LegacyLayout.decodeBound(update.metadata(), del.predicate.getSlice_range().finish, false),
-                         del.timestamp);
+                addRange(cfm,
+                         delInfo,
+                         LegacyLayout.decodeBound(cfm, del.predicate.getSlice_range().start, true).bound,
+                         LegacyLayout.decodeBound(cfm, del.predicate.getSlice_range().finish, false).bound,
+                         del.timestamp,
+                         nowInSec);
             }
             else
             {
@@ -1151,9 +1141,9 @@ public class CassandraServer implements Cassandra.Iface
         else
         {
             if (del.super_column != null)
-                addRange(update, Slice.Bound.inclusiveStartOf(del.super_column), Slice.Bound.inclusiveEndOf(del.super_column), del.timestamp);
+                addRange(cfm, delInfo, Slice.Bound.inclusiveStartOf(del.super_column), Slice.Bound.inclusiveEndOf(del.super_column), del.timestamp, nowInSec);
             else
-                update.addPartitionDeletion(new SimpleDeletionTime(del.timestamp, update.nowInSec()));
+                delInfo.add(new SimpleDeletionTime(del.timestamp, nowInSec));
         }
     }
 
@@ -2283,8 +2273,8 @@ public class CassandraServer implements Cassandra.Iface
             for (int i = 0 ; i < request.getColumn_slices().size() ; i++)
             {
                 fixOptionalSliceParameters(request.getColumn_slices().get(i));
-                Slice.Bound start = LegacyLayout.decodeBound(metadata, request.getColumn_slices().get(i).start, true);
-                Slice.Bound finish = LegacyLayout.decodeBound(metadata, request.getColumn_slices().get(i).finish, false);
+                Slice.Bound start = LegacyLayout.decodeBound(metadata, request.getColumn_slices().get(i).start, true).bound;
+                Slice.Bound finish = LegacyLayout.decodeBound(metadata, request.getColumn_slices().get(i).finish, false).bound;
 
                 int compare = metadata.comparator.compare(start, finish);
                 if (!request.reversed && compare > 0)

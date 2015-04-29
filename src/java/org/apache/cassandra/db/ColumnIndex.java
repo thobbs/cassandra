@@ -142,7 +142,7 @@ public class ColumnIndex
                 // A read could start reading at the beginning of any index block, so if we have an
                 // open range tombstone, we need to "repeat" it at the beginning of the block so a
                 // reader that start by this block is aware of that ongoing deletion.
-                // If we do have an an open marker, atom can only be either a Clustering, or a close marker.
+                // If we do have an open marker, atom can only be either a Clustering, or a close marker.
                 // If it's a close marker, then there is really nothing to do. If it's a clustering, we
                 // close and re-open the current marker.
                 if (openMarker != null && !isMarker)

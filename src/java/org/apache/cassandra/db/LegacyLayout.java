@@ -23,10 +23,13 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.AbstractIterator;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.atoms.*;
+import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.io.ISerializer;
@@ -40,7 +43,7 @@ import org.apache.cassandra.utils.*;
 import static org.apache.cassandra.io.sstable.IndexHelper.IndexInfo;
 
 /**
- * Represents the legacy layouts: dense/sparse and simple/compound.
+ * Functions to deal with the old format.
  */
 public abstract class LegacyLayout
 {
@@ -144,19 +147,27 @@ public abstract class LegacyLayout
         return new LegacyCellName(def.isStatic() ? Clustering.STATIC_CLUSTERING : clustering, def, collectionElement);
     }
 
-    public static Slice.Bound decodeBound(CFMetaData metadata, ByteBuffer bound, boolean isStart)
+    public static LegacyBound decodeBound(CFMetaData metadata, ByteBuffer bound, boolean isStart)
     {
         if (!bound.hasRemaining())
-            return isStart ? Slice.Bound.BOTTOM : Slice.Bound.TOP;
+            return isStart ? LegacyBound.BOTTOM : LegacyBound.TOP;
 
         List<ByteBuffer> components = metadata.isCompound()
                                     ? CompositeType.splitName(bound)
                                     : Collections.singletonList(bound);
 
-        assert components.size() <= metadata.comparator.size();
+        // Either it's a prefix of the clustering, or it's the bound of a collection range tombstone (and thus has
+        // the collection column name)
+        assert components.size() <= metadata.comparator.size() || (!metadata.isCompactTable() && components.size() == metadata.comparator.size() + 1);
 
-        return Slice.Bound.create(isStart ? Slice.Bound.Kind.INCL_START_BOUND : Slice.Bound.Kind.INCL_END_BOUND,
-                                  components.toArray(new ByteBuffer[components.size()]));
+        List<ByteBuffer> prefix = components.size() <= metadata.comparator.size() ? components : components.subList(0, metadata.comparator.size());
+        Slice.Bound sb = Slice.Bound.create(isStart ? Slice.Bound.Kind.INCL_START_BOUND : Slice.Bound.Kind.INCL_END_BOUND,
+                                            prefix.toArray(new ByteBuffer[prefix.size()]));
+
+        ColumnDefinition collectionName = components.size() == metadata.comparator.size() + 1
+                                        ? metadata.getColumnDefinition(components.get(metadata.comparator.size()))
+                                        : null;
+        return new LegacyBound(sb, collectionName);
     }
 
     public static ByteBuffer encodeCellName(CFMetaData metadata, Clustering clustering, ByteBuffer columnName, ByteBuffer collectionElement)
@@ -223,13 +234,207 @@ public abstract class LegacyLayout
     }
 
     // For serializing to old wire format
-    public static Iterator<LegacyAtom> fromAtomIterator(AtomIterator iterator)
+    public static Pair<DeletionInfo, Iterator<LegacyCell>> fromAtomIterator(AtomIterator iterator)
     {
-        // TODO
-        throw new UnsupportedOperationException();
+        // we need to extract the range tombstone so materialize the partition. Since this is
+        // used for the on-wire format, this is not worst than it used to be.
+        final ArrayBackedPartition partition = ArrayBackedPartition.create(iterator);
+        DeletionInfo info = partition.deletionInfo();
+        Iterator<LegacyCell> cells = fromRowIterator(partition.metadata(), partition.iterator(), partition.staticRow());
+        return Pair.create(info, cells);
     }
 
-    // For deserializing old wire format/old sstables
+    // For thrift sake
+    public static AtomIterator toAtomIterator(CFMetaData metadata,
+                                              DecoratedKey key,
+                                              DeletionInfo delInfo,
+                                              Iterator<LegacyCell> cells,
+                                              int nowInSec)
+    {
+        return toAtomIterator(metadata, key, LegacyDeletionInfo.from(delInfo), cells, false, nowInSec);
+    }
+
+    // For deserializing old wire format
+    public static AtomIterator toAtomIterator(CFMetaData metadata,
+                                              DecoratedKey key,
+                                              LegacyDeletionInfo delInfo,
+                                              Iterator<LegacyCell> cells,
+                                              boolean reversed,
+                                              int nowInSec)
+    {
+        CellGrouper grouper = new CellGrouper(metadata, nowInSec);
+        PeekingIterator<LegacyCell> iter = Iterators.peekingIterator(cells);
+
+        // Check if we have some static
+        Row staticRow = iter.hasNext() && iter.peek().name.clustering == Clustering.STATIC_CLUSTERING
+                      ? getNextRow(grouper, iter)
+                      : Rows.EMPTY_STATIC_ROW;
+
+        Iterator<Row> rows = convertToRows(grouper, iter, delInfo);
+        Iterator<RangeTombstone> ranges = delInfo.deletionInfo.rangeIterator(reversed);
+        final Iterator<Atom> atoms = new RowAndTombstoneMergeIterator(metadata.comparator, reversed)
+                                     .setTo(rows, ranges);
+
+        return new AbstractAtomIterator(metadata,
+                                        key,
+                                        delInfo.deletionInfo.getPartitionDeletion(),
+                                        metadata.partitionColumns(),
+                                        staticRow,
+                                        reversed,
+                                        AtomStats.NO_STATS,
+                                        nowInSec)
+        {
+            protected Atom computeNext()
+            {
+                return atoms.hasNext() ? atoms.next() : endOfData();
+            }
+        };
+    }
+
+    private static Row getNextRow(CellGrouper grouper, PeekingIterator<? extends LegacyAtom> cells)
+    {
+        if (!cells.hasNext())
+            return null;
+
+        grouper.reset();
+        while (cells.hasNext() && grouper.addAtom(cells.peek()))
+        {
+            // We've added the cell already in the grouper, so just skip it
+            cells.next();
+        }
+        return grouper.getRow();
+    }
+
+    private static Iterator<LegacyAtom> asLegacyAtomIterator(Iterator<? extends LegacyAtom> iter)
+    {
+        return (Iterator<LegacyAtom>)iter;
+    }
+
+    private static Iterator<Row> convertToRows(final CellGrouper grouper, final PeekingIterator<LegacyCell> cells, final LegacyDeletionInfo delInfo)
+    {
+        MergeIterator.Reducer<LegacyAtom, LegacyAtom> reducer = new MergeIterator.Reducer<LegacyAtom, LegacyAtom>()
+        {
+            private LegacyAtom atom;
+
+            public void reduce(int idx, LegacyAtom current)
+            {
+                // We're merging cell with range tombstones, so we should always only have a single atom to reduce.
+                assert atom == null;
+                atom = (LegacyAtom)current;
+            }
+
+            protected LegacyAtom getReduced()
+            {
+                return atom;
+            }
+
+            protected void onKeyChange()
+            {
+                atom = null;
+            }
+        };
+        List<Iterator<LegacyAtom>> iterators = Arrays.asList(asLegacyAtomIterator(cells), asLegacyAtomIterator(delInfo.inRowRangeTombstones()));
+        Iterator<LegacyAtom> merged = MergeIterator.get(iterators, grouper.metadata.comparator, reducer);
+        final PeekingIterator<LegacyAtom> atoms = Iterators.peekingIterator(merged);
+
+        return new AbstractIterator<Row>()
+        {
+            protected Row computeNext()
+            {
+                if (!cells.hasNext())
+                    return endOfData();
+
+                return getNextRow(grouper, cells);
+            }
+        };
+    }
+
+    private static class CellGrouper
+    {
+        public final CFMetaData metadata;
+        private final ReusableRow row;
+        private Row.Writer writer;
+        private Clustering clustering;
+
+        public CellGrouper(CFMetaData metadata, int nowInSec)
+        {
+            this.metadata = metadata;
+            this.row = new ReusableRow(metadata.clusteringColumns().size(), metadata.partitionColumns().regulars, nowInSec, metadata.isCounter());
+        }
+
+        public void reset()
+        {
+            this.clustering = null;
+            this.writer = row.writer();
+        }
+
+        public boolean addAtom(LegacyAtom atom)
+        {
+            return atom.isCell()
+                 ? addCell(atom.asCell())
+                 : addRangeTombstone(atom.asRangeTombstone());
+        }
+
+        public boolean addCell(LegacyCell cell)
+        {
+            if (clustering == null)
+            {
+                clustering = cell.name.clustering.takeAlias();
+                clustering.writeTo(writer);
+            }
+            else if (!clustering.equals(cell.name.clustering))
+            {
+                return false;
+            }
+
+            if (cell.name.column == null)
+            {
+                // It's the row marker
+                assert !cell.value.hasRemaining();
+                writer.writePartitionKeyLivenessInfo(livenessInfo(metadata, cell));
+            }
+            else
+            {
+                CellPath path = cell.name.collectionElement == null ? null : CellPath.create(cell.name.collectionElement);
+                writer.writeCell(cell.name.column, cell.isCounter(), cell.value, livenessInfo(metadata, cell), path);
+            }
+            return true;
+        }
+
+        public boolean addRangeTombstone(LegacyRangeTombstone tombstone)
+        {
+            if (tombstone.isRowDeletion(metadata))
+            {
+                // If we're already within a row, it can't be the same one
+                if (clustering != null)
+                    return false;
+
+                clustering = tombstone.start.getAsClustering(metadata);
+                writer.writeRowDeletion(tombstone.deletionTime);
+                return true;
+            }
+
+            if (tombstone.isCollectionTombstone(metadata))
+            {
+                if (clustering == null)
+                    clustering = tombstone.start.getAsClustering(metadata);
+                else if (!clustering.equals(tombstone.start.getAsClustering(metadata)))
+                    return false;
+
+                writer.writeComplexDeletion(tombstone.start.collectionName, tombstone.deletionTime);
+                return true;
+            }
+            return false;
+        }
+
+        public Row getRow()
+        {
+            writer.endOfRow();
+            return row;
+        }
+    }
+
+    // For deserializing old sstables
     public static AtomIterator toAtomIterator(CFMetaData metadata,
                                               DecoratedKey key,
                                               DeletionTime partitionDeletion,
@@ -237,17 +442,62 @@ public abstract class LegacyLayout
                                               boolean reversed,
                                               int nowInSec)
     {
-        // TODO
-        throw new UnsupportedOperationException();
+        final CellGrouper grouper = new CellGrouper(metadata, nowInSec);
+        final PeekingIterator<LegacyAtom> iter = Iterators.peekingIterator(atoms);
+
+        // Check if we have some static
+        Row staticRow = iter.hasNext() && iter.peek().isCell() && iter.peek().asCell().name.clustering == Clustering.STATIC_CLUSTERING
+                      ? getNextRow(grouper, iter)
+                      : Rows.EMPTY_STATIC_ROW;
+
+        return new AbstractAtomIterator(metadata,
+                                        key,
+                                        partitionDeletion,
+                                        metadata.partitionColumns(),
+                                        staticRow,
+                                        reversed,
+                                        AtomStats.NO_STATS,
+                                        nowInSec)
+        {
+            private RangeTombstoneMarker closingMarker;
+
+            protected Atom computeNext()
+            {
+                if (!iter.hasNext())
+                    return endOfData();
+
+                if (!iter.peek().isCell())
+                {
+                    LegacyRangeTombstone tombstone = iter.peek().asRangeTombstone();
+                    if (!tombstone.isRowDeletion(metadata) && !tombstone.isCollectionTombstone(metadata))
+                    {
+                        // This is a RT for which we'll generate markers so consume it
+                        iter.next();
+
+                        // TODO: this is actually more complex, we can have repeated markers etc....
+                        if (closingMarker == null)
+                            throw new UnsupportedOperationException();
+                        closingMarker = new SimpleRangeTombstoneMarker(tombstone.stop.bound, tombstone.deletionTime);
+                        return new SimpleRangeTombstoneMarker(tombstone.start.bound, tombstone.deletionTime);
+                    }
+                }
+                return getNextRow(grouper, iter);
+            }
+        };
     }
 
     public static Iterator<LegacyCell> fromRowIterator(final RowIterator iterator)
     {
+        return fromRowIterator(iterator.metadata(), iterator, iterator.staticRow());
+    }
+
+    public static Iterator<LegacyCell> fromRowIterator(final CFMetaData metadata, final Iterator<Row> iterator, final Row staticRow)
+    {
         return new AbstractIterator<LegacyCell>()
         {
-            private Iterator<LegacyCell> currentRow = iterator.staticRow().isEmpty()
+            private Iterator<LegacyCell> currentRow = staticRow.isEmpty()
                                                     ? Collections.<LegacyLayout.LegacyCell>emptyIterator()
-                                                    : fromRow(iterator.metadata(), iterator.staticRow());
+                                                    : fromRow(metadata, staticRow);
 
             protected LegacyCell computeNext()
             {
@@ -257,7 +507,7 @@ public abstract class LegacyLayout
                 if (!iterator.hasNext())
                     return endOfData();
 
-                currentRow = fromRow(iterator.metadata(), iterator.next());
+                currentRow = fromRow(metadata, iterator.next());
                 return computeNext();
             }
         };
@@ -314,86 +564,7 @@ public abstract class LegacyLayout
                                             final Iterator<LegacyCell> cells,
                                             final int nowInSec)
     {
-        return new RowIterator()
-        {
-            private final ReusableRow row = new ReusableRow(metadata.clusteringColumns().size(), metadata.partitionColumns().regulars, nowInSec, metadata.isCounter());
-            private LegacyCell nextCell;
-
-            public CFMetaData metadata()
-            {
-                return metadata;
-            }
-
-            public boolean isReverseOrder()
-            {
-                return false;
-            }
-
-            public PartitionColumns columns()
-            {
-                return metadata.partitionColumns();
-            }
-
-            public DecoratedKey partitionKey()
-            {
-                return key;
-            }
-
-            public Row staticRow()
-            {
-                return Rows.EMPTY_STATIC_ROW;
-            }
-
-            public int nowInSec()
-            {
-                return nowInSec;
-            }
-
-            public boolean hasNext()
-            {
-                return nextCell != null || cells.hasNext();
-            }
-
-            public Row next()
-            {
-                // Use the next available cell to set the clustering
-                if (nextCell == null)
-                    nextCell = cells.next();
-
-                Clustering clustering = nextCell.name.clustering.takeAlias();
-
-                Row.Writer writer = row.writer();
-                clustering.writeTo(writer);
-
-                if (nextCell.name.column == null)
-                {
-                    // It's the row marker
-                    assert !nextCell.value.hasRemaining();
-                    writer.writePartitionKeyLivenessInfo(livenessInfo(metadata, nextCell));
-                    nextCell = cells.hasNext() ? cells.next() : null;
-                }
-
-                while (nextCell != null && clustering.equals(nextCell.name.clustering))
-                {
-                    assert nextCell.name.column != null; // we've already handled the row marker
-                    CellPath path = nextCell.name.collectionElement == null ? null : CellPath.create(nextCell.name.collectionElement);
-                    writer.writeCell(nextCell.name.column, nextCell.isCounter(), nextCell.value, livenessInfo(metadata, nextCell), path);
-                    nextCell = cells.hasNext() ? cells.next() : null;
-                }
-
-                writer.endOfRow();
-                return row;
-            }
-
-            public void remove()
-            {
-                throw new UnsupportedOperationException();
-            }
-
-            public void close()
-            {
-            }
-        };
+        return AtomIterators.asRowIterator(toAtomIterator(metadata, key, LegacyDeletionInfo.live(), cells, false, nowInSec));
     }
 
     private static LivenessInfo livenessInfo(CFMetaData metadata, LegacyCell cell)
@@ -512,9 +683,46 @@ public abstract class LegacyLayout
         }
     }
 
-    public interface LegacyAtom
+    public static class LegacyBound
+    {
+        public static final LegacyBound BOTTOM = new LegacyBound(Slice.Bound.BOTTOM, null);
+        public static final LegacyBound TOP = new LegacyBound(Slice.Bound.TOP, null);
+
+        public final Slice.Bound bound;
+        public final ColumnDefinition collectionName;
+
+        private LegacyBound(Slice.Bound bound, ColumnDefinition collectionName)
+        {
+            this.bound = bound;
+            this.collectionName = collectionName;
+        }
+
+        public Clustering getAsClustering(CFMetaData metadata)
+        {
+            assert bound.size() == metadata.comparator.size();
+            ByteBuffer[] values = new ByteBuffer[bound.size()];
+            for (int i = 0; i < bound.size(); i++)
+                values[i] = bound.get(i);
+            return new SimpleClustering(values);
+        }
+
+        @Override
+        public String toString()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.append(bound.kind()).append("(");
+            for (int i = 0; i < bound.size(); i++)
+                sb.append(i > 0 ? ":" : "").append(bound.get(i) == null ? "null" : ByteBufferUtil.bytesToHex(bound.get(i)));
+            sb.append(")");
+            return String.format("Bound(%s, collection=%s)", sb.toString(), collectionName == null ? "null" : collectionName.name);
+        }
+    }
+
+    public interface LegacyAtom extends Clusterable
     {
         public boolean isCell();
+
+        public ClusteringPrefix clustering();
 
         public LegacyCell asCell();
         public LegacyRangeTombstone asRangeTombstone();
@@ -576,6 +784,11 @@ public abstract class LegacyLayout
             return new LegacyCell(Kind.COUNTER, name, value, FBUtilities.timestampMicros(), LivenessInfo.NO_DELETION_TIME, LivenessInfo.NO_TTL);
         }
 
+        public ClusteringPrefix clustering()
+        {
+            return name.clustering;
+        }
+
         public boolean isCell()
         {
             return true;
@@ -630,17 +843,23 @@ public abstract class LegacyLayout
      * This is used as a temporary object to facilitate dealing with the legacy format, this
      * is not meant to be optimal.
      */
-    public static class LegacyRangeTombstone
+    public static class LegacyRangeTombstone implements LegacyAtom
     {
-        public final ByteBuffer start;
-        public final ByteBuffer stop;
+        public final LegacyBound start;
+        public final LegacyBound stop;
         public final DeletionTime deletionTime;
 
-        private LegacyRangeTombstone(ByteBuffer start, ByteBuffer stop, DeletionTime deletionTime)
+        private LegacyRangeTombstone(LegacyBound start, LegacyBound stop, DeletionTime deletionTime)
         {
+            assert Objects.equals(start.collectionName, stop.collectionName);
             this.start = start;
             this.stop = stop;
             this.deletionTime = deletionTime;
+        }
+
+        public ClusteringPrefix clustering()
+        {
+            return start.bound;
         }
 
         public boolean isCell()
@@ -657,27 +876,73 @@ public abstract class LegacyLayout
         {
             return this;
         }
-    }
 
-    public static class LegacyPartition
-    {
-        public List<LegacyRangeTombstone> rangeTombstones;
-        public Map<ByteBuffer, LegacyCell> cells;
-    }
-
-    public static class DecodedCellName
-    {
-        public final Clustering clustering;
-        public final ColumnDefinition column;
-        public final ByteBuffer collectionElement;
-
-        private DecodedCellName(Clustering clustering, ColumnDefinition column, ByteBuffer collectionElement)
+        public boolean isCollectionTombstone(CFMetaData metadata)
         {
-            this.clustering = clustering;
-            this.column = column;
-            this.collectionElement = collectionElement;
+            return start.collectionName != null;
+        }
+
+        public boolean isRowDeletion(CFMetaData metadata)
+        {
+            if (start.collectionName != null
+                || stop.collectionName != null
+                || start.bound.size() != metadata.comparator.size()
+                || stop.bound.size() != metadata.comparator.size())
+                return false;
+
+            for (int i = 0; i < start.bound.size(); i++)
+                if (!Objects.equals(start.bound.get(i), stop.bound.get(i)))
+                    return false;
+            return true;
         }
     }
+
+    public static class LegacyDeletionInfo
+    {
+        public final DeletionInfo deletionInfo;
+        private final List<LegacyRangeTombstone> inRowTombstones;
+
+        private LegacyDeletionInfo(DeletionInfo deletionInfo, List<LegacyRangeTombstone> inRowTombstones)
+        {
+            this.deletionInfo = deletionInfo;
+            this.inRowTombstones = inRowTombstones;
+        }
+
+        public static LegacyDeletionInfo from(DeletionInfo info)
+        {
+            return new LegacyDeletionInfo(info, Collections.<LegacyRangeTombstone>emptyList());
+        }
+
+        public static LegacyDeletionInfo live()
+        {
+            return from(DeletionInfo.live());
+        }
+
+        public Iterator<LegacyRangeTombstone> inRowRangeTombstones()
+        {
+            return inRowTombstones.iterator();
+        }
+    }
+
+    //public static class LegacyPartition
+    //{
+    //    public List<LegacyRangeTombstone> rangeTombstones;
+    //    public Map<ByteBuffer, LegacyCell> cells;
+    //}
+
+    //public static class DecodedCellName
+    //{
+    //    public final Clustering clustering;
+    //    public final ColumnDefinition column;
+    //    public final ByteBuffer collectionElement;
+
+    //    private DecodedCellName(Clustering clustering, ColumnDefinition column, ByteBuffer collectionElement)
+    //    {
+    //        this.clustering = clustering;
+    //        this.column = column;
+    //        this.collectionElement = collectionElement;
+    //    }
+    //}
 
     //public void deserializeCellBody(DataInput in, DeserializedCell cell, ByteBuffer collectionElement, int mask, Flag flag, int expireBefore)
     //throws IOException

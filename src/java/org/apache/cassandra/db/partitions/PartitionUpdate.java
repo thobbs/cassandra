@@ -64,7 +64,7 @@ import org.apache.cassandra.utils.UUIDSerializer;
  * {@code ModificationStatement} requires that (because we could have multiple {@link Operation}
  * on the same column in a given statement)).
  */
-public class PartitionUpdate extends AbstractPartitionData implements Iterable<Row>, Sorting.Sortable
+public class PartitionUpdate extends AbstractPartitionData implements Sorting.Sortable
 {
     protected static final Logger logger = LoggerFactory.getLogger(PartitionUpdate.class);
 
@@ -297,23 +297,6 @@ public class PartitionUpdate extends AbstractPartitionData implements Iterable<R
     }
 
     /**
-     * The deletion info for the partition update.
-     *
-     * <b>warning:</b> the returned object should be used in a read-only fashion. In particular,
-     * it should not be used to add new range tombstones to this deletion. For that,
-     * {@link addRangeTombstone} should be used instead. The reason being that adding directly to
-     * the returned object would bypass some stats collection that {@code addRangeTombstone} does.
-     *
-     * @return the deletion info for the partition update for use as read-only.
-     */
-    public DeletionInfo deletionInfo()
-    {
-        // TODO: it is a tad fragile that deletionInfo can be but shouldn't be modified. We
-        // could add the option of providing a read-only view of a DeletionInfo instead.
-        return deletionInfo;
-    }
-
-    /**
      * The size of the data contained in this update.
      *
      * @return the size of the data contained in this update.
@@ -329,18 +312,6 @@ public class PartitionUpdate extends AbstractPartitionData implements Iterable<R
                 size += cell.dataSize();
         }
         return size;
-    }
-
-    /**
-     * Returns an iterator that iterators over the rows of this update in clustering order.
-     * <p>
-     * This is equivalent to calling {@code this.iterator(this.nowInSec())}.
-     *
-     * @return an iterator over the rows of this update.
-     */
-    public Iterator<Row> iterator()
-    {
-        return iterator(createdAtInSec);
     }
 
     /**
