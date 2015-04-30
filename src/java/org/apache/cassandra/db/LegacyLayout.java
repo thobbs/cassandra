@@ -25,6 +25,8 @@ import java.util.*;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.PeekingIterator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -47,13 +49,15 @@ import static org.apache.cassandra.io.sstable.IndexHelper.IndexInfo;
  */
 public abstract class LegacyLayout
 {
+    private static final Logger logger = LoggerFactory.getLogger(LegacyLayout.class);
+
     public final static int MAX_CELL_NAME_LENGTH = FBUtilities.MAX_UNSIGNED_SHORT;
 
-    public final static int DELETION_MASK        = 0x01;
-    public final static int EXPIRATION_MASK      = 0x02;
-    public final static int COUNTER_MASK         = 0x04;
-    public final static int COUNTER_UPDATE_MASK  = 0x08;
-    public final static int RANGE_TOMBSTONE_MASK = 0x10;
+    private final static int DELETION_MASK        = 0x01;
+    private final static int EXPIRATION_MASK      = 0x02;
+    private final static int COUNTER_MASK         = 0x04;
+    private final static int COUNTER_UPDATE_MASK  = 0x08;
+    private final static int RANGE_TOMBSTONE_MASK = 0x10;
 
     private LegacyLayout() {}
 
@@ -341,10 +345,10 @@ public abstract class LegacyLayout
         {
             protected Row computeNext()
             {
-                if (!cells.hasNext())
+                if (!atoms.hasNext())
                     return endOfData();
 
-                return getNextRow(grouper, cells);
+                return getNextRow(grouper, atoms);
             }
         };
     }
@@ -642,6 +646,71 @@ public abstract class LegacyLayout
                 return 0;
             }
         };
+    }
+
+    public static LegacyAtom readLegacyAtom(CFMetaData metadata, DataInput in) throws IOException
+    {
+        ByteBuffer cellname = ByteBufferUtil.readWithShortLength(in);
+        if (!cellname.hasRemaining())
+            return null; // END_OF_ROW
+
+        int b = in.readUnsignedByte();
+        return (b & RANGE_TOMBSTONE_MASK) != 0
+             ? readLegacyRangeTombstoneBody(metadata, in, cellname)
+             : readLegacyCellBody(metadata, in, cellname, b);
+    }
+
+    public static LegacyCell readLegacyCell(CFMetaData metadata, DataInput in) throws IOException
+    {
+        ByteBuffer cellname = ByteBufferUtil.readWithShortLength(in);
+        int b = in.readUnsignedByte();
+        return readLegacyCellBody(metadata, in, cellname, b);
+    }
+
+    public static LegacyCell readLegacyCellBody(CFMetaData metadata, DataInput in, ByteBuffer cellname, int mask) throws IOException
+    {
+        LegacyCellName name = decodeCellName(metadata, cellname);
+
+        if ((mask & COUNTER_MASK) != 0)
+        {
+            long timestampOfLastDelete = in.readLong();
+            long ts = in.readLong();
+            ByteBuffer value = ByteBufferUtil.readWithLength(in);
+            return new LegacyCell(LegacyCell.Kind.COUNTER, name, value, ts, LivenessInfo.NO_DELETION_TIME, LivenessInfo.NO_TTL);
+        }
+        else if ((mask & EXPIRATION_MASK) != 0)
+        {
+            int ttl = in.readInt();
+            int expiration = in.readInt();
+            long ts = in.readLong();
+            ByteBuffer value = ByteBufferUtil.readWithLength(in);
+            return new LegacyCell(LegacyCell.Kind.EXPIRING, name, value, ts, expiration, ttl);
+        }
+        else
+        {
+            long ts = in.readLong();
+            ByteBuffer value = ByteBufferUtil.readWithLength(in);
+            return (mask & COUNTER_UPDATE_MASK) != 0
+                ? new LegacyCell(LegacyCell.Kind.COUNTER, name, CounterContext.instance().createLocal(ByteBufferUtil.toLong(value)), ts, LivenessInfo.NO_DELETION_TIME, LivenessInfo.NO_TTL)
+                : ((mask & DELETION_MASK) == 0
+                        ? new LegacyCell(LegacyCell.Kind.REGULAR, name, value, ts, LivenessInfo.NO_DELETION_TIME, LivenessInfo.NO_TTL)
+                        : new LegacyCell(LegacyCell.Kind.DELETED, name, ByteBufferUtil.EMPTY_BYTE_BUFFER, ts, ByteBufferUtil.toInt(value), LivenessInfo.NO_TTL));
+        }
+    }
+
+    public static LegacyRangeTombstone readLegacyRangeTombstone(CFMetaData metadata, DataInput in) throws IOException
+    {
+        ByteBuffer boundname = ByteBufferUtil.readWithShortLength(in);
+        in.readUnsignedByte();
+        return readLegacyRangeTombstoneBody(metadata, in, boundname);
+    }
+
+    public static LegacyRangeTombstone readLegacyRangeTombstoneBody(CFMetaData metadata, DataInput in, ByteBuffer boundname) throws IOException
+    {
+        LegacyBound min = decodeBound(metadata, boundname, true);
+        LegacyBound max = decodeBound(metadata, ByteBufferUtil.readWithShortLength(in), false);
+        DeletionTime dt = DeletionTime.serializer.deserialize(in);
+        return new LegacyRangeTombstone(min, max, dt);
     }
 
     public static class LegacyCellName
