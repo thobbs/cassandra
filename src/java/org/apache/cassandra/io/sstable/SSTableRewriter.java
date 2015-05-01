@@ -63,9 +63,14 @@ public class SSTableRewriter
     }
 
     @VisibleForTesting
-    static void overrideOpenInterval(long size)
+    public static void overrideOpenInterval(long size)
     {
         preemptiveOpenInterval = size;
+    }
+    @VisibleForTesting
+    public static long getOpenInterval()
+    {
+        return preemptiveOpenInterval;
     }
 
     private final DataTracker dataTracker;

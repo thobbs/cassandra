@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.io.*;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Sets;
 
@@ -401,6 +402,27 @@ public class Scrubber implements Closeable
         public long maxPurgeableTimestamp(DecoratedKey key)
         {
             return Long.MIN_VALUE;
+        }
+    }
+
+    @VisibleForTesting
+    public ScrubResult scrubWithResult()
+    {
+        scrub();
+        return new ScrubResult(this);
+    }
+
+    public static final class ScrubResult
+    {
+        public final int goodRows;
+        public final int badRows;
+        public final int emptyRows;
+
+        public ScrubResult(Scrubber scrubber)
+        {
+            this.goodRows = scrubber.goodRows;
+            this.badRows = scrubber.badRows;
+            this.emptyRows = scrubber.emptyRows;
         }
     }
 }
