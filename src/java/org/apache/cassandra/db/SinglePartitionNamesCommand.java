@@ -115,7 +115,7 @@ public class SinglePartitionNamesCommand extends SinglePartitionReadCommand<Name
 
             Tracing.trace("Merging data from sstable {}", sstable.descriptor.generation);
             sstable.incrementReadCount();
-            try (AtomIterator iter = filter.filter(sstable.iterator(partitionKey(), filter.queriedColumns(), filter.isReversed(), nowInSec())))
+            try (AtomIterator iter = filter.filter(sstable.iterator(partitionKey(), filter.queriedColumns(), filter.isReversed(), nowInSec(), isForThrift())))
             {
                 if (AtomIterators.isEmpty(iter))
                     continue;

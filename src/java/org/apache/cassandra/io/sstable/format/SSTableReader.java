@@ -1459,8 +1459,8 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     protected abstract RowIndexEntry getPosition(RowPosition key, Operator op, boolean updateCacheAndStats, boolean permitMatchPastLast);
 
-    public abstract SliceableAtomIterator iterator(DecoratedKey key, ColumnsSelection selectedColumns, boolean reversed, int nowInSec);
-    public abstract SliceableAtomIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, ColumnsSelection selectedColumns, boolean reversed, int nowInSec);
+    public abstract SliceableAtomIterator iterator(DecoratedKey key, ColumnsSelection selectedColumns, boolean reversed, int nowInSec, boolean isForThrift);
+    public abstract SliceableAtomIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, ColumnsSelection selectedColumns, boolean reversed, int nowInSec, boolean isForThrift);
 
     /**
      * Finds and returns the first key beyond a given token in this SSTable or null if no such key exists.

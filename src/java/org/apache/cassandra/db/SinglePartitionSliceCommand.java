@@ -163,7 +163,7 @@ public class SinglePartitionSliceCommand extends SinglePartitionReadCommand<Slic
                 }
 
                 sstable.incrementReadCount();
-                AtomIterator iter = filter.filter(sstable.iterator(partitionKey(), filter.queriedColumns(), filter.isReversed(), nowInSec()));
+                AtomIterator iter = filter.filter(sstable.iterator(partitionKey(), filter.queriedColumns(), filter.isReversed(), nowInSec(), isForThrift()));
                 mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone, iter.partitionLevelDeletion().markedForDeleteAt());
                 sstablesIterated++;
                 iterators.add(isForThrift() ? ThriftResultsMerger.maybeWrap(iter) : iter);
@@ -179,7 +179,7 @@ public class SinglePartitionSliceCommand extends SinglePartitionReadCommand<Slic
                         continue;
 
                     sstable.incrementReadCount();
-                    AtomIterator iter = filter.filter(sstable.iterator(partitionKey(), filter.queriedColumns(), filter.isReversed(), nowInSec()));
+                    AtomIterator iter = filter.filter(sstable.iterator(partitionKey(), filter.queriedColumns(), filter.isReversed(), nowInSec(), isForThrift()));
                     if (iter.partitionLevelDeletion().markedForDeleteAt() > minTimestamp)
                     {
                         includedDueToTombstones++;

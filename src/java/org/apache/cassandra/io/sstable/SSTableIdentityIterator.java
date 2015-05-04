@@ -20,6 +20,8 @@ package org.apache.cassandra.io.sstable;
 import java.io.*;
 import java.util.Iterator;
 
+import com.google.common.collect.AbstractIterator;
+
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
@@ -30,12 +32,14 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.FBUtilities;
 
-public class SSTableIdentityIterator extends SSTableAtomIterator implements Comparable<SSTableIdentityIterator>, AtomIterator
+public class SSTableIdentityIterator extends AbstractIterator<Atom> implements Comparable<SSTableIdentityIterator>, AtomIterator
 {
     private final SSTableReader sstable;
     private final DecoratedKey key;
     private final DeletionTime partitionLevelDeletion;
     private final String filename;
+
+    private final SSTableAtomIterator iterator;
     private final Row staticRow;
 
     /**
@@ -46,10 +50,6 @@ public class SSTableIdentityIterator extends SSTableAtomIterator implements Comp
      */
     public SSTableIdentityIterator(SSTableReader sstable, RandomAccessReader file, DecoratedKey key, int nowInSec)
     {
-        super(file,
-              sstable.header,
-              new SerializationHelper(sstable.descriptor.version.correspondingMessagingVersion(), SerializationHelper.Flag.LOCAL, nowInSec),
-              sstable.metadata.isCounter());
         this.sstable = sstable;
         this.filename = file.getPath();
         this.key = key;
@@ -57,19 +57,15 @@ public class SSTableIdentityIterator extends SSTableAtomIterator implements Comp
         try
         {
             this.partitionLevelDeletion = DeletionTime.serializer.deserialize(file);
-            this.staticRow = readStaticRow();
+            SerializationHelper helper = new SerializationHelper(sstable.descriptor.version.correspondingMessagingVersion(), SerializationHelper.Flag.LOCAL, nowInSec);
+            this.iterator = SSTableAtomIterator.create(sstable.metadata, file, sstable.header, helper, partitionLevelDeletion);
+            this.staticRow = iterator.readStaticRow();
         }
         catch (IOException e)
         {
             sstable.markSuspect();
             throw new CorruptSSTableException(e, filename);
         }
-    }
-
-    protected RuntimeException onIOException(IOException e)
-    {
-        sstable.markSuspect();
-        return new CorruptSSTableException(e, filename);
     }
 
     public CFMetaData metadata()
@@ -100,6 +96,27 @@ public class SSTableIdentityIterator extends SSTableAtomIterator implements Comp
     public Row staticRow()
     {
         return staticRow;
+    }
+
+    protected Atom computeNext()
+    {
+        try
+        {
+            return iterator.hasNext() ? iterator.next() : endOfData();
+        }
+        catch (IOError e)
+        {
+            sstable.markSuspect();
+            if (e.getCause() != null && e.getCause() instanceof Exception)
+                throw new CorruptSSTableException((Exception)e.getCause(), filename);
+            else
+                throw e;
+        }
+    }
+
+    public int nowInSec()
+    {
+        return iterator.nowInSec();
     }
 
     public void close()

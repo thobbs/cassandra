@@ -58,18 +58,18 @@ public class BigTableReader extends SSTableReader
         super(desc, components, metadata, partitioner, maxDataAge, sstableMetadata, openReason, header);
     }
 
-    public SliceableAtomIterator iterator(DecoratedKey key, ColumnsSelection selectedColumns, boolean reversed, int nowInSec)
+    public SliceableAtomIterator iterator(DecoratedKey key, ColumnsSelection selectedColumns, boolean reversed, int nowInSec, boolean isForThrift)
     {
         return reversed
-             ? new SSTableReversedIterator(this, key, selectedColumns, nowInSec)
-             : new SSTableIterator(this, key, selectedColumns, nowInSec);
+             ? new SSTableReversedIterator(this, key, selectedColumns, nowInSec, isForThrift)
+             : new SSTableIterator(this, key, selectedColumns, nowInSec, isForThrift);
     }
 
-    public SliceableAtomIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, ColumnsSelection selectedColumns, boolean reversed, int nowInSec)
+    public SliceableAtomIterator iterator(FileDataInput file, DecoratedKey key, RowIndexEntry indexEntry, ColumnsSelection selectedColumns, boolean reversed, int nowInSec, boolean isForThrift)
     {
         return reversed
-             ? new SSTableReversedIterator(this, file, key, indexEntry, selectedColumns, nowInSec)
-             : new SSTableIterator(this, file, key, indexEntry, selectedColumns, nowInSec);
+             ? new SSTableReversedIterator(this, file, key, indexEntry, selectedColumns, nowInSec, isForThrift)
+             : new SSTableIterator(this, file, key, indexEntry, selectedColumns, nowInSec, isForThrift);
     }
 
     /**

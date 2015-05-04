@@ -50,17 +50,21 @@ abstract class AbstractSSTableIterator implements SliceableAtomIterator
     protected final Row staticRow;
     protected final Reader reader;
 
+    private final boolean isForThrift;
+
     protected AbstractSSTableIterator(SSTableReader sstable,
                                       FileDataInput file,
                                       DecoratedKey key,
                                       RowIndexEntry indexEntry,
                                       ColumnsSelection columnsSelection,
-                                      int nowInSec)
+                                      int nowInSec,
+                                      boolean isForThrift)
     {
         this.sstable = sstable;
         this.key = key;
         this.columns = columnsSelection;
         this.helper = new SerializationHelper(sstable.descriptor.version.correspondingMessagingVersion(), SerializationHelper.Flag.LOCAL, nowInSec, columnsSelection);
+        this.isForThrift = isForThrift;
 
         if (indexEntry == null)
         {
@@ -73,17 +77,19 @@ abstract class AbstractSSTableIterator implements SliceableAtomIterator
             try
             {
                 boolean shouldCloseFile = file == null;
-                boolean isAtPartitionStart = false;
                 // We seek to the beginning to the partition if either:
                 //   - the partition is not indexed; we then have a single block to read anyway
                 //     and we need to read the partition deletion time.
                 //   - we're querying static columns.
-                if (indexEntry.isIndexed() && columns.columns().statics.isEmpty())
-                {
-                    this.partitionLevelDeletion = indexEntry.deletionTime();
-                    this.staticRow = Rows.EMPTY_STATIC_ROW;
-                }
-                else
+                boolean needSeekAtPartitionStart = !indexEntry.isIndexed() || !columns.columns().statics.isEmpty();
+
+                // For CQL queries on static compact tables, we only want to consider static value (only those are exposed),
+                // but readStaticRow have already read them and might in fact have consumed the whole partition (when reading
+                // the legacy file format), so set the reader to null so we don't try to read anything more. We can remove this
+                // once we drop support for the legacy file format
+                boolean needsReader = sstable.descriptor.version.storeRows() || isForThrift || !sstable.metadata.isStaticCompactTable();
+
+                if (needSeekAtPartitionStart)
                 {
                     // Not indexed (or is reading static), set to the beginning of the partition and read partition level deletion there
                     if (file == null)
@@ -93,32 +99,74 @@ abstract class AbstractSSTableIterator implements SliceableAtomIterator
 
                     ByteBufferUtil.skipShortLength(file); // Skip partition key
                     this.partitionLevelDeletion = DeletionTime.serializer.deserialize(file);
-                    if (sstable.header.hasStatic())
-                    {
-                        if (columns.columns().statics.isEmpty())
-                        {
-                            this.staticRow = Rows.EMPTY_STATIC_ROW;
-                            AtomSerializer.serializer.skipStaticRow(file, sstable.header, helper);
-                        }
-                        else
-                        {
-                            this.staticRow = AtomSerializer.serializer.deserializeStaticRow(file, sstable.header, helper);
-                        }
-                    }
-                    else
-                    {
-                        this.staticRow = Rows.EMPTY_STATIC_ROW;
-                    }
-                    isAtPartitionStart = true;
+
+                    // Note that this needs to be called after file != null and after the partitionDeletion has been set, but before readStaticRow
+                    // (since it uses it) so we can't move that up (but we'll be able to simplify as soon as we drop support for the old file format).
+                    this.reader = needsReader ? createReader(indexEntry, file, needSeekAtPartitionStart, shouldCloseFile) : null;
+                    this.staticRow = readStaticRow(sstable, file, helper, columns.columns().statics, isForThrift, nowInSec, reader == null ? null : reader.deserializer);
+                }
+                else
+                {
+                    this.partitionLevelDeletion = indexEntry.deletionTime();
+                    this.staticRow = Rows.EMPTY_STATIC_ROW;
+                    this.reader = needsReader ? createReader(indexEntry, file, needSeekAtPartitionStart, shouldCloseFile) : null;
                 }
 
-                this.reader = createReader(indexEntry, file, isAtPartitionStart, shouldCloseFile);
             }
             catch (IOException e)
             {
                 sstable.markSuspect();
                 throw new CorruptSSTableException(e, file.getPath());
             }
+        }
+    }
+
+    private static Row readStaticRow(SSTableReader sstable,
+                                     FileDataInput file,
+                                     SerializationHelper helper,
+                                     Columns statics,
+                                     boolean isForThrift,
+                                     int nowInSec,
+                                     AtomDeserializer deserializer) throws IOException
+    {
+        if (!sstable.descriptor.version.storeRows())
+        {
+            if (!sstable.metadata.isCompactTable())
+            {
+                assert deserializer != null;
+                return deserializer.hasNext() && deserializer.nextIsStatic()
+                     ? (Row)deserializer.readNext()
+                     : Rows.EMPTY_STATIC_ROW;
+            }
+
+            // For compact tables, we use statics for the "column_metadata" definition. However, in the old format, those
+            // "column_metadata" are intermingled as any other "cell". In theory, this means that we'd have to do a first
+            // pass to extract the static values. However, for thrift, we'll use the ThriftResultsMerger right away which
+            // will re-merge static values with dynamic ones, so we can just ignore static and read every cell as a
+            // "dynamic" one. For CQL, if the table is a "static compact", then is has only static columns exposed and no
+            // dynamic ones. So we do a pass to extract static columns here, but will have no more work to do. Otherwise,
+            // the table won't have static columns.
+            if (statics.isEmpty() || isForThrift)
+                return Rows.EMPTY_STATIC_ROW;
+
+            assert sstable.metadata.isStaticCompactTable() && !isForThrift;
+
+            // As said above, if it's a CQL query and the table is a "static compact", the only exposed columns are the
+            // static ones. So we don't have to mark the position to seek back later.
+            return LegacyLayout.extractStaticColumns(sstable.metadata, file, statics, nowInSec);
+        }
+
+        if (!sstable.header.hasStatic())
+            return Rows.EMPTY_STATIC_ROW;
+
+        if (statics.isEmpty())
+        {
+            AtomSerializer.serializer.skipStaticRow(file, sstable.header, helper);
+            return Rows.EMPTY_STATIC_ROW;
+        }
+        else
+        {
+            return AtomSerializer.serializer.deserializeStaticRow(file, sstable.header, helper);
         }
     }
 
@@ -243,7 +291,7 @@ abstract class AbstractSSTableIterator implements SliceableAtomIterator
         private void createDeserializer()
         {
             assert file != null && deserializer == null;
-            deserializer = AtomDeserializer.create(sstable.metadata, file, sstable.header, helper);
+            deserializer = AtomDeserializer.create(sstable.metadata, file, sstable.header, helper, partitionLevelDeletion, isForThrift);
         }
 
         protected void seekToPosition(long position) throws IOException

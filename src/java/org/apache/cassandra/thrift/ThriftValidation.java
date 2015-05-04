@@ -259,7 +259,7 @@ public class ThriftValidation
                     if (cname.column != null && cname.collectionElement != null && !cname.column.type.isCollection())
                         throw new org.apache.cassandra.exceptions.InvalidRequestException(String.format("Invalid collection component, %s is not a collection", cname.column.name));
                 }
-                catch (IllegalArgumentException e)
+                catch (IllegalArgumentException | UnknownColumnException e)
                 {
                     throw new org.apache.cassandra.exceptions.InvalidRequestException(String.format("Error validating cell name for CQL3 table %s: %s", metadata.cfName, e.getMessage()));
                 }
@@ -448,11 +448,17 @@ public class ThriftValidation
         if (!column.isSetTimestamp())
             throw new org.apache.cassandra.exceptions.InvalidRequestException("Column timestamp is required");
 
-        LegacyLayout.LegacyCellName cn = LegacyLayout.decodeCellName(metadata, scName, column.name);
-
         try
         {
+            LegacyLayout.LegacyCellName cn = LegacyLayout.decodeCellName(metadata, scName, column.name);
             cn.column.validateCellValue(column.value);
+
+            // Indexed column values cannot be larger than 64K.  See CASSANDRA-3057/4240 for more details
+            Keyspace.open(metadata.ksName).getColumnFamilyStore(metadata.cfName).indexManager.validate(cn.column, column.value, null);
+        }
+        catch (UnknownColumnException e)
+        {
+            throw new org.apache.cassandra.exceptions.InvalidRequestException(e.getMessage());
         }
         catch (MarshalException me)
         {
@@ -466,8 +472,6 @@ public class ThriftValidation
                                                                       (getThriftColumnNameComparator(metadata, scName)).getString(column.name)));
         }
 
-        // Indexed column values cannot be larger than 64K.  See CASSANDRA-3057/4240 for more details
-        Keyspace.open(metadata.ksName).getColumnFamilyStore(metadata.cfName).indexManager.validate(cn.column, column.value, null);
     }
 
     /**

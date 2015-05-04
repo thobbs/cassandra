@@ -78,7 +78,7 @@ public class DeletionInfo implements IMeasurableMemory
         ranges.add(slice.start(), slice.end(), markedForDeleteAt, localDeletionTime);
     }
 
-    private DeletionInfo(DeletionTime partitionDeletion, RangeTombstoneList ranges)
+    public DeletionInfo(DeletionTime partitionDeletion, RangeTombstoneList ranges)
     {
         this.partitionDeletion = partitionDeletion.takeAlias();
         this.ranges = ranges;

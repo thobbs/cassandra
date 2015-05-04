@@ -614,27 +614,19 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO (note that we should be careful to handle the flag properly)
-                throw new UnsupportedOperationException();
-                //if (!in.readBoolean())
-                //    return null;
+                // TODO (we should be careful to handle the flag properly)
+                assert key != null;
 
-                //ColumnFamily cf = factory.create(Schema.instance.getCFMetaData(deserializeCfId(in, version)));
+                // This is only used in mutation, and mutation have never allowed "null" column families
+                boolean present = in.readBoolean();
+                assert present;
 
-                //if (cf.metadata().isSuper() && version < MessagingService.VERSION_20)
-                //{
-                //    SuperColumns.deserializerSuperColumnFamily(in, cf, flag, version);
-                //}
-                //else
-                //{
-                //    cf.delete(cf.getComparator().deletionInfoSerializer().deserialize(in, version));
-
-                //    ColumnSerializer columnSerializer = cf.getComparator().columnSerializer();
-                //    int size = in.readInt();
-                //    for (int i = 0; i < size; ++i)
-                //        cf.addColumn(columnSerializer.deserialize(in, flag));
-                //}
-                //return cf;
+                CFMetaData metadata = CFMetaData.serializer.deserialize(in, version);
+                LegacyLayout.LegacyDeletionInfo info = LegacyLayout.LegacyDeletionInfo.serializer.deserialize(metadata, in, version);
+                int size = in.readInt();
+                Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.deserializeCells(metadata, in, version, flag, size);
+                AtomIterator iterator = LegacyLayout.onWireCellstoAtomIterator(metadata, key, info, cells, false, FBUtilities.nowInSeconds());
+                return AtomIterators.toUpdate(iterator);
             }
 
             assert key == null; // key is only there for the old format
