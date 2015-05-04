@@ -142,7 +142,7 @@ public class BigFormat implements SSTableFormat
             tracksLegacyCounterShards = version.compareTo("ka") >= 0;
             newFileName = version.compareTo("la") >= 0;
             storeRows = version.compareTo("la") >= 0;
-            correspondingMessagingVersion = MessagingService.VERSION_30;
+            correspondingMessagingVersion = storeRows ? MessagingService.VERSION_30 : MessagingService.VERSION_21;
         }
 
         @Override

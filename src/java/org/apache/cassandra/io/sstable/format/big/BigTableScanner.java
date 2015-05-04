@@ -328,7 +328,7 @@ public class BigTableScanner implements ISSTableScanner
                             }
 
                             PartitionFilter filter = dataRange.partitionFilter(partitionKey());
-                            return filter.filter(sstable.iterator(dfile, partitionKey(), currentEntry, filter.queriedColumns(), filter.isReversed(), nowInSec));
+                            return filter.filter(sstable.iterator(dfile, partitionKey(), currentEntry, filter.queriedColumns(), filter.isReversed(), nowInSec, isForThrift));
                         }
                         catch (IOException e)
                         {

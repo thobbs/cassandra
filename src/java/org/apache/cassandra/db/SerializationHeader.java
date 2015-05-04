@@ -142,7 +142,10 @@ public class SerializationHeader
             stats.updateLocalDeletionTime(sstable.getMinLocalDeletionTime());
             stats.updateTTL(sstable.getMinTTL());
             stats.updateColumnSetPerRow(sstable.getTotalColumnsSet(), sstable.getTotalRows());
-            columns.addAll(sstable.header.columns());
+            if (sstable.header == null)
+                columns.addAll(metadata.partitionColumns());
+            else
+                columns.addAll(sstable.header.columns());
         }
         return new SerializationHeader(metadata, columns.build(), stats.get(), true);
     }

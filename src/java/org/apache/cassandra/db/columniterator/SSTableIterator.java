@@ -45,9 +45,9 @@ public class SSTableIterator extends AbstractSSTableIterator
 {
     private static final Logger logger = LoggerFactory.getLogger(SSTableIterator.class);
 
-    public SSTableIterator(SSTableReader sstable, DecoratedKey key, ColumnsSelection columns, int nowInSec)
+    public SSTableIterator(SSTableReader sstable, DecoratedKey key, ColumnsSelection columns, int nowInSec, boolean isForThrift)
     {
-        this(sstable, null, key, sstable.getPosition(key, SSTableReader.Operator.EQ), columns, nowInSec);
+        this(sstable, null, key, sstable.getPosition(key, SSTableReader.Operator.EQ), columns, nowInSec, isForThrift);
     }
 
     public SSTableIterator(SSTableReader sstable,
@@ -55,9 +55,10 @@ public class SSTableIterator extends AbstractSSTableIterator
                            DecoratedKey key,
                            RowIndexEntry indexEntry,
                            ColumnsSelection columns,
-                           int nowInSec)
+                           int nowInSec,
+                           boolean isForThrift)
     {
-        super(sstable, file, key, indexEntry, columns, nowInSec);
+        super(sstable, file, key, indexEntry, columns, nowInSec, isForThrift);
     }
 
     protected Reader createReader(RowIndexEntry indexEntry, FileDataInput file, boolean isAtPartitionStart, boolean shouldCloseFile)

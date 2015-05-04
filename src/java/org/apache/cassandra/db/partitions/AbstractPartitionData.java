@@ -216,7 +216,6 @@ public abstract class AbstractPartitionData implements Partition, Iterable<Row>
         return deletionInfo;
     }
 
-
     public void addPartitionDeletion(DeletionTime deletionTime)
     {
         collectStats(deletionTime);

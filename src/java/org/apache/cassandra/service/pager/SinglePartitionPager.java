@@ -75,7 +75,7 @@ public class SinglePartitionPager extends AbstractQueryPager
     {
         return lastReturned == null
              ? null
-             : new PagingState(null, LegacyLayout.encodeClustering(lastReturned), maxRemaining(), remainingInPartition());
+             : new PagingState(null, LegacyLayout.encodeClustering(command.metadata(), lastReturned), maxRemaining(), remainingInPartition());
     }
 
     protected DataIterator queryNextPage(int pageSize, ConsistencyLevel consistencyLevel, boolean localQuery)

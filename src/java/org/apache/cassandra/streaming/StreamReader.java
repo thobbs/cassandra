@@ -18,6 +18,7 @@
 package org.apache.cassandra.streaming;
 
 import java.io.*;
+import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.util.Collection;
@@ -36,6 +37,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.atoms.*;
+import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableAtomIterator;
@@ -180,41 +182,28 @@ public class StreamReader
 
         private DecoratedKey key;
         private DeletionTime partitionLevelDeletion;
-        private Iterator<Atom> atomIter;
+        private SSTableAtomIterator atomIter;
         private Row staticRow;
         private IOException exception;
 
+        private final CounterFilteredRow counterRow;
+
         public StreamDeserializer(CFMetaData metadata, DataInput in, Version version, SerializationHeader header)
         {
+            assert version.storeRows() : "We don't allow streaming from pre-3.0 nodes";
             this.metadata = metadata;
             this.in = in;
             this.helper = new SerializationHelper(version.correspondingMessagingVersion(), SerializationHelper.Flag.PRESERVE_SIZE, FBUtilities.nowInSeconds());
             this.header = header;
+            this.counterRow = metadata.isCounter() ? new CounterFilteredRow() : null;
         }
 
         public DecoratedKey newPartition() throws IOException
         {
             key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
             partitionLevelDeletion = DeletionTime.serializer.deserialize(in);
-            staticRow = header.hasStatic()
-                      ? AtomSerializer.serializer.deserializeStaticRow(in, header, helper)
-                      : Rows.EMPTY_STATIC_ROW;
-            atomIter = new SSTableAtomIterator(in, header, helper, metadata.isCounter())
-            {
-                @Override
-                protected Row updateRow(ReusableRow row)
-                {
-                    return metadata.isCounter()
-                         ? row.markCounterLocalShardsToBeCleared()
-                         : row;
-                }
-
-                protected RuntimeException onIOException(IOException e)
-                {
-                    // We'll catch that in hasNext() below
-                    throw new RuntimeException(e);
-                }
-            };
+            atomIter = SSTableAtomIterator.create(metadata, in, header, helper, partitionLevelDeletion);
+            staticRow = atomIter.readStaticRow();
             return key;
         }
 
@@ -265,7 +254,7 @@ public class StreamReader
             {
                 return atomIter.hasNext();
             }
-            catch (RuntimeException e)
+            catch (IOError e)
             {
                 if (e.getCause() != null && e.getCause() instanceof IOException)
                 {
@@ -283,14 +272,15 @@ public class StreamReader
             // to what we do in hasNext)
             Atom atom = atomIter.next();
             return metadata.isCounter() && atom.kind() == Atom.Kind.ROW
-                ? maybeMarkLocalToBeCleared((Row)atom)
-                : atom;
+                 ? maybeMarkLocalToBeCleared((Row)atom)
+                 : atom;
         }
 
-        private static Row maybeMarkLocalToBeCleared(Row row)
+        private Row maybeMarkLocalToBeCleared(Row row)
         {
-            // TODO
-            throw new UnsupportedOperationException();
+            return metadata.isCounter()
+                 ? counterRow.setTo(row)
+                 : row;
         }
 
         public void checkForExceptions() throws IOException
@@ -301,6 +291,20 @@ public class StreamReader
 
         public void close()
         {
+        }
+    }
+
+    private static class CounterFilteredRow extends WrappingRow
+    {
+        protected Cell filterCell(Cell cell)
+        {
+            if (!cell.isCounterCell())
+                return cell;
+
+            ByteBuffer marked = CounterContext.instance().markLocalToBeCleared(cell.value());
+            return marked == cell.value()
+                 ? cell
+                 : Cells.create(cell.column(), true, marked, cell.livenessInfo(), cell.path());
         }
     }
 }

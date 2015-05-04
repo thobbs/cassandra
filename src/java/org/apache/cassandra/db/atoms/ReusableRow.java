@@ -20,7 +20,6 @@ package org.apache.cassandra.db.atoms;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.context.CounterContext;
 
 public class ReusableRow extends AbstractReusableRow
 {
@@ -61,20 +60,6 @@ public class ReusableRow extends AbstractReusableRow
     public LivenessInfo partitionKeyLivenessInfo()
     {
         return liveness;
-    }
-
-    public Row markCounterLocalShardsToBeCleared()
-    {
-        for (Cell cell : this)
-        {
-            if (!cell.isCounterCell())
-                continue;
-
-            ByteBuffer marked = CounterContext.instance().markLocalToBeCleared(cell.value());
-            if (marked != cell.value())
-                data.setValue(row(), cell.column(), cell.path(), marked);
-        }
-        return this;
     }
 
     public long maxLiveTimestamp()

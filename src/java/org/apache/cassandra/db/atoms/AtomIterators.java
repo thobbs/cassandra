@@ -412,6 +412,8 @@ public abstract class AtomIterators
     {
         PartitionUpdate update = new PartitionUpdate(iterator.metadata(), iterator.partitionKey(), iterator.columns(), 1, iterator.nowInSec());
 
+        update.addPartitionDeletion(iterator.partitionLevelDeletion());
+
         if (iterator.staticRow() != Rows.EMPTY_STATIC_ROW)
             iterator.staticRow().copyTo(update.staticWriter());
 
