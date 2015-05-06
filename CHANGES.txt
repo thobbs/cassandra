@@ -1,4 +1,6 @@
 2.0.15:
+ * Better warning log when tables are queried before the schema has fully
+   propagated (CASSANDRA-9136)
  * (cqlsh) Add SERIAL and LOCAL_SERIAL consistency levels (CASSANDRA-8051)
  * Fix index selection during rebuild with certain table layouts (CASSANDRA-9281)
  * Fix partition-level-delete-only workload accounting (CASSANDRA-9194)
