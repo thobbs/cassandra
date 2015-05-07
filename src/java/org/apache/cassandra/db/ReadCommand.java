@@ -19,8 +19,16 @@ package org.apache.cassandra.db;
 
 import java.io.DataInput;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -486,6 +494,24 @@ public abstract class ReadCommand implements ReadQuery
         }
     }
 
+    private enum LegacyType
+    {
+        GET_BY_NAMES((byte)1),
+        GET_SLICES((byte)2);
+
+        public final byte serializedValue;
+
+        private LegacyType(byte b)
+        {
+            this.serializedValue = b;
+        }
+
+        public static LegacyType fromSerializedValue(byte b)
+        {
+            return b == 1 ? GET_BY_NAMES : GET_SLICES;
+        }
+    }
+
     /*
      * Deserialize pre-3.0 RangeSliceCommand for backward compatibility sake
      */
@@ -697,50 +723,98 @@ public abstract class ReadCommand implements ReadQuery
     }
 
     // From old ReadCommand
-    //class ReadCommandSerializer implements IVersionedSerializer<ReadCommand>
-    //{
-    //    public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
-    //    {
-    //        out.writeByte(command.commandType.serializedValue);
-    //        switch (command.commandType)
-    //        {
-    //            case GET_BY_NAMES:
-    //                SliceByNamesReadCommand.serializer.serialize(command, out, version);
-    //                break;
-    //            case GET_SLICES:
-    //                SliceFromReadCommand.serializer.serialize(command, out, version);
-    //                break;
-    //            default:
-    //                throw new AssertionError();
-    //        }
-    //    }
+    class ReadCommandSerializer implements IVersionedSerializer<ReadCommand>
+    {
+        public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
+        {
+            
+            throw new UnsupportedOperationException();
+        }
 
-    //    public ReadCommand deserialize(DataInput in, int version) throws IOException
-    //    {
-    //        ReadCommand.Type msgType = ReadCommand.Type.fromSerializedValue(in.readByte());
-    //        switch (msgType)
-    //        {
-    //            case GET_BY_NAMES:
-    //                return SliceByNamesReadCommand.serializer.deserialize(in, version);
-    //            case GET_SLICES:
-    //                return SliceFromReadCommand.serializer.deserialize(in, version);
-    //            default:
-    //                throw new AssertionError();
-    //        }
-    //    }
+        public ReadCommand deserialize(DataInput in, int version) throws IOException
+        {
+            LegacyType msgType = LegacyType.fromSerializedValue(in.readByte());
 
-    //    public long serializedSize(ReadCommand command, int version)
-    //    {
-    //        switch (command.commandType)
-    //        {
-    //            case GET_BY_NAMES:
-    //                return 1 + SliceByNamesReadCommand.serializer.serializedSize(command, version);
-    //            case GET_SLICES:
-    //                return 1 + SliceFromReadCommand.serializer.serializedSize(command, version);
-    //            default:
-    //                throw new AssertionError();
-    //        }
-    //    }
-    //}
+            boolean isDigest = in.readBoolean();
+            String keyspaceName = in.readUTF();
+            DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
+            String cfName = in.readUTF();
+            long nowInMillis = in.readLong();
+            int nowInSeconds = (int) (nowInMillis / 1000);
+            CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, cfName);
 
+            try
+            {
+                switch (msgType)
+                {
+                    case GET_BY_NAMES:
+                        return deserializeNamesCommand(in, version, isDigest, metadata, key, nowInSeconds);
+                    case GET_SLICES:
+                        return deserializeSliceCommand(in, version, isDigest, metadata, key, nowInSeconds);
+                    default:
+                        throw new AssertionError();
+                }
+            }
+            catch (UnknownColumnException exc)
+            {
+                // TODO what to do with an unknown column?
+                throw new RuntimeException(exc);
+            }
+        }
+
+        private SinglePartitionNamesCommand deserializeNamesCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
+        {
+            int numCellNames = in.readInt();
+            SortedSet<Clustering> clusterings = new TreeSet<>(metadata.comparator);
+            for (int i = 0; i < numCellNames; i++)
+            {
+                ByteBuffer buffer = ByteBufferUtil.readWithShortLength(in);
+                clusterings.add(LegacyLayout.decodeCellName(metadata, buffer).clustering);
+            }
+
+            // TODO this is the old countCQL3Rows flag; is it equivalent to forThrift?
+            boolean forThrift = !in.readBoolean();
+            ColumnsSelection selection = ColumnsSelection.withoutSubselection(metadata.partitionColumns());
+            NamesPartitionFilter filter = new NamesPartitionFilter(selection, clusterings, false);
+            return new SinglePartitionNamesCommand(isDigest, forThrift, metadata, nowInSeconds, ColumnFilter.NONE, DataLimits.NONE, key, filter);
+        }
+
+        private SinglePartitionSliceCommand deserializeSliceCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
+        {
+            int numSlices = in.readInt();
+            // TODO this may not be handling reversed queries correctly
+            Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
+            for (int i = 0; i < numSlices; i++)
+            {
+                Clustering start = LegacyLayout.decodeCellName(metadata, ByteBufferUtil.readWithShortLength(in)).clustering;
+                Clustering finish = LegacyLayout.decodeCellName(metadata, ByteBufferUtil.readWithShortLength(in)).clustering;
+                slicesBuilder.add(Slice.make(metadata.comparator, start, finish));
+            }
+
+            boolean reversed = in.readBoolean();
+            int count = in.readInt();
+            int compositesToGroup = -1;
+            compositesToGroup = in.readInt();
+
+            SlicePartitionFilter filter = new SlicePartitionFilter(metadata.partitionColumns(), slicesBuilder.build(), reversed);
+
+            DataLimits limits;
+            if (compositesToGroup == -2)
+                limits = DataLimits.distinctLimits(count);  // See CASSANDRA-8490 for the explanation of this value
+            else if (compositesToGroup == -1)
+                limits = DataLimits.thriftLimits(1, count);
+            else
+                limits = DataLimits.cqlLimits(count);
+
+            // TODO probably wrong?
+            boolean isForThrift = compositesToGroup == -1;
+
+            return new SinglePartitionSliceCommand(isDigest, isForThrift, metadata, nowInSeconds, ColumnFilter.NONE, limits, key, filter);
+        }
+
+        public long serializedSize(ReadCommand command, int version)
+        {
+            throw new UnsupportedOperationException();
+        }
+    }
 }
