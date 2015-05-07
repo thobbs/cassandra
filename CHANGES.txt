@@ -1,4 +1,6 @@
 3.0
+ * Ensure aggregate SFUNC return type matches STYPE if FFUNC is
+   specified (CASSANDRA-9321)
  * Remove Thrift dependencies in bundled tools (CASSANDRA-8358)
  * Disable memory mapping of hsperfdata file for JVM statistics (CASSANDRA-9242)
  * Add pre-startup checks to detect potential incompatibilities (CASSANDRA-8049)
