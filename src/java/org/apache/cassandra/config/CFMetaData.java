@@ -265,7 +265,7 @@ public final class CFMetaData
         this.isCounter = isCounter;
 
         // A compact table should always have a clustering
-        assert isCQLTable() || !clusteringColumns.isEmpty();
+        assert isCQLTable() || !clusteringColumns.isEmpty() : String.format("For table %s.%s, isDense=%b, isCompound=%b, clustering=%s", ksName, cfName, isDense, isCompound, clusteringColumns);
 
         this.partitionKeyColumns = partitionKeyColumns;
         this.clusteringColumns = clusteringColumns;

@@ -393,6 +393,11 @@ public class ColumnDefinition extends ColumnSpecification implements Comparable<
         });
     }
 
+    public ColumnDefinition asStaticDefinition()
+    {
+        return new ColumnDefinition(ksName, cfName, name, type, indexType, indexOptions, indexName, componentIndex, Kind.STATIC);
+    }
+
     public int compareTo(ColumnDefinition other)
     {
         if (this == other)
