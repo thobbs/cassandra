@@ -727,7 +727,7 @@ public abstract class ReadCommand implements ReadQuery
     {
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
-            
+
             throw new UnsupportedOperationException();
         }
 
@@ -772,11 +772,13 @@ public abstract class ReadCommand implements ReadQuery
                 clusterings.add(LegacyLayout.decodeCellName(metadata, buffer).clustering);
             }
 
-            // TODO this is the old countCQL3Rows flag; is it equivalent to forThrift?
-            boolean forThrift = !in.readBoolean();
+            boolean countCQL3Rows = !in.readBoolean();
+
             ColumnsSelection selection = ColumnsSelection.withoutSubselection(metadata.partitionColumns());
             NamesPartitionFilter filter = new NamesPartitionFilter(selection, clusterings, false);
-            return new SinglePartitionNamesCommand(isDigest, forThrift, metadata, nowInSeconds, ColumnFilter.NONE, DataLimits.NONE, key, filter);
+
+            // messages from old nodes will expect the thrift format, so always use 'true' for isForThrift
+            return new SinglePartitionNamesCommand(isDigest, true, metadata, nowInSeconds, ColumnFilter.NONE, DataLimits.NONE, key, filter);
         }
 
         private SinglePartitionSliceCommand deserializeSliceCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
@@ -793,8 +795,7 @@ public abstract class ReadCommand implements ReadQuery
 
             boolean reversed = in.readBoolean();
             int count = in.readInt();
-            int compositesToGroup = -1;
-            compositesToGroup = in.readInt();
+            int compositesToGroup = in.readInt();
 
             SlicePartitionFilter filter = new SlicePartitionFilter(metadata.partitionColumns(), slicesBuilder.build(), reversed);
 
@@ -806,10 +807,8 @@ public abstract class ReadCommand implements ReadQuery
             else
                 limits = DataLimits.cqlLimits(count);
 
-            // TODO probably wrong?
-            boolean isForThrift = compositesToGroup == -1;
-
-            return new SinglePartitionSliceCommand(isDigest, isForThrift, metadata, nowInSeconds, ColumnFilter.NONE, limits, key, filter);
+            // messages from old nodes will expect the thrift format, so always use 'true' for isForThrift
+            return new SinglePartitionSliceCommand(isDigest, true, metadata, nowInSeconds, ColumnFilter.NONE, limits, key, filter);
         }
 
         public long serializedSize(ReadCommand command, int version)
