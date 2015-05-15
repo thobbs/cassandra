@@ -60,6 +60,7 @@ public abstract class ReadCommand implements ReadQuery
 
     public static final IVersionedSerializer<ReadCommand> legacyRangeSliceCommandSerializer = new LegacyRangeSliceCommandSerializer();
     public static final IVersionedSerializer<ReadCommand> legacyPagedRangeCommandSerializer = new LegacyPagedRangeCommandSerializer();
+    public static final IVersionedSerializer<ReadCommand> legacyReadCommandSerializer = new LegacyReadCommandSerializer();
 
     private final Kind kind;
     private final CFMetaData metadata;
@@ -449,7 +450,10 @@ public abstract class ReadCommand implements ReadQuery
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
             if (version < MessagingService.VERSION_30)
-                throw new UnsupportedOperationException();
+            {
+                legacyReadCommandSerializer.serialize(command, out, version);
+                return;
+            }
 
             out.writeByte(command.kind.ordinal());
             out.writeByte(digestFlag(command.isDigestQuery()) | thriftFlag(command.isForThrift()));
@@ -464,7 +468,7 @@ public abstract class ReadCommand implements ReadQuery
         public ReadCommand deserialize(DataInput in, int version) throws IOException
         {
             if (version < MessagingService.VERSION_30)
-                throw new UnsupportedOperationException();
+                return legacyReadCommandSerializer.deserialize(in, version);
 
             Kind kind = Kind.values()[in.readByte()];
             int flags = in.readByte();
@@ -504,6 +508,12 @@ public abstract class ReadCommand implements ReadQuery
         private LegacyType(byte b)
         {
             this.serializedValue = b;
+        }
+        public static LegacyType fromPartitionFilterKind(PartitionFilter.Kind kind)
+        {
+            return kind == PartitionFilter.Kind.SLICE
+                   ? GET_SLICES
+                   : GET_BY_NAMES;
         }
 
         public static LegacyType fromSerializedValue(byte b)
@@ -723,10 +733,29 @@ public abstract class ReadCommand implements ReadQuery
     }
 
     // From old ReadCommand
-    class ReadCommandSerializer implements IVersionedSerializer<ReadCommand>
+    static class LegacyReadCommandSerializer implements IVersionedSerializer<ReadCommand>
     {
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
+            if (command.kind == Kind.SINGLE_PARTITION)
+            {
+                SinglePartitionReadCommand singleReadCommand = (SinglePartitionReadCommand) command;
+
+                CFMetaData metadata = singleReadCommand.metadata();
+
+                out.writeByte(LegacyType.fromPartitionFilterKind(singleReadCommand.partitionFilter().getKind()).ordinal());
+
+                out.writeBoolean(singleReadCommand.isDigestQuery());
+                out.writeUTF(metadata.ksName);
+                ByteBufferUtil.writeWithShortLength(singleReadCommand.partitionKey().getKey(), out);
+                out.writeUTF(metadata.cfName);
+                out.writeLong(singleReadCommand.nowInSec() * 1000);  // convert from seconds to millis
+
+                if (singleReadCommand.partitionFilter().getKind() == PartitionFilter.Kind.SLICE)
+                    serializeSliceCommand((SinglePartitionSliceCommand) singleReadCommand, out, version);
+                else
+                    serializeNamesCommand((SinglePartitionNamesCommand) singleReadCommand, out, version);
+            }
 
             throw new UnsupportedOperationException();
         }
@@ -762,6 +791,69 @@ public abstract class ReadCommand implements ReadQuery
             }
         }
 
+        public long serializedSize(ReadCommand command, int version)
+        {
+            if (command.kind == Kind.SINGLE_PARTITION)
+            {
+                SinglePartitionReadCommand singleReadCommand = (SinglePartitionReadCommand) command;
+
+                TypeSizes sizes = TypeSizes.NATIVE;
+                int keySize = singleReadCommand.partitionKey().getKey().remaining();
+
+                CFMetaData metadata = singleReadCommand.metadata();
+
+                long size = 1;  // message type (single byte)
+                size += sizes.sizeof(command.isDigestQuery());
+                size += sizes.sizeof(metadata.ksName);
+                size += sizes.sizeof((short) keySize) + keySize;
+                size += sizes.sizeof((long) command.nowInSec());
+
+                if (singleReadCommand.partitionFilter().getKind() == PartitionFilter.Kind.SLICE)
+                    return size + serializedSliceCommandSize((SinglePartitionSliceCommand) singleReadCommand, version);
+                else
+                    return size + serializedNamesCommandSize((SinglePartitionNamesCommand) singleReadCommand, version);
+            }
+
+            throw new UnsupportedOperationException();
+        }
+
+        private void serializeNamesCommand(SinglePartitionNamesCommand command, DataOutputPlus out, int version) throws IOException
+        {
+            CFMetaData metadata = command.metadata();
+
+            PartitionColumns columns = command.queriedColumns().columns();
+            out.writeInt(columns.size());
+            for (ColumnDefinition column : columns)
+                ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null), out);
+
+            // countCql3Rows should be true if it's not a DISTINCT query and it's fetching a range of cells, meaning
+            // one of the following is true:
+            //  * it's a sparse, simple table
+            //  * it's a dense table, but the clustering columns have been fully specified
+            // We only use NamesPartitionFilters when the clustering columns have been fully specified, so we can
+            // combine the last two cases into a check for compact storage.
+            if (metadata.isCompactTable() && !(command.limits().kind() == DataLimits.Kind.CQL_LIMIT && command.limits().perPartitionCount() == 1))
+                out.writeBoolean(true);  // it's compact and not a DISTINCT query
+            else
+                out.writeBoolean(false);
+        }
+
+        public long serializedNamesCommandSize(SinglePartitionNamesCommand command, int version)
+        {
+            TypeSizes sizes = TypeSizes.NATIVE;
+            CFMetaData metadata = command.metadata();
+
+            PartitionColumns columns = command.queriedColumns().columns();
+            long size = sizes.sizeof(columns.size());
+            for (ColumnDefinition column : columns)
+            {
+                ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null);
+                size += sizes.sizeof((short) columnName.remaining()) + columnName.remaining();
+            }
+
+            return size + sizes.sizeof(true);  // countCql3Rows
+        }
+
         private SinglePartitionNamesCommand deserializeNamesCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
         {
             int numCellNames = in.readInt();
@@ -772,13 +864,66 @@ public abstract class ReadCommand implements ReadQuery
                 clusterings.add(LegacyLayout.decodeCellName(metadata, buffer).clustering);
             }
 
-            boolean countCQL3Rows = !in.readBoolean();
+            in.readBoolean();  // countCql3Rows
 
             ColumnsSelection selection = ColumnsSelection.withoutSubselection(metadata.partitionColumns());
             NamesPartitionFilter filter = new NamesPartitionFilter(selection, clusterings, false);
 
             // messages from old nodes will expect the thrift format, so always use 'true' for isForThrift
             return new SinglePartitionNamesCommand(isDigest, true, metadata, nowInSeconds, ColumnFilter.NONE, DataLimits.NONE, key, filter);
+        }
+
+        private void serializeSliceCommand(SinglePartitionSliceCommand command, DataOutputPlus out, int version) throws IOException
+        {
+            CFMetaData metadata = command.metadata();
+
+            // slice filter serialization
+            Slices slices = command.partitionFilter().requestedSlices();
+            out.writeInt(slices.size());
+            for (Slice slice : slices)
+            {
+                ByteBuffer sliceStart = LegacyLayout.encodeCellName(metadata, slice.start().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
+                ByteBufferUtil.writeWithShortLength(sliceStart, out);
+
+                ByteBuffer sliceEnd = LegacyLayout.encodeCellName(metadata, slice.end().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
+                ByteBufferUtil.writeWithShortLength(sliceEnd, out);
+            }
+
+            out.writeBoolean(command.partitionFilter().isReversed());
+            out.writeInt(command.limits().count());
+            int compositesToGroup;
+            DataLimits.Kind kind = command.limits().kind();
+            if (kind == DataLimits.Kind.THRIFT_LIMIT)
+                compositesToGroup = -1;
+            else if ((kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && command.limits().perPartitionCount() == 1)
+                compositesToGroup = -2;  // for DISTINCT queries (CASSANDRA-8490)
+            else
+                compositesToGroup = metadata.clusteringColumns().size();
+            out.writeInt(compositesToGroup);
+        }
+
+        public long serializedSliceCommandSize(SinglePartitionSliceCommand command, int version)
+        {
+            TypeSizes sizes = TypeSizes.NATIVE;
+            CFMetaData metadata = command.metadata();
+
+            // slice filter serialization
+            Slices slices = command.partitionFilter().requestedSlices();
+            long size = sizes.sizeof(slices.size());
+
+            for (Slice slice : slices)
+            {
+                ByteBuffer sliceStart = LegacyLayout.encodeCellName(metadata, slice.start().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
+                ByteBuffer sliceEnd = LegacyLayout.encodeCellName(metadata, slice.end().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
+                size += sizes.sizeof((short) sliceStart.remaining()) + sliceStart.remaining();
+                size += sizes.sizeof((short) sliceEnd.remaining()) + sliceEnd.remaining();
+            }
+
+            size += sizes.sizeof(command.partitionFilter().isReversed());
+            size += sizes.sizeof(command.limits().count());
+            size += sizes.sizeof(0);  // compositesToGroup
+
+            return size;
         }
 
         private SinglePartitionSliceCommand deserializeSliceCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
@@ -809,11 +954,6 @@ public abstract class ReadCommand implements ReadQuery
 
             // messages from old nodes will expect the thrift format, so always use 'true' for isForThrift
             return new SinglePartitionSliceCommand(isDigest, true, metadata, nowInSeconds, ColumnFilter.NONE, limits, key, filter);
-        }
-
-        public long serializedSize(ReadCommand command, int version)
-        {
-            throw new UnsupportedOperationException();
         }
     }
 }

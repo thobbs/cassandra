@@ -60,7 +60,7 @@ public abstract class DataLimits
     };
     public static final DataLimits DISTINCT_NONE = new CQLLimits(Integer.MAX_VALUE, 1);
 
-    private enum Kind { CQL_LIMIT, CQL_PAGING_LIMIT, THRIFT_LIMIT, SUPER_COLUMN_COUNTING_LIMIT }
+    public enum Kind { CQL_LIMIT, CQL_PAGING_LIMIT, THRIFT_LIMIT, SUPER_COLUMN_COUNTING_LIMIT }
 
     public static DataLimits cqlLimits(int cqlRowLimit)
     {
@@ -87,7 +87,7 @@ public abstract class DataLimits
         return new SuperColumnCountingLimits(partitionLimit, cellPerPartitionLimit);
     }
 
-    protected abstract Kind kind();
+    public abstract Kind kind();
 
     public abstract boolean isUnlimited();
 
@@ -195,7 +195,7 @@ public abstract class DataLimits
             return new CQLLimits(rowLimit, 1, true);
         }
 
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.CQL_LIMIT;
         }
@@ -354,7 +354,7 @@ public abstract class DataLimits
         }
 
         @Override
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.CQL_PAGING_LIMIT;
         }
@@ -408,7 +408,7 @@ public abstract class DataLimits
             this.cellPerPartitionLimit = cellPerPartitionLimit;
         }
 
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.THRIFT_LIMIT;
         }
@@ -563,7 +563,7 @@ public abstract class DataLimits
             super(partitionLimit, cellPerPartitionLimit);
         }
 
-        protected Kind kind()
+        public Kind kind()
         {
             return Kind.SUPER_COLUMN_COUNTING_LIMIT;
         }
