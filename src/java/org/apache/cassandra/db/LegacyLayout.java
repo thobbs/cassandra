@@ -155,6 +155,9 @@ public abstract class LegacyLayout
         }
 
         ByteBuffer collectionElement = metadata.isCompound() ? CompositeType.extractComponent(cellname, metadata.comparator.size() + 1) : null;
+
+        // Note that because static compact columns are translated to static defs in the new world order, we need to force a static
+        // clustering if the definition is static (as it might not be in this case).
         return new LegacyCellName(def.isStatic() ? Clustering.STATIC_CLUSTERING : clustering, def, collectionElement);
     }
 
@@ -228,6 +231,9 @@ public abstract class LegacyLayout
         int csize = metadata.comparator.size();
         if (csize == 0)
             return Clustering.EMPTY;
+
+        if (metadata.isCompound() && CompositeType.isStaticName(value))
+            return Clustering.STATIC_CLUSTERING;
 
         List<ByteBuffer> components = metadata.isCompound()
                                     ? CompositeType.splitName(value)
@@ -778,17 +784,19 @@ public abstract class LegacyLayout
 
         public boolean addCell(LegacyCell cell)
         {
-            if (!isStatic)
+            if (isStatic)
             {
-                if (clustering == null)
-                {
-                    clustering = cell.name.clustering.takeAlias();
-                    clustering.writeTo(writer);
-                }
-                else if (!clustering.equals(cell.name.clustering))
-                {
+                if (cell.name.clustering != Clustering.STATIC_CLUSTERING)
                     return false;
-                }
+            }
+            else if (clustering == null)
+            {
+                clustering = cell.name.clustering.takeAlias();
+                clustering.writeTo(writer);
+            }
+            else if (!clustering.equals(cell.name.clustering))
+            {
+                return false;
             }
 
             // Ignore shadowed cells
@@ -820,7 +828,8 @@ public abstract class LegacyLayout
                 if (clustering != null)
                     return false;
 
-                clustering = tombstone.start.getAsClustering(metadata);
+                clustering = tombstone.start.getAsClustering(metadata).takeAlias();
+                clustering.writeTo(writer);
                 writer.writeRowDeletion(tombstone.deletionTime);
                 rowDeletion = tombstone;
                 return true;
@@ -829,9 +838,14 @@ public abstract class LegacyLayout
             if (tombstone.isCollectionTombstone(metadata))
             {
                 if (clustering == null)
-                    clustering = tombstone.start.getAsClustering(metadata);
+                {
+                    clustering = tombstone.start.getAsClustering(metadata).takeAlias();
+                    clustering.writeTo(writer);
+                }
                 else if (!clustering.equals(tombstone.start.getAsClustering(metadata)))
+                {
                     return false;
+                }
 
                 writer.writeComplexDeletion(tombstone.start.collectionName, tombstone.deletionTime);
                 if (rowDeletion == null || tombstone.deletionTime.supersedes(rowDeletion.deletionTime))
@@ -883,7 +897,7 @@ public abstract class LegacyLayout
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < clustering.size(); i++)
                 sb.append(i > 0 ? ":" : "").append(clustering.get(i) == null ? "null" : ByteBufferUtil.bytesToHex(clustering.get(i)));
-            return String.format("Cellname(clustering=%s, column=%s, collElt=%s)", sb.toString(), column.name, collectionElement == null ? "null" : ByteBufferUtil.bytesToHex(collectionElement));
+            return String.format("Cellname(clustering=%s, column=%s, collElt=%s)", sb.toString(), column == null ? "null" : column.name, collectionElement == null ? "null" : ByteBufferUtil.bytesToHex(collectionElement));
         }
     }
 
@@ -1065,9 +1079,32 @@ public abstract class LegacyLayout
         public final LegacyBound stop;
         public final DeletionTime deletionTime;
 
+        // Do not use directly, use create() instead.
         private LegacyRangeTombstone(LegacyBound start, LegacyBound stop, DeletionTime deletionTime)
         {
-            assert Objects.equals(start.collectionName, stop.collectionName);
+            // Because of the way RangeTombstoneList work, we can have a tombstone where only one of
+            // the bound has a collectionName. That happens if we have a big tombstone A (spanning one
+            // or multiple rows) and a collection tombstone B. In that case, RangeTombstoneList will
+            // split this into 3 RTs: the first one from the beginning of A to the beginning of B,
+            // then B, then a third one from the end of B to the end of A. To make this simpler, if
+            // we detect that case we transform the 1st and 3rd tombstone so they don't end in the middle
+            // of a row (which is still correct).
+            if ((start.collectionName == null) != (stop.collectionName == null))
+            {
+                if (start.collectionName == null)
+                    stop = new LegacyBound(stop.bound, stop.isStatic, null);
+                else
+                    start = new LegacyBound(start.bound, start.isStatic, null);
+            }
+            else if (!Objects.equals(start.collectionName, stop.collectionName))
+            {
+                // We're in the similar but slightly more complex case where on top of the big tombstone
+                // A, we have 2 (or more) collection tombstones B and C within A. So we also end up with
+                // a tombstone that goes between the end of B and the start of C.
+                start = new LegacyBound(start.bound, start.isStatic, null);
+                stop = new LegacyBound(stop.bound, stop.isStatic, null);
+            }
+
             this.start = start;
             this.stop = stop;
             this.deletionTime = deletionTime;
@@ -1115,6 +1152,12 @@ public abstract class LegacyLayout
                 if (!Objects.equals(start.bound.get(i), stop.bound.get(i)))
                     return false;
             return true;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("RT(%s-%s, %s)", start, stop, deletionTime);
         }
     }
 

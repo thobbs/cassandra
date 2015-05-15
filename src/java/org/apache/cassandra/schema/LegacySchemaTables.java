@@ -993,7 +993,8 @@ public class LegacySchemaTables
         boolean isCompound = rawComparator instanceof CompositeType;
 
         // We don't really use the default validator but as we have it for backward compatibility, we use it to know if it's a counter table
-        boolean isCounter = TypeParser.parse(result.getString("default_validator")) instanceof CounterColumnType;
+        AbstractType<?> defaultValidator = TypeParser.parse(result.getString("default_validator"));
+        boolean isCounter =  defaultValidator instanceof CounterColumnType;
 
         // if we are upgrading, we use id generated from names initially
         UUID cfId = result.has("cf_id")
@@ -1007,6 +1008,12 @@ public class LegacySchemaTables
                                                                         subComparator,
                                                                         isSuper,
                                                                         !isSuper && !isDense && isCompound);
+
+        // Internally, compact tables have a specific layout, see CompactTables. But when upgrading from
+        // previous versions, they may not have the expected schema, so convert it now.
+        // We can remove this once we don't support upgrade from versions < 3.0.
+        if (isDense || !isCompound || isSuper)
+            columnDefs = maybeConvertDefinitions(ksName, cfName, isDense, isCompound, isSuper, columnDefs, rawComparator, defaultValidator);
 
         CFMetaData cfm = CFMetaData.create(ksName, cfName, cfId, isDense, isCompound, isSuper, isCounter, columnDefs);
 
@@ -1048,6 +1055,59 @@ public class LegacySchemaTables
         }
 
         return cfm;
+    }
+
+    private static List<ColumnDefinition> maybeConvertDefinitions(String ksName,
+                                                                  String cfName,
+                                                                  boolean isDense,
+                                                                  boolean isCompound,
+                                                                  boolean isSuper,
+                                                                  List<ColumnDefinition> definitions,
+                                                                  AbstractType<?> rawComparator,
+                                                                  AbstractType<?> defaultValidator)
+    {
+        if (isSuper)
+        {
+            // TODO
+            throw new UnsupportedOperationException();
+        }
+
+        // For static compact tables, we need to convert the regular definitions to static one, and add the clustering.
+        if (!isDense && !isCompound)
+        {
+            // If we have a static def, we're already up to date
+            if (hasKind(definitions, ColumnDefinition.Kind.STATIC))
+                return definitions;
+
+            // We'll convert every regular definition to a static one, and then add the clustering
+            // column and compact column value
+            List<ColumnDefinition> newDefinitions = new ArrayList<>(definitions.size() + 2);
+            for (ColumnDefinition def : definitions)
+            {
+                assert def.isPartitionKey() || def.isRegular();
+                newDefinitions.add(def.isPartitionKey() ? def : def.asStaticDefinition());
+            }
+            newDefinitions.add(ColumnDefinition.clusteringKeyDef(ksName, cfName, CompactTables.DEFAULT_CLUSTERING_NAME + 1, rawComparator, null));
+            newDefinitions.add(ColumnDefinition.regularDef(ksName, cfName, CompactTables.DEFAULT_COMPACT_VALUE_NAME, defaultValidator, null));
+            return newDefinitions;
+        }
+
+        // For dense compact tables, we might not have a compact value column, in which case we should add it
+        // (we use EmptyType to recognize that the compact value was not declared by the use (see CreateTableStatement too))
+        if (isDense && !hasKind(definitions, ColumnDefinition.Kind.REGULAR))
+            definitions.add(ColumnDefinition.regularDef(ksName, cfName, CompactTables.DEFAULT_COMPACT_VALUE_NAME, EmptyType.instance, null));
+
+        return definitions;
+    }
+
+    private static boolean hasKind(List<ColumnDefinition> defs, ColumnDefinition.Kind kind)
+    {
+        for (ColumnDefinition def : defs)
+        {
+            if (def.kind == kind)
+                return true;
+        }
+        return false;
     }
 
     private static void addDroppedColumns(CFMetaData cfm, Map<String, Long> droppedTimes, Map<String, String> types)

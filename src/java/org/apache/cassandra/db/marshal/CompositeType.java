@@ -177,6 +177,7 @@ public class CompositeType extends AbstractCompositeType
         // most names will be complete.
         ByteBuffer[] l = new ByteBuffer[types.size()];
         ByteBuffer bb = name.duplicate();
+        readStatic(bb);
         int i = 0;
         while (bb.remaining() > 0)
         {
@@ -190,6 +191,7 @@ public class CompositeType extends AbstractCompositeType
     {
         List<ByteBuffer> l = new ArrayList<>();
         ByteBuffer bb = name.duplicate();
+        readStatic(bb);
         while (bb.remaining() > 0)
         {
             l.add(ByteBufferUtil.readBytesWithShortLength(bb));

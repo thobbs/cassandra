@@ -21,6 +21,9 @@ import java.nio.ByteBuffer;
 import java.io.DataInput;
 import java.io.IOException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.atoms.*;
@@ -38,6 +41,8 @@ import org.apache.cassandra.net.MessagingService;
  */
 public abstract class AtomDeserializer
 {
+    private static final Logger logger = LoggerFactory.getLogger(AtomDeserializer.class);
+
     protected final CFMetaData metadata;
     protected final DataInput in;
     protected final SerializationHelper helper;
@@ -384,6 +389,10 @@ public abstract class AtomDeserializer
                 closingMarker = new SimpleRangeTombstoneMarker(tombstone.stop.bound, tombstone.deletionTime);
                 return new SimpleRangeTombstoneMarker(tombstone.start.bound, tombstone.deletionTime);
             }
+
+            LegacyLayout.CellGrouper grouper = nextAtom.isStatic()
+                                             ? LegacyLayout.CellGrouper.staticGrouper(metadata, helper.nowInSec)
+                                             : this.grouper;
 
             grouper.reset();
             grouper.addAtom(nextAtom);
