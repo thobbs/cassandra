@@ -32,9 +32,13 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class ReadResponse
 {
+    private static final Logger logger = LoggerFactory.getLogger(ReadResponse.class);
+
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
     public static final IVersionedSerializer<ReadResponse> legacyRangeSliceReplySerializer = new LegacyRangeSliceReplySerializer();
 
@@ -189,8 +193,14 @@ public abstract class ReadResponse
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException();
+                boolean isDigest = response.isDigestQuery();
+                out.writeInt(isDigest ? response.digest().remaining() : 0);
+                ByteBuffer buffer = isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER;
+                out.write(buffer);
+                out.writeBoolean(isDigest);
+                if (!isDigest)
+                    PartitionIterators.serializerForIntraNode().serialize(response.makeIterator(), out, version);
+                return;
             }
 
             assert !(response instanceof LocalDataResponse);
@@ -225,14 +235,19 @@ public abstract class ReadResponse
 
         public long serializedSize(ReadResponse response, int version)
         {
-            if (version < MessagingService.VERSION_30)
-            {
-                // TODO
-                throw new UnsupportedOperationException();
-            }
-
             TypeSizes sizes = TypeSizes.NATIVE;
             boolean isDigest = response.isDigestQuery();
+
+            if (version < MessagingService.VERSION_30)
+            {
+                long size = ByteBufferUtil.serializedSizeWithLength(isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER, sizes);
+                size += sizes.sizeof(isDigest);
+                // TODO is the partition iterator reusable?
+                if (!isDigest)
+                    size += PartitionIterators.serializerForIntraNode().serializedSize(response.makeIterator(), version);
+                return size;
+            }
+
             long size = ByteBufferUtil.serializedSizeWithShortLength(isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER, sizes);
 
             if (!isDigest)
@@ -251,11 +266,22 @@ public abstract class ReadResponse
     {
         public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
         {
-            // TODO
-            throw new UnsupportedOperationException();
-            //        out.writeInt(rsr.rows.size());
-            //        for (Row row : rsr.rows)
-            //            Row.serializer.serialize(row, out, version);
+            int numPartitions = 0;
+            try (PartitionIterator iterator = response.makeIterator())
+            {
+                while (iterator.hasNext())
+                {
+                    try (AtomIterator atomIterator = iterator.next())
+                    {
+                        numPartitions++;
+                    }
+                }
+            }
+            out.writeInt(numPartitions);
+            try (PartitionIterator iterator = response.makeIterator())
+            {
+                PartitionIterators.serializerForIntraNode().serialize(iterator, out, version);
+            }
         }
 
         public ReadResponse deserialize(DataInput in, int version) throws IOException
@@ -271,12 +297,12 @@ public abstract class ReadResponse
 
         public long serializedSize(ReadResponse response, int version)
         {
-            // TODO
-            throw new UnsupportedOperationException();
-            //        int size = TypeSizes.NATIVE.sizeof(rsr.rows.size());
-            //        for (Row row : rsr.rows)
-            //            size += Row.serializer.serializedSize(row, version);
-            //        return size;
+            int size = TypeSizes.NATIVE.sizeof(0);  // number of partitions
+            try (PartitionIterator iterator = response.makeIterator())
+            {
+                size += PartitionIterators.serializerForIntraNode().serializedSize(iterator, version);
+            }
+            return size;
         }
     }
 }

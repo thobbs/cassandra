@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.*;
 
+import com.google.common.collect.Lists;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -32,8 +33,11 @@ import org.apache.cassandra.db.atoms.*;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.MergeIterator;
 
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.UUIDSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -400,7 +404,15 @@ public abstract class PartitionIterators
         public void serialize(PartitionIterator iter, DataOutputPlus out, int version) throws IOException
         {
             if (version < MessagingService.VERSION_30)
-                throw new UnsupportedOperationException();
+            {
+                while (iter.hasNext())
+                {
+                    try (AtomIterator partition = iter.next())
+                    {
+                        serializePartition(partition, out, version);
+                    }
+                }
+            }
 
             out.writeBoolean(iter.isForThrift());
             while (iter.hasNext())
@@ -412,6 +424,58 @@ public abstract class PartitionIterators
                 }
             }
             out.writeBoolean(false);
+        }
+
+        void serializePartition(AtomIterator partition, DataOutputPlus out, int version) throws IOException
+        {
+            assert version < MessagingService.VERSION_30;
+
+            ByteBufferUtil.writeWithShortLength(partition.partitionKey().getKey(), out);
+            Pair<DeletionInfo, Iterator<LegacyLayout.LegacyCell>> pair = LegacyLayout.fromAtomIterator(partition);
+
+            if (!pair.right.hasNext())
+            {
+                out.writeBoolean(false);
+                return;
+            }
+
+            out.writeBoolean(true);
+            UUIDSerializer.serializer.serialize(partition.metadata().cfId, out, version);
+
+            DeletionTime.serializer.serialize(pair.left.getPartitionDeletion(), out);
+            // TODO this is the number of range tombstones, and would normally be followed by serialization
+            // of the range tombstone list
+            out.writeInt(0);
+
+            // begin cell serialization
+            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right);
+            out.writeInt(cells.size());
+            for (LegacyLayout.LegacyCell cell : cells)
+            {
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                {
+                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
+                }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                {
+                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
+                    // TODO need to write timestampOfLastDelete, what does that correspond to?
+                }
+
+                ByteBufferUtil.writeWithShortLength(cell.name.encode(partition.metadata()), out);
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                {
+                    out.writeByte(LegacyLayout.EXPIRATION_MASK);  // serialization flags
+                    out.writeInt(cell.ttl);
+                    out.writeInt(cell.localDeletionTime);
+                }
+                else
+                {
+                    out.writeByte(0);  // cell serialization flags
+                }
+                out.writeLong(cell.timestamp);
+                ByteBufferUtil.writeWithLength(cell.value, out);
+            }
         }
 
         public PartitionIterator deserialize(final DataInput in, final int version, final SerializationHelper.Flag flag) throws IOException
@@ -478,6 +542,72 @@ public abstract class PartitionIterators
                         next.close();
                 }
             };
+        }
+
+        public long serializedSize(PartitionIterator iter, int version)
+        {
+            assert version < MessagingService.VERSION_30;
+            TypeSizes sizes = TypeSizes.NATIVE;
+
+            if (!iter.hasNext())
+                return sizes.sizeof(false);
+
+            long size = sizes.sizeof(true);
+            while (iter.hasNext())
+            {
+                try (AtomIterator partition = iter.next())
+                {
+                    size += serializedPartitionSize(partition, version);
+                }
+            }
+            return size;
+        }
+
+        long serializedPartitionSize(AtomIterator partition, int version)
+        {
+            assert version < MessagingService.VERSION_30;
+            TypeSizes sizes = TypeSizes.NATIVE;
+
+            long size = ByteBufferUtil.serializedSizeWithShortLength(partition.partitionKey().getKey(), sizes);
+            Pair<DeletionInfo, Iterator<LegacyLayout.LegacyCell>> pair = LegacyLayout.fromAtomIterator(partition);
+
+            if (!pair.right.hasNext())
+                return size + sizes.sizeof(false);
+
+            size += sizes.sizeof(true);
+            size += UUIDSerializer.serializer.serializedSize(partition.metadata().cfId, version);
+            size += DeletionTime.serializer.serializedSize(pair.left.getPartitionDeletion(), sizes);
+            // TODO this is the number of range tombstones, and would normally be followed by serialization
+            // of the range tombstone list
+            size += sizes.sizeof(0);
+
+            // begin cell serialization
+            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right);
+            size += sizes.sizeof(cells.size());
+            for (LegacyLayout.LegacyCell cell : cells)
+            {
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                {
+                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
+                }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                {
+                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
+                    // TODO need to write timestampOfLastDelete, what does that correspond to?
+                }
+
+                size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(partition.metadata()), sizes);
+                size += 1;  // serialization flags
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                {
+                    size += sizes.sizeof(cell.ttl);
+                    size += sizes.sizeof(cell.localDeletionTime);
+                }
+                size += sizes.sizeof(cell.timestamp);
+                size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+            }
+
+            return size;
         }
     }
 }
