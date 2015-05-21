@@ -20,10 +20,7 @@ package org.apache.cassandra.db;
 import java.io.DataInput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.SortedSet;
-import java.util.TreeSet;
+import java.util.*;
 
 import com.google.common.collect.Iterables;
 import org.apache.cassandra.config.Schema;
@@ -551,8 +548,19 @@ public abstract class ReadCommand implements ReadQuery
             // begin DiskAtomFilterSerializer.serialize()
             if (rangeCommand.isNamesQuery())
             {
-                // handle names query
-                throw new UnsupportedOperationException(String.format("RangeSlices with names filters not supported yet: %s", command));
+                // TODO unify with single-partition names query serialization
+                out.writeByte(1);  // 0 for slices, 1 for names
+                NamesPartitionFilter filter = (NamesPartitionFilter) rangeCommand.dataRange().partitionFilter;
+                PartitionColumns columns = filter.queriedColumns().columns();
+                out.writeInt(columns.size());
+                for (ColumnDefinition column : columns)
+                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null), out);
+
+                // see serializeNamesCommand() for an explanation of the countCql3Rows  ield
+                if (metadata.isCompactTable() && !(command.limits().kind() == DataLimits.Kind.CQL_LIMIT && command.limits().perPartitionCount() == 1))
+                    out.writeBoolean(true);  // it's compact and not a DISTINCT query
+                else
+                    out.writeBoolean(false);
             }
             else
             {
@@ -610,44 +618,71 @@ public abstract class ReadCommand implements ReadQuery
 
             try
             {
+                PartitionFilter filter;
+                int compositesToGroup = 0;
+                int perPartitionLimit = -1;
                 boolean isNamesQuery = in.readBoolean();  // 0 for slices, 1 for names
                 if (isNamesQuery)
                 {
-                    throw new UnsupportedOperationException("Names queries for ranges slices are not yet supported");
+                    // TODO unify with single-partition names query deser
+                    int numCellNames = in.readInt();
+                    SortedSet<Clustering> clusterings = new TreeSet<>(metadata.comparator);
+                    Set<ColumnDefinition> staticColumns = new HashSet<>();
+                    Set<ColumnDefinition> columns = new HashSet<>();
+                    for (int i = 0; i < numCellNames; i++)
+                    {
+                        ByteBuffer buffer = ByteBufferUtil.readWithShortLength(in);
+                        LegacyLayout.LegacyCellName cellName = LegacyLayout.decodeCellName(metadata, buffer);
+                        if (!cellName.clustering.equals(Clustering.STATIC_CLUSTERING))
+                        {
+                            clusterings.add(cellName.clustering);
+                            columns.add(cellName.column);
+                        }
+                        else
+                        {
+                            staticColumns.add(cellName.column);
+                        }
+                    }
+
+                    in.readBoolean();  // countCql3Rows
+
+                    ColumnsSelection selection = ColumnsSelection.withoutSubselection(new PartitionColumns(Columns.from(staticColumns), Columns.from(columns)));
+                    filter = new NamesPartitionFilter(selection, clusterings, false);
                 }
                 else
                 {
                     Slices slices = LegacyReadCommandSerializer.deserializeSlices(in, metadata);
                     boolean isReversed = in.readBoolean();
-                    int perPartitionLimit = in.readInt();
-                    int compositesToGroup = in.readInt();
-                    SlicePartitionFilter filter = new SlicePartitionFilter(metadata.partitionColumns(), slices, isReversed);
-
-                    int numColumnFilters = in.readInt();
-                    ColumnFilter columnFilter;
-                    if (numColumnFilters == 0)
-                        columnFilter = ColumnFilter.NONE;
-                    else
-                        throw new UnsupportedOperationException("ColumnFilters not supported yet: %s");
-
-                    AbstractBounds<RowPosition> keyRange = AbstractBounds.rowPositionSerializer.deserialize(in, StorageService.getPartitioner(), version);
-                    int maxResults = in.readInt();
-
-                    // TODO what needs to be done for these?
-                    boolean countCQL3Rows = in.readBoolean();
-                    boolean isPaging = in.readBoolean();
-
-                    boolean isDistinct = compositesToGroup == -2;
-                    DataLimits limits;
-                    if (isDistinct)
-                        limits = DataLimits.distinctLimits(maxResults);
-                    else if (compositesToGroup == -1)
-                        limits = DataLimits.thriftLimits(maxResults, perPartitionLimit);
-                    else
-                        limits = DataLimits.cqlLimits(maxResults);
-
-                    return new PartitionRangeReadCommand(false, true, metadata, nowInSec, columnFilter, limits, new DataRange(keyRange, filter));
+                    perPartitionLimit = in.readInt();
+                    compositesToGroup = in.readInt();
+                    filter = new SlicePartitionFilter(metadata.partitionColumns(), slices, isReversed);
                 }
+
+                int numColumnFilters = in.readInt();
+                ColumnFilter columnFilter;
+                if (numColumnFilters == 0)
+                    columnFilter = ColumnFilter.NONE;
+                else
+                    throw new UnsupportedOperationException("ColumnFilters not supported yet: %s");
+
+                AbstractBounds<RowPosition> keyRange = AbstractBounds.rowPositionSerializer.deserialize(in, StorageService.getPartitioner(), version);
+                int maxResults = in.readInt();
+
+                // TODO what needs to be done for these?
+                boolean countCQL3Rows = in.readBoolean();
+                boolean isPaging = in.readBoolean();
+
+                boolean isDistinct = compositesToGroup == -2;
+                DataLimits limits;
+                if (isDistinct)
+                    limits = DataLimits.distinctLimits(maxResults);
+                else if (compositesToGroup == -1)
+                    limits = DataLimits.thriftLimits(maxResults, perPartitionLimit);
+                else
+                    limits = DataLimits.cqlLimits(maxResults);
+
+                PartitionRangeReadCommand command = new PartitionRangeReadCommand(false, true, metadata, nowInSec, columnFilter, limits, new DataRange(keyRange, filter));
+                return command;
             }
             catch (UnknownColumnException exc)
             {
@@ -671,8 +706,15 @@ public abstract class ReadCommand implements ReadQuery
             size += 1;  // 0 for slices, 1 for names
             if (rangeCommand.isNamesQuery())
             {
-                // handle names query
-                throw new UnsupportedOperationException(String.format("RangeSlices with names filters not supported yet: %s", command));
+                PartitionColumns columns = command.queriedColumns().columns();
+                size = sizes.sizeof(columns.size());
+                for (ColumnDefinition column : columns)
+                {
+                    ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null);
+                    size += sizes.sizeof((short) columnName.remaining()) + columnName.remaining();
+                }
+
+                size += sizes.sizeof(true);  // countCql3Rows
             }
             else
             {
@@ -681,22 +723,22 @@ public abstract class ReadCommand implements ReadQuery
                 size += sizes.sizeof(filter.isReversed());
                 size += sizes.sizeof(command.limits().perPartitionCount());
                 size += sizes.sizeof(0); // compositesToGroup
-
-                if (rangeCommand.columnFilter().equals(ColumnFilter.NONE))
-                {
-                    size += sizes.sizeof(0);
-                }
-                else
-                {
-                    // TODO write index expressions out
-                    throw new UnsupportedOperationException(String.format("ColumnFilters not supported yet: %s", command));
-                }
-
-                size += AbstractBounds.rowPositionSerializer.serializedSize(rangeCommand.dataRange().keyRange(), version);
-                size += sizes.sizeof(rangeCommand.limits().count());
-                size += sizes.sizeof(!rangeCommand.isForThrift());
-                return size + sizes.sizeof(rangeCommand.dataRange().isPaging());
             }
+
+            if (rangeCommand.columnFilter().equals(ColumnFilter.NONE))
+            {
+                size += sizes.sizeof(0);
+            }
+            else
+            {
+                // TODO write index expressions out
+                throw new UnsupportedOperationException(String.format("ColumnFilters not supported yet: %s", command));
+            }
+
+            size += AbstractBounds.rowPositionSerializer.serializedSize(rangeCommand.dataRange().keyRange(), version);
+            size += sizes.sizeof(rangeCommand.limits().count());
+            size += sizes.sizeof(!rangeCommand.isForThrift());
+            return size + sizes.sizeof(rangeCommand.dataRange().isPaging());
         }
     }
 
@@ -926,15 +968,26 @@ public abstract class ReadCommand implements ReadQuery
         {
             int numCellNames = in.readInt();
             SortedSet<Clustering> clusterings = new TreeSet<>(metadata.comparator);
+            Set<ColumnDefinition> staticColumns = new HashSet<>();
+            Set<ColumnDefinition> columns = new HashSet<>();
             for (int i = 0; i < numCellNames; i++)
             {
                 ByteBuffer buffer = ByteBufferUtil.readWithShortLength(in);
-                clusterings.add(LegacyLayout.decodeCellName(metadata, buffer).clustering);
+                LegacyLayout.LegacyCellName cellName = LegacyLayout.decodeCellName(metadata, buffer);
+                if (!cellName.clustering.equals(Clustering.STATIC_CLUSTERING))
+                {
+                    clusterings.add(cellName.clustering);
+                    columns.add(cellName.column);
+                }
+                else
+                {
+                    staticColumns.add(cellName.column);
+                }
             }
 
             in.readBoolean();  // countCql3Rows
 
-            ColumnsSelection selection = ColumnsSelection.withoutSubselection(metadata.partitionColumns());
+            ColumnsSelection selection = ColumnsSelection.withoutSubselection(new PartitionColumns(Columns.from(staticColumns), Columns.from(columns)));
             NamesPartitionFilter filter = new NamesPartitionFilter(selection, clusterings, false);
 
             // messages from old nodes will expect the thrift format, so always use 'true' for isForThrift
