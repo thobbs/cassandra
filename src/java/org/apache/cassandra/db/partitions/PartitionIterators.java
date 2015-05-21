@@ -412,6 +412,7 @@ public abstract class PartitionIterators
                         serializePartition(partition, out, version);
                     }
                 }
+                return;
             }
 
             out.writeBoolean(iter.isForThrift());

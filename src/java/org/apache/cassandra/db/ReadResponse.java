@@ -266,6 +266,7 @@ public abstract class ReadResponse
     {
         public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
         {
+            // TODO this is currently really inefficient because we have to iterate over all of the results twice
             int numPartitions = 0;
             try (PartitionIterator iterator = response.makeIterator())
             {
@@ -274,6 +275,10 @@ public abstract class ReadResponse
                     try (AtomIterator atomIterator = iterator.next())
                     {
                         numPartitions++;
+
+                        // we have to fully exhaust the subiterator
+                        while(atomIterator.hasNext())
+                            atomIterator.next();
                     }
                 }
             }
