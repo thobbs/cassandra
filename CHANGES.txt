@@ -1,4 +1,6 @@
 2.1.6
+ * Use ProtocolError code instead of ServerError code for native protocol
+   error responses to unsupported protocol versions (CASSANDRA-9451)
  * Improve estimated row count (CASSANDRA-9107)
  * Optimize range tombstone memory footprint (CASSANDRA-8603)
  * Use configured gcgs in anticompaction (CASSANDRA-9397)
