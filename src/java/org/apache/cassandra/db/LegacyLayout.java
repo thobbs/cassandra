@@ -483,7 +483,7 @@ public abstract class LegacyLayout
                     return endOfData();
 
                 Cell cell = cells.next();
-                return makeLegacyCell(metadata, row.clustering(), cell);
+                return makeLegacyCell(metadata, row.clustering().takeAlias(), cell);
             }
         };
     }
