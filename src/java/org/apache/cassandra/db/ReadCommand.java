@@ -1053,12 +1053,27 @@ public abstract class ReadCommand implements ReadQuery
 
         private SinglePartitionSliceCommand deserializeSliceCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
         {
-            Slices slices = deserializeSlices(in, metadata);
+            int numSlices = in.readInt();
+            ByteBuffer[] startBuffers = new ByteBuffer[numSlices];
+            ByteBuffer[] finishBuffers = new ByteBuffer[numSlices];
+            for (int i = 0; i < numSlices; i++)
+            {
+                startBuffers[i] = ByteBufferUtil.readWithShortLength(in);
+                finishBuffers[i] = ByteBufferUtil.readWithShortLength(in);
+            }
+
             boolean reversed = in.readBoolean();
             int count = in.readInt();
             int compositesToGroup = in.readInt();
 
-            SlicePartitionFilter filter = new SlicePartitionFilter(metadata.partitionColumns(), slices, reversed);
+            Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
+            for (int i = 0; i < numSlices; i++)
+            {
+                Slice.Bound start = LegacyLayout.decodeBound(metadata, startBuffers[i], !reversed).bound;
+                Slice.Bound finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], reversed).bound;
+                slicesBuilder.add(Slice.make(start, finish));
+            }
+            SlicePartitionFilter filter = new SlicePartitionFilter(metadata.partitionColumns(), slicesBuilder.build(), reversed);
 
             DataLimits limits;
             if (compositesToGroup == -2)
@@ -1074,6 +1089,7 @@ public abstract class ReadCommand implements ReadQuery
 
         static Slices deserializeSlices(DataInput in, CFMetaData metadata) throws IOException, UnknownColumnException
         {
+            // TODO reversal is not handled correctly here, see deserializeSliceCommand for correct behavior
             int numSlices = in.readInt();
             Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
             for (int i = 0; i < numSlices; i++)
@@ -1081,7 +1097,6 @@ public abstract class ReadCommand implements ReadQuery
                 ByteBuffer startBuffer = ByteBufferUtil.readWithShortLength(in);
                 ByteBuffer finishBuffer = ByteBufferUtil.readWithShortLength(in);
 
-                // TODO probably not handling reversal correctly here
                 Slice.Bound start = LegacyLayout.decodeBound(metadata, startBuffer, true).bound;
                 Slice.Bound finish = LegacyLayout.decodeBound(metadata, finishBuffer, false).bound;
                 slicesBuilder.add(Slice.make(start, finish));
