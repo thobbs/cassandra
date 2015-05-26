@@ -54,7 +54,7 @@ public abstract class LegacyLayout
 
     public final static int MAX_CELL_NAME_LENGTH = FBUtilities.MAX_UNSIGNED_SHORT;
 
-    private final static int DELETION_MASK        = 0x01;
+    public final static int DELETION_MASK        = 0x01;
     public final static int EXPIRATION_MASK      = 0x02;
     private final static int COUNTER_MASK         = 0x04;
     private final static int COUNTER_UPDATE_MASK  = 0x08;

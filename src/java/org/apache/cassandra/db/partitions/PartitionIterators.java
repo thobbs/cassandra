@@ -30,6 +30,7 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.atoms.*;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
@@ -444,36 +445,62 @@ public abstract class PartitionIterators
             UUIDSerializer.serializer.serialize(partition.metadata().cfId, out, version);
 
             DeletionTime.serializer.serialize(pair.left.getPartitionDeletion(), out);
-            // TODO this is the number of range tombstones, and would normally be followed by serialization
-            // of the range tombstone list
-            out.writeInt(0);
+
+            // begin serialization of the range tombstone list
+            out.writeInt(pair.left.rangeCount());
+            if (pair.left.hasRanges())
+            {
+                Iterator<RangeTombstone> rangeTombstoneIterator = pair.left.rangeIterator(false);  // TODO reversed?
+                CompositeType type = CompositeType.getInstance(pair.left.rangeComparator().subtypes());
+                while (rangeTombstoneIterator.hasNext())
+                {
+                    RangeTombstone rt = rangeTombstoneIterator.next();
+                    Slice slice = rt.deletedSlice();
+                    CompositeType.Builder startBuilder = type.builder();
+                    CompositeType.Builder finishBuilder = type.builder();
+                    for (int i = 0; i < slice.start().clustering().size(); i++)
+                    {
+                        startBuilder.add(slice.start().get(i));
+                        finishBuilder.add(slice.end().get(i));
+                    }
+
+                    // TODO double check inclusive ends
+                    ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
+                    if (slice.end().isInclusive())
+                        ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
+                    else
+                        ByteBufferUtil.writeWithShortLength(startBuilder.buildAsEndOfRange(), out);
+
+                    out.writeInt(rt.deletionTime().localDeletionTime());
+                    out.writeLong(rt.deletionTime().markedForDeleteAt());
+                }
+            }
 
             // begin cell serialization
             List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right);
             out.writeInt(cells.size());
             for (LegacyLayout.LegacyCell cell : cells)
             {
-                if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                 {
-                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
-                }
-                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
-                {
-                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
+                    throw new UnsupportedOperationException("Counter cells are not supported yet");
                     // TODO need to write timestampOfLastDelete, what does that correspond to?
                 }
 
                 ByteBufferUtil.writeWithShortLength(cell.name.encode(partition.metadata()), out);
+                int serializationFlags = 0;
                 if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
                 {
-                    out.writeByte(LegacyLayout.EXPIRATION_MASK);  // serialization flags
+                    serializationFlags = LegacyLayout.EXPIRATION_MASK;
                     out.writeInt(cell.ttl);
                     out.writeInt(cell.localDeletionTime);
                 }
-                else
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
                 {
-                    out.writeByte(0);  // cell serialization flags
+                    serializationFlags = LegacyLayout.DELETION_MASK;
                 }
+
+                out.writeByte(serializationFlags);
                 out.writeLong(cell.timestamp);
                 ByteBufferUtil.writeWithLength(cell.value, out);
             }
@@ -578,22 +605,40 @@ public abstract class PartitionIterators
             size += sizes.sizeof(true);
             size += UUIDSerializer.serializer.serializedSize(partition.metadata().cfId, version);
             size += DeletionTime.serializer.serializedSize(pair.left.getPartitionDeletion(), sizes);
-            // TODO this is the number of range tombstones, and would normally be followed by serialization
-            // of the range tombstone list
-            size += sizes.sizeof(0);
+
+            // begin range tombstone list
+            size += sizes.sizeof(pair.left.rangeCount());
+            if (pair.left.hasRanges())
+            {
+                Iterator<RangeTombstone> rangeTombstoneIterator = pair.left.rangeIterator(false);  // TODO reversed?
+                CompositeType type = CompositeType.getInstance(pair.left.rangeComparator().subtypes());
+                while (rangeTombstoneIterator.hasNext())
+                {
+                    RangeTombstone rt = rangeTombstoneIterator.next();
+                    Slice slice = rt.deletedSlice();
+                    CompositeType.Builder startBuilder = type.builder();
+                    CompositeType.Builder finishBuilder = type.builder();
+                    for (int i = 0; i < slice.start().clustering().size(); i++)
+                    {
+                        startBuilder.add(slice.start().get(i));
+                        finishBuilder.add(slice.end().get(i));
+                    }
+
+                    size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build(), sizes);
+                    size += ByteBufferUtil.serializedSizeWithShortLength(finishBuilder.build(), sizes);
+                    size += sizes.sizeof(rt.deletionTime().localDeletionTime());
+                    size += sizes.sizeof(rt.deletionTime().markedForDeleteAt());
+                }
+            }
 
             // begin cell serialization
             List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right);
             size += sizes.sizeof(cells.size());
             for (LegacyLayout.LegacyCell cell : cells)
             {
-                if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                 {
-                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
-                }
-                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
-                {
-                    throw new UnsupportedOperationException("Deleted cells are not supported yet");
+                    throw new UnsupportedOperationException("Counter cells are not supported yet");
                     // TODO need to write timestampOfLastDelete, what does that correspond to?
                 }
 

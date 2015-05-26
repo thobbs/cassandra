@@ -192,6 +192,11 @@ public class DeletionInfo implements IMeasurableMemory
         return ranges == null ? Iterators.<RangeTombstone>emptyIterator() : ranges.iterator(slice, reversed);
     }
 
+    public ClusteringComparator rangeComparator()
+    {
+        return ranges.comparator();
+    }
+
     public RangeTombstone rangeCovering(Clustering name)
     {
         return ranges == null ? null : ranges.search(name);
