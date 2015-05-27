@@ -23,7 +23,9 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -590,15 +592,14 @@ public abstract class ReadCommand implements ReadQuery
             }
             else
             {
-                // TODO write index expressions out
-                // out.writeInt(rangeCommand.columnFilter().size())
-                // for (IndexExpression expr : sliceCommand.columnFilter)
-                // {
-                //     ByteBufferUtil.writeWithShortLength(expr.column, out);
-                //     out.writeInt(expr.operator.ordinal());
-                //     ByteBufferUtil.writeWithShortLength(expr.value, out);
-                // }
-                throw new UnsupportedOperationException(String.format("ColumnFilters not supported yet: %s", command));
+                ArrayList<ColumnFilter.Expression> indexExpressions = Lists.newArrayList(rangeCommand.columnFilter().iterator());
+                out.writeInt(indexExpressions.size());
+                for (ColumnFilter.Expression expression : indexExpressions)
+                {
+                    ByteBufferUtil.writeWithShortLength(expression.column().name.bytes, out);
+                    out.writeInt(expression.operator().ordinal());
+                    ByteBufferUtil.writeWithShortLength(expression.getIndexValue(), out);
+                }
             }
 
             // key range serialization
@@ -659,9 +660,22 @@ public abstract class ReadCommand implements ReadQuery
                 int numColumnFilters = in.readInt();
                 ColumnFilter columnFilter;
                 if (numColumnFilters == 0)
+                {
                     columnFilter = ColumnFilter.NONE;
+                }
                 else
-                    throw new UnsupportedOperationException("ColumnFilters not supported yet: %s");
+                {
+                    int numFilters = in.readInt();
+                    columnFilter = ColumnFilter.create(numFilters);
+                    for (int i = 0; i < numFilters; i++)
+                    {
+                        ByteBuffer columnName = ByteBufferUtil.readWithShortLength(in);
+                        ColumnDefinition column = metadata.getColumnDefinition(columnName);
+                        Operator op = Operator.readFrom(in);
+                        ByteBuffer indexValue = ByteBufferUtil.readWithShortLength(in);
+                        columnFilter.add(column, op, indexValue);
+                    }
+                }
 
                 AbstractBounds<RowPosition> keyRange = AbstractBounds.rowPositionSerializer.deserialize(in, StorageService.getPartitioner(), version);
                 int maxResults = in.readInt();
@@ -729,8 +743,14 @@ public abstract class ReadCommand implements ReadQuery
             }
             else
             {
-                // TODO write index expressions out
-                throw new UnsupportedOperationException(String.format("ColumnFilters not supported yet: %s", command));
+                ArrayList<ColumnFilter.Expression> indexExpressions = Lists.newArrayList(rangeCommand.columnFilter().iterator());
+                size += sizes.sizeof(indexExpressions.size());
+                for (ColumnFilter.Expression expression : indexExpressions)
+                {
+                    size += ByteBufferUtil.serializedSizeWithShortLength(expression.column().name.bytes, sizes);
+                    size += sizes.sizeof(expression.operator().ordinal());
+                    size += ByteBufferUtil.serializedSizeWithShortLength(expression.getIndexValue(), sizes);
+                }
             }
 
             size += AbstractBounds.rowPositionSerializer.serializedSize(rangeCommand.dataRange().keyRange(), version);
