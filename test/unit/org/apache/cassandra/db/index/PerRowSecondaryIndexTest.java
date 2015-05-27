@@ -27,6 +27,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.QueryFilter;
@@ -131,7 +132,13 @@ public class PerRowSecondaryIndexTest extends SchemaLoader
         {
             return ACTIVE;
         }
-
+        
+        @Override
+        public boolean indexes(ColumnDefinition cdef)
+        {
+            return ACTIVE;
+        }
+        
         @Override
         public void index(ByteBuffer rowKey, ColumnFamily cf)
         {

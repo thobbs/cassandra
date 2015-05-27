@@ -1,5 +1,33 @@
+2.0.16:
+ * Fix failing bound statement after adding a collection (CASSANDRA-9411)
+ * Fix counting cache serialization in request metrics (CASSANDRA-9466)
+ * (cqlsh) Add LOGIN command to switch users (CASSANDRA-7212)
+ * Clone SliceQueryFilter in AbstractReadCommand implementations (CASSANDRA-8940)
+ * Push correct protocol notification for DROP INDEX (CASSANDRA-9310)
+ * token-generator - generated tokens too long (CASSANDRA-9300)
+ * Add option not to validate atoms during scrub (CASSANDRA-9406)
+ * Backport CASSANDRA-3569 (CASSANDRA-9455)
+
+
 2.0.15:
- * Ignore gossip SYNs after shutdown (CASSANDRA-9238)
+ * Fix counting of tombstones for TombstoneOverwhelmingException (CASSANDRA-9299)
+ * Fix ReconnectableSnitch reconnecting to peers during upgrade (CASSANDRA-6702)
+ * Include keyspace and table name in error log for collections over the size
+   limit (CASSANDRA-9286)
+ * Avoid potential overlap in LCS with single-partition sstables (CASSANDRA-9322)
+ * Log warning message when a table is queried before the schema has fully
+   propagated (CASSANDRA-9136)
+ * Overload SecondaryIndex#indexes to accept the column definition (CASSANDRA-9314)
+ * (cqlsh) Add SERIAL and LOCAL_SERIAL consistency levels (CASSANDRA-8051)
+ * Fix index selection during rebuild with certain table layouts (CASSANDRA-9281)
+ * Fix partition-level-delete-only workload accounting (CASSANDRA-9194)
+ * Allow scrub to handle corrupted compressed chunks (CASSANDRA-9140)
+ * Fix assertion error when resetlocalschema is run during repair (CASSANDRA-9249)
+ * Disable single sstable tombstone compactions for DTCS by default (CASSANDRA-9234)
+ * Do more agressive ttl expiration checks to be able to
+   drop more sstables (CASSANDRA-8243)
+ * IncomingTcpConnection thread is not named (CASSANDRA-9262)
+ * Close incoming connections when MessagingService is stopped (CASSANDRA-9238)
  * Avoid overflow when calculating max sstable size in LCS (CASSANDRA-9235)
  * Make sstable blacklisting work with compression (CASSANDRA-9138)
  * Do not attempt to rebuild indexes if no index accepts any column (CASSANDRA-9196)
@@ -49,9 +77,12 @@
    (CASSANDRA-8808)
  * Fix MT mismatch between empty and GC-able data (CASSANDRA-8979)
  * Fix incorrect validation when snapshotting single table (CASSANDRA-8056)
+ * Fix streaming hang when retrying (CASSANDRA-9132)
+
 
 2.0.14
  * Bind JMX to localhost unless explicitly configured otherwise (CASSANDRA-9085)
+
 
 2.0.13:
  * Add offline tool to relevel sstables (CASSANDRA-8301)
