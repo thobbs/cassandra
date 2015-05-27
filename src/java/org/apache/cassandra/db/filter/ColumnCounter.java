@@ -171,9 +171,12 @@ public class ColumnCounter
         @Override
         public void count(Column column, DeletionInfo.InOrderTester tester)
         {
-            if (!isLive(column, tester, timestamp))
+            if (tester.isDeleted(column))
+                return;
+
+            if (!column.isLive(timestamp))
             {
-                ignored++;
+                tombstones++;
                 return;
             }
 
