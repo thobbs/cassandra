@@ -651,11 +651,9 @@ public abstract class ReadCommand implements ReadQuery
                 }
                 else
                 {
-                    Slices slices = LegacyReadCommandSerializer.deserializeSlices(in, metadata);
-                    boolean isReversed = in.readBoolean();
+                    filter = LegacyReadCommandSerializer.deserializeSlicePartitionFilter(in, metadata);
                     perPartitionLimit = in.readInt();
                     compositesToGroup = in.readInt();
-                    filter = new SlicePartitionFilter(metadata.partitionColumns(), slices, isReversed);
                 }
 
                 int numColumnFilters = in.readInt();
@@ -1053,27 +1051,9 @@ public abstract class ReadCommand implements ReadQuery
 
         private SinglePartitionSliceCommand deserializeSliceCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
         {
-            int numSlices = in.readInt();
-            ByteBuffer[] startBuffers = new ByteBuffer[numSlices];
-            ByteBuffer[] finishBuffers = new ByteBuffer[numSlices];
-            for (int i = 0; i < numSlices; i++)
-            {
-                startBuffers[i] = ByteBufferUtil.readWithShortLength(in);
-                finishBuffers[i] = ByteBufferUtil.readWithShortLength(in);
-            }
-
-            boolean reversed = in.readBoolean();
+            SlicePartitionFilter filter = deserializeSlicePartitionFilter(in, metadata);
             int count = in.readInt();
             int compositesToGroup = in.readInt();
-
-            Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
-            for (int i = 0; i < numSlices; i++)
-            {
-                Slice.Bound start = LegacyLayout.decodeBound(metadata, startBuffers[i], !reversed).bound;
-                Slice.Bound finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], reversed).bound;
-                slicesBuilder.add(Slice.make(start, finish));
-            }
-            SlicePartitionFilter filter = new SlicePartitionFilter(metadata.partitionColumns(), slicesBuilder.build(), reversed);
 
             DataLimits limits;
             if (compositesToGroup == -2)
@@ -1087,21 +1067,28 @@ public abstract class ReadCommand implements ReadQuery
             return new SinglePartitionSliceCommand(isDigest, true, metadata, nowInSeconds, ColumnFilter.NONE, limits, key, filter);
         }
 
-        static Slices deserializeSlices(DataInput in, CFMetaData metadata) throws IOException, UnknownColumnException
+        static SlicePartitionFilter deserializeSlicePartitionFilter(DataInput in, CFMetaData metadata) throws IOException
         {
-            // TODO reversal is not handled correctly here, see deserializeSliceCommand for correct behavior
             int numSlices = in.readInt();
+            ByteBuffer[] startBuffers = new ByteBuffer[numSlices];
+            ByteBuffer[] finishBuffers = new ByteBuffer[numSlices];
+            for (int i = 0; i < numSlices; i++)
+            {
+                startBuffers[i] = ByteBufferUtil.readWithShortLength(in);
+                finishBuffers[i] = ByteBufferUtil.readWithShortLength(in);
+            }
+
+            boolean reversed = in.readBoolean();
+
             Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
             for (int i = 0; i < numSlices; i++)
             {
-                ByteBuffer startBuffer = ByteBufferUtil.readWithShortLength(in);
-                ByteBuffer finishBuffer = ByteBufferUtil.readWithShortLength(in);
-
-                Slice.Bound start = LegacyLayout.decodeBound(metadata, startBuffer, true).bound;
-                Slice.Bound finish = LegacyLayout.decodeBound(metadata, finishBuffer, false).bound;
+                Slice.Bound start = LegacyLayout.decodeBound(metadata, startBuffers[i], !reversed).bound;
+                Slice.Bound finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], reversed).bound;
                 slicesBuilder.add(Slice.make(start, finish));
             }
-            return slicesBuilder.build();
+
+            return new SlicePartitionFilter(metadata.partitionColumns(), slicesBuilder.build(), reversed);
         }
     }
 }
