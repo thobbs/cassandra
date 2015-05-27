@@ -1083,8 +1083,17 @@ public abstract class ReadCommand implements ReadQuery
             Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
             for (int i = 0; i < numSlices; i++)
             {
-                Slice.Bound start = LegacyLayout.decodeBound(metadata, startBuffers[i], !reversed).bound;
-                Slice.Bound finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], reversed).bound;
+                Slice.Bound start, finish;
+                if (!reversed)
+                {
+                    start = LegacyLayout.decodeBound(metadata, startBuffers[i], true).bound;
+                    finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], false).bound;
+                }
+                else
+                {
+                    finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], false).bound;
+                    start = LegacyLayout.decodeBound(metadata, startBuffers[i], true).bound;
+                }
                 slicesBuilder.add(Slice.make(start, finish));
             }
 
