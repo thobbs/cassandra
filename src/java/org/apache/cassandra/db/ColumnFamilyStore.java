@@ -383,6 +383,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     /** call when dropping or renaming a CF. Performs mbean housekeeping and invalidates CFS to other operations */
     public void invalidate()
     {
+        // disable and cancel in-progress compactions before invalidating
         valid = false;
 
         try
@@ -397,7 +398,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         }
 
         latencyCalculator.cancel(false);
-        compactionStrategyWrapper.shutdown();
         SystemKeyspace.removeTruncationRecord(metadata.cfId);
         data.unreferenceSSTables();
         indexManager.invalidate();
@@ -1180,7 +1180,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     public void apply(DecoratedKey key, ColumnFamily columnFamily, SecondaryIndexManager.Updater indexer, OpOrder.Group opGroup, ReplayPosition replayPosition)
     {
         long start = System.nanoTime();
-
         Memtable mt = data.getMemtableFor(opGroup, replayPosition);
         final long timeDelta = mt.put(key, columnFamily, indexer, opGroup);
         maybeUpdateRowCache(key);
@@ -1399,12 +1398,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         return CompactionManager.instance.performCleanup(ColumnFamilyStore.this);
     }
 
-    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted) throws ExecutionException, InterruptedException
+    public CompactionManager.AllSSTableOpStatus scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData) throws ExecutionException, InterruptedException
     {
         // skip snapshot creation during scrub, SEE JIRA 5891
         if(!disableSnapshot)
             snapshotWithoutFlush("pre-scrub-" + System.currentTimeMillis());
-        return CompactionManager.instance.performScrub(ColumnFamilyStore.this, skipCorrupted);
+        return CompactionManager.instance.performScrub(ColumnFamilyStore.this, skipCorrupted, checkData);
     }
 
     public CompactionManager.AllSSTableOpStatus sstablesRewrite(boolean excludeCurrentVersion) throws ExecutionException, InterruptedException
@@ -1768,7 +1767,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             if (filter.filter instanceof SliceQueryFilter)
             {
                 // Log the number of tombstones scanned on single key queries
-                metric.tombstoneScannedHistogram.update(((SliceQueryFilter) filter.filter).lastIgnored());
+                metric.tombstoneScannedHistogram.update(((SliceQueryFilter) filter.filter).lastTombstones());
                 metric.liveScannedHistogram.update(((SliceQueryFilter) filter.filter).lastLive());
             }
         }
@@ -1870,31 +1869,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             public List<SSTableReader> apply(DataTracker.View view)
             {
                 return compactionStrategyWrapper.filterSSTablesForReads(view.sstablesInBounds(rowBounds));
-            }
-        };
-    }
-
-    /**
-     * @return a ViewFragment containing the sstables and memtables that may need to be merged
-     * for rows for all of @param rowBoundsCollection, inclusive, according to the interval tree.
-     */
-    public Function<DataTracker.View, List<SSTableReader>> viewFilter(final Collection<AbstractBounds<RowPosition>> rowBoundsCollection, final boolean includeRepaired)
-    {
-        return new Function<DataTracker.View, List<SSTableReader>>()
-        {
-            public List<SSTableReader> apply(DataTracker.View view)
-            {
-                Set<SSTableReader> sstables = Sets.newHashSet();
-                for (AbstractBounds<RowPosition> rowBounds : rowBoundsCollection)
-                {
-                    for (SSTableReader sstable : view.sstablesInBounds(rowBounds))
-                    {
-                        if (includeRepaired || !sstable.isRepaired())
-                            sstables.add(sstable);
-                    }
-                }
-
-                return ImmutableList.copyOf(sstables);
             }
         };
     }
@@ -2566,26 +2540,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             try
             {
                 // interrupt in-progress compactions
-                Function<ColumnFamilyStore, CFMetaData> f = new Function<ColumnFamilyStore, CFMetaData>()
-                {
-                    public CFMetaData apply(ColumnFamilyStore cfs)
-                    {
-                        return cfs.metadata;
-                    }
-                };
-                Iterable<CFMetaData> allMetadata = Iterables.transform(selfWithIndexes, f);
-                CompactionManager.instance.interruptCompactionFor(allMetadata, interruptValidation);
-
-                // wait for the interruption to be recognized
-                long start = System.nanoTime();
-                long delay = TimeUnit.MINUTES.toNanos(1);
-                while (System.nanoTime() - start < delay)
-                {
-                    if (CompactionManager.instance.isCompacting(selfWithIndexes))
-                        Uninterruptibles.sleepUninterruptibly(100, TimeUnit.MILLISECONDS);
-                    else
-                        break;
-                }
+                CompactionManager.instance.interruptCompactionForCFs(selfWithIndexes, interruptValidation);
+                CompactionManager.instance.waitForCessation(selfWithIndexes);
 
                 // doublecheck that we finished, instead of timing out
                 for (ColumnFamilyStore cfs : selfWithIndexes)
@@ -2935,10 +2891,12 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         public List<SSTableReader> apply(DataTracker.View view)
         {
             List<SSTableReader> sstables = new ArrayList<>();
-            sstables.addAll(view.compacting);
+            for (SSTableReader sstable : view.compacting)
+                if (sstable.openReason != SSTableReader.OpenReason.EARLY)
+                    sstables.add(sstable);
             for (SSTableReader sstable : view.sstables)
-            if (!view.compacting.contains(sstable) && sstable.openReason != SSTableReader.OpenReason.EARLY)
-                sstables.add(sstable);
+                if (!view.compacting.contains(sstable) && sstable.openReason != SSTableReader.OpenReason.EARLY)
+                    sstables.add(sstable);
             return sstables;
         }
     };

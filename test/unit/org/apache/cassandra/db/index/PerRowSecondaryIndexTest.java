@@ -159,11 +159,17 @@ public class PerRowSecondaryIndexTest extends SchemaLoader
         }
 
         @Override
-        public boolean indexes(ColumnDefinition column)
+        public boolean indexes(CellName name)
         {
             return ACTIVE;
         }
-
+        
+        @Override
+        public boolean indexes(ColumnDefinition cdef)
+        {
+            return ACTIVE;
+        }
+        
         @Override
         public void index(ByteBuffer rowKey, ColumnFamily cf)
         {
@@ -231,12 +237,6 @@ public class PerRowSecondaryIndexTest extends SchemaLoader
         public ColumnFamilyStore getIndexCfs()
         {
             return baseCfs;
-        }
-
-        @Override
-        public boolean indexes(CellName name)
-        {
-            return true;
         }
 
         @Override

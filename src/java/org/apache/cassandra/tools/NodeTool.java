@@ -867,10 +867,7 @@ public class NodeTool
                     if (offHeapSize != null)
                         System.out.println("\t\tOff heap memory used (total): " + format(offHeapSize, humanReadable));
                     System.out.println("\t\tSSTable Compression Ratio: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "CompressionRatio"));
-                    long numberOfKeys = 0;
-                    for (long keys : (long[]) probe.getColumnFamilyMetric(keyspaceName, cfName, "EstimatedColumnCountHistogram"))
-                        numberOfKeys += keys;
-                    System.out.println("\t\tNumber of keys (estimate): " + numberOfKeys);
+                    System.out.println("\t\tNumber of keys (estimate): " + probe.getColumnFamilyMetric(keyspaceName, cfName, "EstimatedRowCount"));
                     System.out.println("\t\tMemtable cell count: " + probe.getColumnFamilyMetric(keyspaceName, cfName, "MemtableColumnsCount"));
                     System.out.println("\t\tMemtable data size: " + format((Long) probe.getColumnFamilyMetric(keyspaceName, cfName, "MemtableLiveDataSize"), humanReadable));
                     if (memtableOffHeapSize != null)
@@ -1250,6 +1247,11 @@ public class NodeTool
                 description = "Skip corrupted partitions even when scrubbing counter tables. (default false)")
         private boolean skipCorrupted = false;
 
+        @Option(title = "no_validate",
+                name = {"-n", "--no-validate"},
+                description = "Do not validate columns using column validator")
+        private boolean noValidation = false;
+
         @Override
         public void execute(NodeProbe probe)
         {
@@ -1260,7 +1262,7 @@ public class NodeTool
             {
                 try
                 {
-                    probe.scrub(System.out, disableSnapshot, skipCorrupted, keyspace, cfnames);
+                    probe.scrub(System.out, disableSnapshot, skipCorrupted, !noValidation, keyspace, cfnames);
                 } catch (Exception e)
                 {
                     throw new RuntimeException("Error occurred during flushing", e);

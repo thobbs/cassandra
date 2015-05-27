@@ -1,7 +1,60 @@
-2.1.5
+2.1.6
+ * (cqlsh) Better float precision by default (CASSANDRA-9224)
+ * Improve estimated row count (CASSANDRA-9107)
+ * Optimize range tombstone memory footprint (CASSANDRA-8603)
+ * Use configured gcgs in anticompaction (CASSANDRA-9397)
+ * Warn on misuse of unlogged batches (CASSANDRA-9282)
+ * Failure detector detects and ignores local pauses (CASSANDRA-9183)
+ * Add utility class to support for rate limiting a given log statement (CASSANDRA-9029)
+ * Add missing consistency levels to cassandra-stess (CASSANDRA-9361)
+ * Fix commitlog getCompletedTasks to not increment (CASSANDRA-9339)
+ * Fix for harmless exceptions logged as ERROR (CASSANDRA-8564)
+ * Delete processed sstables in sstablesplit/sstableupgrade (CASSANDRA-8606)
+ * Improve sstable exclusion from partition tombstones (CASSANDRA-9298)
+ * Validate the indexed column rather than the cell's contents for 2i (CASSANDRA-9057)
+ * Add support for top-k custom 2i queries (CASSANDRA-8717)
+ * Fix error when dropping table during compaction (CASSANDRA-9251)
+ * cassandra-stress supports validation operations over user profiles (CASSANDRA-8773)
+ * Add support for rate limiting log messages (CASSANDRA-9029)
+ * Log the partition key with tombstone warnings (CASSANDRA-8561)
+ * Reduce runWithCompactionsDisabled poll interval to 1ms (CASSANDRA-9271)
+ * Fix PITR commitlog replay (CASSANDRA-9195)
+ * GCInspector logs very different times (CASSANDRA-9124)
  * Fix deleting from an empty list (CASSANDRA-9198)
  * Update tuple and collection types that use a user-defined type when that UDT
    is modified (CASSANDRA-9148, CASSANDRA-9192)
+ * Use higher timeout for prepair and snapshot in repair (CASSANDRA-9261)
+ * Fix anticompaction blocking ANTI_ENTROPY stage (CASSANDRA-9151)
+ * Repair waits for anticompaction to finish (CASSANDRA-9097)
+ * Fix streaming not holding ref when stream error (CASSANDRA-9295)
+ * Fix canonical view returning early opened SSTables (CASSANDRA-9396)
+Merged from 2.0:
+ * Fix counting cache serialization in request metrics (CASSANDRA-9466)
+ * (cqlsh) Add LOGIN command to switch users (CASSANDRA-7212)
+ * Clone SliceQueryFilter in AbstractReadCommand implementations (CASSANDRA-8940)
+ * Push correct protocol notification for DROP INDEX (CASSANDRA-9310)
+ * token-generator - generated tokens too long (CASSANDRA-9300)
+ * Add option not to validate atoms during scrub (CASSANDRA-9406)
+ * Fix counting of tombstones for TombstoneOverwhelmingException (CASSANDRA-9299)
+ * Fix ReconnectableSnitch reconnecting to peers during upgrade (CASSANDRA-6702)
+ * Include keyspace and table name in error log for collections over the size
+   limit (CASSANDRA-9286)
+ * Avoid potential overlap in LCS with single-partition sstables (CASSANDRA-9322)
+ * Log warning message when a table is queried before the schema has fully
+   propagated (CASSANDRA-9136)
+ * Overload SecondaryIndex#indexes to accept the column definition (CASSANDRA-9314)
+ * (cqlsh) Add SERIAL and LOCAL_SERIAL consistency levels (CASSANDRA-8051)
+ * Fix index selection during rebuild with certain table layouts (CASSANDRA-9281)
+ * Fix partition-level-delete-only workload accounting (CASSANDRA-9194)
+ * Allow scrub to handle corrupted compressed chunks (CASSANDRA-9140)
+ * Fix assertion error when resetlocalschema is run during repair (CASSANDRA-9249)
+ * Disable single sstable tombstone compactions for DTCS by default (CASSANDRA-9234)
+ * IncomingTcpConnection thread is not named (CASSANDRA-9262)
+ * Close incoming connections when MessagingService is stopped (CASSANDRA-9238)
+ * Fix streaming hang when retrying (CASSANDRA-9132)
+
+
+2.1.5
  * Re-add deprecated cold_reads_to_omit param for backwards compat (CASSANDRA-9203)
  * Make anticompaction visible in compactionstats (CASSANDRA-9098)
  * Improve nodetool getendpoints documentation about the partition
@@ -53,7 +106,7 @@
  * Fix top partitions reporting wrong cardinality (CASSANDRA-8834)
  * Fix rare NPE in KeyCacheSerializer (CASSANDRA-8067)
  * Pick sstables for validation as late as possible inc repairs (CASSANDRA-8366)
- * Fix commitlog getPendingTasks to not increment (CASSANDRA-8856)
+ * Fix commitlog getPendingTasks to not increment (CASSANDRA-8862)
  * Fix parallelism adjustment in range and secondary index queries
    when the first fetch does not satisfy the limit (CASSANDRA-8856)
  * Check if the filtered sstables is non-empty in STCS (CASSANDRA-8843)
@@ -148,8 +201,10 @@ Merged from 2.0:
  * Ensure SSTableSimpleUnsortedWriter.close() terminates if
    disk writer has crashed (CASSANDRA-8807)
 
+
 2.1.4
  * Bind JMX to localhost unless explicitly configured otherwise (CASSANDRA-9085)
+
 
 2.1.3
  * Fix HSHA/offheap_objects corruption (CASSANDRA-8719)
@@ -301,6 +356,7 @@ Merged from 2.0:
  * Add DC-aware sequential repair (CASSANDRA-8193)
  * Use live sstables in snapshot repair if possible (CASSANDRA-8312)
  * Fix hints serialized size calculation (CASSANDRA-8587)
+
 
 2.1.2
  * (cqlsh) parse_for_table_meta errors out on queries with undefined
@@ -746,7 +802,7 @@ Merged from 1.2:
  * Fix broken paging state with prepared statement (CASSANDRA-7120)
  * Fix IllegalArgumentException in CqlStorage (CASSANDRA-7287)
  * Allow nulls/non-existant fields in UDT (CASSANDRA-7206)
- * Backport Thrift MultiSliceRequest (CASSANDRA-7027)
+ * Add Thrift MultiSliceRequest (CASSANDRA-6757, CASSANDRA-7027)
  * Handle overlapping MultiSlices (CASSANDRA-7279)
  * Fix DataOutputTest on Windows (CASSANDRA-7265)
  * Embedded sets in user defined data-types are not updating (CASSANDRA-7267)

@@ -50,8 +50,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Multimap;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
-import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.RateLimiter;
+import com.google.common.util.concurrent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -309,7 +308,7 @@ public class CompactionManager implements CompactionManagerMBean
         }
     }
 
-    public AllSSTableOpStatus performScrub(final ColumnFamilyStore cfs, final boolean skipCorrupted) throws InterruptedException, ExecutionException
+    public AllSSTableOpStatus performScrub(final ColumnFamilyStore cfs, final boolean skipCorrupted, final boolean checkData) throws InterruptedException, ExecutionException
     {
         assert !cfs.isIndex();
         return parallelAllSSTableOperation(cfs, new OneSSTableOperation()
@@ -323,7 +322,7 @@ public class CompactionManager implements CompactionManagerMBean
             @Override
             public void execute(SSTableReader input) throws IOException
             {
-                scrubOne(cfs, input, skipCorrupted);
+                scrubOne(cfs, input, skipCorrupted, checkData);
             }
         });
     }
@@ -387,7 +386,7 @@ public class CompactionManager implements CompactionManagerMBean
         });
     }
 
-    public Future<?> submitAntiCompaction(final ColumnFamilyStore cfs,
+    public ListenableFuture<?> submitAntiCompaction(final ColumnFamilyStore cfs,
                                           final Collection<Range<Token>> ranges,
                                           final Refs<SSTableReader> sstables,
                                           final long repairedAt)
@@ -417,7 +416,9 @@ public class CompactionManager implements CompactionManagerMBean
             return Futures.immediateCancelledFuture();
         }
 
-        return executor.submit(runnable);
+        ListenableFutureTask<?> task = ListenableFutureTask.create(runnable, null);
+        executor.submit(task);
+        return task;
     }
 
     /**
@@ -483,7 +484,7 @@ public class CompactionManager implements CompactionManagerMBean
             cfs.getDataTracker().unmarkCompacting(sstables);
         }
 
-        logger.info(String.format("Completed anticompaction successfully"));
+        logger.info("Completed anticompaction successfully");
     }
 
     public void performMaximal(final ColumnFamilyStore cfStore) throws InterruptedException, ExecutionException
@@ -638,9 +639,9 @@ public class CompactionManager implements CompactionManagerMBean
         }
     }
 
-    private void scrubOne(ColumnFamilyStore cfs, SSTableReader sstable, boolean skipCorrupted) throws IOException
+    private void scrubOne(ColumnFamilyStore cfs, SSTableReader sstable, boolean skipCorrupted, boolean checkData) throws IOException
     {
-        Scrubber scrubber = new Scrubber(cfs, sstable, skipCorrupted, false);
+        Scrubber scrubber = new Scrubber(cfs, sstable, skipCorrupted, false, checkData);
 
         CompactionInfo.Holder scrubInfo = scrubber.getScrubInfo();
         metrics.beginCompaction(scrubInfo);
@@ -1071,7 +1072,7 @@ public class CompactionManager implements CompactionManagerMBean
             SSTableRewriter unRepairedSSTableWriter = new SSTableRewriter(cfs, sstableAsSet, sstable.maxDataAge, false);
 
             try (AbstractCompactionStrategy.ScannerList scanners = cfs.getCompactionStrategy().getScanners(new HashSet<>(Collections.singleton(sstable)));
-                 CompactionController controller = new CompactionController(cfs, sstableAsSet, CFMetaData.DEFAULT_GC_GRACE_SECONDS))
+                 CompactionController controller = new CompactionController(cfs, sstableAsSet, getDefaultGcBefore(cfs)))
             {
                 int expectedBloomFilterSize = Math.max(cfs.metadata.getMinIndexInterval(), (int)sstable.estimatedKeys());
                 repairedSSTableWriter.switchWriter(CompactionManager.createWriter(cfs, destination, expectedBloomFilterSize, repairedAt, sstable));
@@ -1464,6 +1465,28 @@ public class CompactionManager implements CompactionManagerMBean
 
             if (Iterables.contains(columnFamilies, info.getCFMetaData()))
                 compactionHolder.stop(); // signal compaction to stop
+        }
+    }
+
+    public void interruptCompactionForCFs(Iterable<ColumnFamilyStore> cfss, boolean interruptValidation)
+    {
+        List<CFMetaData> metadata = new ArrayList<>();
+        for (ColumnFamilyStore cfs : cfss)
+            metadata.add(cfs.metadata);
+
+        interruptCompactionFor(metadata, interruptValidation);
+    }
+
+    public void waitForCessation(Iterable<ColumnFamilyStore> cfss)
+    {
+        long start = System.nanoTime();
+        long delay = TimeUnit.MINUTES.toNanos(1);
+        while (System.nanoTime() - start < delay)
+        {
+            if (CompactionManager.instance.isCompacting(cfss))
+                Uninterruptibles.sleepUninterruptibly(1, TimeUnit.MILLISECONDS);
+            else
+                break;
         }
     }
 }

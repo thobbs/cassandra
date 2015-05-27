@@ -216,11 +216,13 @@ my_commands_ending_with_newline = (
     'help',
     '?',
     'consistency',
+    'serial',
     'describe',
     'desc',
     'show',
     'source',
     'capture',
+    'login',
     'debug',
     'tracing',
     'expand',
@@ -247,10 +249,12 @@ cqlsh_extra_syntax_rules = r'''
 
 <specialCommand> ::= <describeCommand>
                    | <consistencyCommand>
+                   | <serialConsistencyCommand>
                    | <showCommand>
                    | <sourceCommand>
                    | <captureCommand>
                    | <copyCommand>
+                   | <loginCommand>
                    | <debugCommand>
                    | <helpCommand>
                    | <tracingCommand>
@@ -285,6 +289,13 @@ cqlsh_extra_syntax_rules = r'''
                      | "LOCAL_SERIAL"
                      | "LOCAL_ONE"
                      ;
+
+<serialConsistencyCommand> ::= "SERIAL" "CONSISTENCY" ( level=<serialConsistencyLevel> )?
+                             ;
+
+<serialConsistencyLevel> ::= "SERIAL"
+                           | "LOCAL_SERIAL"
+                           ;
 
 <showCommand> ::= "SHOW" what=( "VERSION" | "HOST" | "SESSION" sessionid=<uuid> )
                 ;
@@ -324,6 +335,9 @@ cqlsh_extra_syntax_rules = r'''
 
 <pagingCommand> ::= "PAGING" ( switch=( "ON" | "OFF" ) )?
                   ;
+
+<loginCommand> ::= "LOGIN" username=<username> (password=<stringLiteral>)?
+                 ;
 
 <exitCommand> ::= "exit" | "quit"
                 ;
@@ -643,6 +657,7 @@ class Shell(cmd.Cmd):
         self.stdin = stdin
         self.query_out = sys.stdout
         self.consistency_level = cassandra.ConsistencyLevel.ONE
+        self.serial_consistency_level = cassandra.ConsistencyLevel.SERIAL;
         # the python driver returns BLOBs as string, but we expect them as bytearrays
         cassandra.cqltypes.BytesType.deserialize = staticmethod(lambda byts, protocol_version: bytearray(byts))
         cassandra.cqltypes.CassandraType.support_empty_values = True
@@ -997,7 +1012,7 @@ class Shell(cmd.Cmd):
         self.tracing_enabled = tracing_was_enabled
 
     def perform_statement(self, statement):
-        stmt = SimpleStatement(statement, consistency_level=self.consistency_level, fetch_size=self.default_page_size if self.use_paging else None)
+        stmt = SimpleStatement(statement, consistency_level=self.consistency_level, serial_consistency_level=self.serial_consistency_level, fetch_size=self.default_page_size if self.use_paging else None)
         result = self.perform_simple_statement(stmt)
         if self.tracing_enabled:
             if stmt.trace:
@@ -1921,7 +1936,9 @@ class Shell(cmd.Cmd):
 
            Valid consistency levels:
 
-           ANY, ONE, TWO, THREE, QUORUM, ALL, LOCAL_ONE, LOCAL_QUORUM and EACH_QUORUM.
+           ANY, ONE, TWO, THREE, QUORUM, ALL, LOCAL_ONE, LOCAL_QUORUM, EACH_QUORUM, SERIAL and LOCAL_SERIAL.
+
+           SERIAL and LOCAL_SERIAL may be used only for SELECTs; will be rejected with updates.
 
         CONSISTENCY
 
@@ -1934,6 +1951,69 @@ class Shell(cmd.Cmd):
 
         self.consistency_level = cassandra.ConsistencyLevel.name_to_value[level.upper()]
         print 'Consistency level set to %s.' % (level.upper(),)
+
+    def do_serial(self, parsed):
+        """
+        SERIAL CONSISTENCY [cqlsh only]
+
+           Overrides serial consistency level (default level is SERIAL).
+
+        SERIAL CONSISTENCY <level>
+
+           Sets consistency level for future conditional updates.
+
+           Valid consistency levels:
+
+           SERIAL, LOCAL_SERIAL.
+
+        SERIAL CONSISTENCY
+
+           SERIAL CONSISTENCY with no arguments shows the current consistency level.
+        """
+        level = parsed.get_binding('level')
+        if level is None:
+            print 'Current serial consistency level is %s.' % (cassandra.ConsistencyLevel.value_to_name[self.serial_consistency_level])
+            return
+
+        self.serial_consistency_level = cassandra.ConsistencyLevel.name_to_value[level.upper()]
+        print 'Serial consistency level set to %s.' % (level.upper(),)
+
+    def do_login(self, parsed):
+        """
+        LOGIN [cqlsh only]
+
+           Changes login information without requiring restart.
+
+        LOGIN <username> (<password>)
+
+           Login using the specified username. If password is specified, it will be used
+           otherwise, you will be prompted to enter.
+        """
+        username = parsed.get_binding('username')
+        password = parsed.get_binding('password')
+        if password is None:
+            password = getpass.getpass()
+        else:
+            password = password[1:-1]
+
+        auth_provider = PlainTextAuthProvider(username=username, password=password)
+
+        conn = Cluster(contact_points=(self.hostname,), port=self.port, cql_version=self.conn.cql_version,
+                       protocol_version=DEFAULT_PROTOCOL_VERSION,
+                       auth_provider=auth_provider,
+                       ssl_options=self.conn.ssl_options,
+                       load_balancing_policy=WhiteListRoundRobinPolicy([self.hostname]))
+
+        if self.current_keyspace:
+            session = conn.connect(self.current_keyspace)
+        else:
+            session = conn.connect()
+
+        # Update after we've connected in case we fail to authenticate
+        self.conn = conn
+        self.auth_provider = auth_provider
+        self.username = username
+        self.session = session
 
     def do_exit(self, parsed=None):
         """

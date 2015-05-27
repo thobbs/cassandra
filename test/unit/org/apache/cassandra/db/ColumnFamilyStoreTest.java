@@ -2164,30 +2164,31 @@ public class ColumnFamilyStoreTest extends SchemaLoader
         });
         System.err.println("Row key: " + rowKey + " Cols: " + transformed);
     }
-
+    
     @Test
     public void testRebuildSecondaryIndex() throws IOException
     {
+        CellName indexedCellName = cellname("indexed");
         Mutation rm;
 
         rm = new Mutation("PerRowSecondaryIndex", ByteBufferUtil.bytes("k1"));
-        rm.add("Indexed1", cellname("indexed"), ByteBufferUtil.bytes("foo"), 1);
+        rm.add("Indexed1", indexedCellName, ByteBufferUtil.bytes("foo"), 1);
+
         rm.apply();
         assertTrue(Arrays.equals("k1".getBytes(), PerRowSecondaryIndexTest.TestIndex.LAST_INDEXED_KEY.array()));
-
+        
         Keyspace.open("PerRowSecondaryIndex").getColumnFamilyStore("Indexed1").forceBlockingFlush();
-
+        
         PerRowSecondaryIndexTest.TestIndex.reset();
-
+        
         ColumnFamilyStore.rebuildSecondaryIndex("PerRowSecondaryIndex", "Indexed1", PerRowSecondaryIndexTest.TestIndex.class.getSimpleName());
         assertTrue(Arrays.equals("k1".getBytes(), PerRowSecondaryIndexTest.TestIndex.LAST_INDEXED_KEY.array()));
-
+        
         PerRowSecondaryIndexTest.TestIndex.reset();
-
         PerRowSecondaryIndexTest.TestIndex.ACTIVE = false;
         ColumnFamilyStore.rebuildSecondaryIndex("PerRowSecondaryIndex", "Indexed1", PerRowSecondaryIndexTest.TestIndex.class.getSimpleName());
         assertNull(PerRowSecondaryIndexTest.TestIndex.LAST_INDEXED_KEY);
-
+        
         PerRowSecondaryIndexTest.TestIndex.reset();
     }
 }

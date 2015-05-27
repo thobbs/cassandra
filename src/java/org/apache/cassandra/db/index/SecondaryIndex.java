@@ -305,17 +305,20 @@ public abstract class SecondaryIndex
 
     /**
      * Returns true if the provided cell name is indexed by this secondary index.
+     *
+     * The default implementation checks whether the name is one the columnDef name,
+     * but this should be overriden but subclass if needed.
      */
     public abstract boolean indexes(CellName name);
 
     /**
-     * Returns true if the defined column is indexed by this secondary index.
-     * @param column definition of the column to check
-     * @return whether the supplied column is indexed or not
+     * Returns true if the provided column definition is indexed by this secondary index.
+     *
+     * The default implementation checks whether it is contained in this index column definitions set.
      */
-    public boolean indexes(ColumnDefinition column)
+    public boolean indexes(ColumnDefinition cdef)
     {
-        return columnDefs.contains(column);
+        return columnDefs.contains(cdef);
     }
 
     /**
@@ -364,7 +367,7 @@ public abstract class SecondaryIndex
         return index;
     }
 
-    public abstract boolean validate(Cell cell);
+    public abstract boolean validate(ByteBuffer rowKey, Cell cell);
 
     public abstract long estimateResultRows();
 
