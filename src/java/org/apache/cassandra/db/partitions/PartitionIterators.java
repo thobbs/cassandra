@@ -20,7 +20,6 @@ package org.apache.cassandra.db.partitions;
 import java.io.DataInput;
 import java.io.IOError;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.*;
 
@@ -31,7 +30,6 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.atoms.*;
 import org.apache.cassandra.db.marshal.CompositeType;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -481,26 +479,29 @@ public abstract class PartitionIterators
             out.writeInt(cells.size());
             for (LegacyLayout.LegacyCell cell : cells)
             {
-                if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
-                {
-                    throw new UnsupportedOperationException("Counter cells are not supported yet");
-                    // TODO need to write timestampOfLastDelete, what does that correspond to?
-                }
-
                 ByteBufferUtil.writeWithShortLength(cell.name.encode(partition.metadata()), out);
-                int serializationFlags = 0;
                 if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
                 {
-                    serializationFlags = LegacyLayout.EXPIRATION_MASK;
+                    out.writeByte(LegacyLayout.EXPIRATION_MASK);  // serialization flags
                     out.writeInt(cell.ttl);
                     out.writeInt(cell.localDeletionTime);
                 }
                 else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
                 {
-                    serializationFlags = LegacyLayout.DELETION_MASK;
+                    out.writeByte(LegacyLayout.DELETION_MASK);  // serialization flags
+                }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                {
+                    out.writeByte(LegacyLayout.COUNTER_MASK);  // serialization flags
+                    // TODO this is what to write according to Aleksey, but judging by the 2.x code it should be
+                    // Long.MIN_VALUE instead; need to double check
+                    out.writeLong(Long.MAX_VALUE);  // timestampOfLastDelete
+                }
+                else
+                {
+                    out.writeByte(0);  // serialization flags
                 }
 
-                out.writeByte(serializationFlags);
                 out.writeLong(cell.timestamp);
                 ByteBufferUtil.writeWithLength(cell.value, out);
             }
@@ -636,18 +637,16 @@ public abstract class PartitionIterators
             size += sizes.sizeof(cells.size());
             for (LegacyLayout.LegacyCell cell : cells)
             {
-                if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
-                {
-                    throw new UnsupportedOperationException("Counter cells are not supported yet");
-                    // TODO need to write timestampOfLastDelete, what does that correspond to?
-                }
-
                 size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(partition.metadata()), sizes);
                 size += 1;  // serialization flags
                 if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
                 {
                     size += sizes.sizeof(cell.ttl);
                     size += sizes.sizeof(cell.localDeletionTime);
+                }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                {
+                    size += sizes.sizeof(Long.MAX_VALUE);
                 }
                 size += sizes.sizeof(cell.timestamp);
                 size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
