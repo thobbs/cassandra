@@ -20,6 +20,7 @@ package org.apache.cassandra.db.partitions;
 import java.io.DataInput;
 import java.io.IOError;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.*;
 
@@ -32,11 +33,9 @@ import org.apache.cassandra.db.atoms.*;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.*;
 
-import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.UUIDSerializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -510,7 +509,51 @@ public abstract class PartitionIterators
         public PartitionIterator deserialize(final DataInput in, final int version, final SerializationHelper.Flag flag) throws IOException
         {
             if (version < MessagingService.VERSION_30)
-                throw new UnsupportedOperationException();
+            {
+                return new AbstractPartitionIterator()
+                {
+                    private AtomIterator next;
+                    private final int partitionCount = in.readInt();
+                    private int partitionsSeen = 0;
+
+                    public boolean isForThrift()
+                    {
+                        return true;
+                    }
+
+                    public boolean hasNext()
+                    {
+                        return partitionsSeen < partitionCount;
+                    }
+
+                    public AtomIterator next()
+                    {
+                        if (!hasNext())
+                            throw new NoSuchElementException();
+
+                        try
+                        {
+                            DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
+
+                            boolean present = in.readBoolean();
+                            assert present;
+                            next = deserializePartition(in, key, version);
+                            return next;
+                        }
+                        catch (IOException e)
+                        {
+                            throw new IOError(e);
+                        }
+                    }
+
+                    @Override
+                    public void close()
+                    {
+                        if (next != null)
+                            next.close();
+                    }
+                };
+            }
 
             final boolean isForThrift = in.readBoolean();
 
@@ -571,6 +614,18 @@ public abstract class PartitionIterators
                         next.close();
                 }
             };
+        }
+
+        public AtomIterator deserializePartition(DataInput in, DecoratedKey key, int version) throws IOException
+        {
+            assert version < MessagingService.VERSION_30;
+
+            CFMetaData metadata = CFMetaData.serializer.deserialize(in, version);
+            LegacyLayout.LegacyDeletionInfo info = LegacyLayout.LegacyDeletionInfo.serializer.deserialize(metadata, in, version);
+            int size = in.readInt();
+            // TODO double-check that this is the correct flag to use
+            Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.deserializeCells(metadata, in, version, SerializationHelper.Flag.LOCAL, size);
+            return LegacyLayout.onWireCellstoAtomIterator(metadata, key, info, cells, false, FBUtilities.nowInSeconds());
         }
 
         public long serializedSize(PartitionIterator iter, int version)

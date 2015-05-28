@@ -30,6 +30,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.slf4j.Logger;
@@ -220,8 +221,23 @@ public abstract class ReadResponse
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException();
+                ByteBuffer digest = ByteBufferUtil.readWithShortLength(in);
+                boolean isDigest = in.readBoolean();
+                assert isDigest == digest.hasRemaining();
+                if (isDigest)
+                {
+                    return new DigestResponse(digest);
+                }
+
+                // ReadResponses from older versions are always single-partition (ranges are handled by RangeSliceReply)
+                DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
+
+                boolean present = in.readBoolean();
+                assert present;
+
+                AtomIterator atomIterator = PartitionIterators.serializerForIntraNode().deserializePartition(in, key, version);
+                PartitionIterator iterator = new SingletonPartitionIterator(atomIterator, true);
+                return new LocalDataResponse(iterator);
             }
 
             ByteBuffer digest = ByteBufferUtil.readWithShortLength(in);
@@ -291,13 +307,8 @@ public abstract class ReadResponse
 
         public ReadResponse deserialize(DataInput in, int version) throws IOException
         {
-            // TODO
-            throw new UnsupportedOperationException();
-            //        int rowCount = in.readInt();
-            //        List<Row> rows = new ArrayList<Row>(rowCount);
-            //        for (int i = 0; i < rowCount; i++)
-            //            rows.add(Row.serializer.deserialize(in, version));
-            //        return new RangeSliceReply(rows);
+            in.readInt();  // rowCount
+            return new LocalDataResponse(PartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.LOCAL));
         }
 
         public long serializedSize(ReadResponse response, int version)

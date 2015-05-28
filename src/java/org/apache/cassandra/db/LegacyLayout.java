@@ -56,7 +56,7 @@ public abstract class LegacyLayout
 
     public final static int DELETION_MASK        = 0x01;
     public final static int EXPIRATION_MASK      = 0x02;
-    private final static int COUNTER_MASK         = 0x04;
+    public final static int COUNTER_MASK         = 0x04;
     private final static int COUNTER_UPDATE_MASK  = 0x08;
     private final static int RANGE_TOMBSTONE_MASK = 0x10;
 
@@ -443,7 +443,7 @@ public abstract class LegacyLayout
     {
         return new AbstractIterator<LegacyCell>()
         {
-            private Iterator<LegacyCell> currentRow = staticRow.isEmpty()
+            private Iterator<LegacyCell> currentRow = staticRow == null || staticRow.isEmpty()
                                                     ? Collections.<LegacyLayout.LegacyCell>emptyIterator()
                                                     : fromRow(metadata, staticRow);
 
