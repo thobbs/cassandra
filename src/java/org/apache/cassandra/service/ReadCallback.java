@@ -52,7 +52,7 @@ public class ReadCallback<TMessage, TResolved> implements IAsyncCallback<TMessag
     final long start;
     final int blockfor;
     final List<InetAddress> endpoints;
-    private final IReadCommand command;
+    public final IReadCommand command;
     private final ConsistencyLevel consistencyLevel;
     private static final AtomicIntegerFieldUpdater<ReadCallback> recievedUpdater
             = AtomicIntegerFieldUpdater.newUpdater(ReadCallback.class, "received");

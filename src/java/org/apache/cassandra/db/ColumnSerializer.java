@@ -29,9 +29,12 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ColumnSerializer implements ISerializer<Cell>
 {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnSerializer.class);
     public final static int DELETION_MASK        = 0x01;
     public final static int EXPIRATION_MASK      = 0x02;
     public final static int COUNTER_MASK         = 0x04;
@@ -103,9 +106,12 @@ public class ColumnSerializer implements ISerializer<Cell>
 
     public Cell deserialize(DataInput in, ColumnSerializer.Flag flag, int expireBefore) throws IOException
     {
+        logger.warn("###  deserializing cell name");
         CellName name = type.cellSerializer().deserialize(in);
+        logger.warn("###  deserialized cell name: {}", type.getString(name));
 
         int b = in.readUnsignedByte();
+        logger.warn("###  cell flags: {}", b);
         return deserializeColumnBody(in, name, b, flag, expireBefore);
     }
 
@@ -120,10 +126,13 @@ public class ColumnSerializer implements ISerializer<Cell>
         }
         else if ((mask & EXPIRATION_MASK) != 0)
         {
+            logger.warn("###  deserializing expired cell");
             int ttl = in.readInt();
             int expiration = in.readInt();
             long ts = in.readLong();
+            logger.warn("###  deserialized cell attributes: ttl={}, expiration={}, ts={}", ttl, expiration, ts);
             ByteBuffer value = ByteBufferUtil.readWithLength(in);
+            logger.warn("###  deserialized cell value: {}", ByteBufferUtil.bytesToHex(value));
             return BufferExpiringCell.create(name, value, ts, ttl, expiration, expireBefore, flag);
         }
         else

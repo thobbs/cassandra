@@ -29,9 +29,12 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily>, ISSTableSerializer<ColumnFamily>
 {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnFamilySerializer.class);
     /*
      * Serialized ColumnFamily format:
      *
@@ -92,9 +95,14 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
     public ColumnFamily deserialize(DataInput in, ColumnFamily.Factory factory, ColumnSerializer.Flag flag, int version) throws IOException
     {
         if (!in.readBoolean())
+        {
+            logger.warn("### ColumnFamily is empty");
             return null;
+        }
+        logger.warn("### ColumnFamily is not empty");
 
         ColumnFamily cf = factory.create(Schema.instance.getCFMetaData(deserializeCfId(in, version)));
+        logger.warn("### deserialized cfid");
 
         if (cf.metadata().isSuper() && version < MessagingService.VERSION_20)
         {
@@ -103,12 +111,20 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
         else
         {
             cf.delete(cf.getComparator().deletionInfoSerializer().deserialize(in, version));
+            logger.warn("### deserialized deletion info");
 
             ColumnSerializer columnSerializer = cf.getComparator().columnSerializer();
             int size = in.readInt();
+            logger.warn("### number of columns: {}", size);
             for (int i = 0; i < size; ++i)
-                cf.addColumn(columnSerializer.deserialize(in, flag));
+            {
+                logger.warn("### deserializing cell {}", i);
+                Cell cell = columnSerializer.deserialize(in, flag);
+                logger.warn("###   deserialized cell: {}", cf.getComparator().getString(cell.name()));
+                cf.addColumn(cell);
+            }
         }
+        logger.warn("### returning deserialized cf");
         return cf;
     }
 

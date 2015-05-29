@@ -1748,6 +1748,8 @@ public class StorageProxy implements StorageProxyMBean
                     ReadCallback<RangeSliceReply, Iterable<Row>> handler = cmdPairHandler.right;
                     RangeSliceResponseResolver resolver = (RangeSliceResponseResolver)handler.resolver;
 
+                    logger.warn("### processing handler for command: {}", handler.command);
+
                     try
                     {
                         for (Row row : handler.get())
@@ -1829,6 +1831,7 @@ public class StorageProxy implements StorageProxyMBean
                         actualRowsPerRange = fetchedRows / i;
                         concurrencyFactor = Math.max(1, Math.min(ranges.size() - i, Math.round(remainingRows / actualRowsPerRange)));
                     }
+                    concurrencyFactor = 1;
                     logger.debug("Didn't get enough response rows; actual rows per range: {}; remaining rows: {}, new concurrent requests: {}",
                                  actualRowsPerRange, (int) remainingRows, concurrencyFactor);
                 }

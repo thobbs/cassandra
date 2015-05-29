@@ -25,9 +25,12 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Row
 {
+    private static final Logger logger = LoggerFactory.getLogger(Row.class);
     public static final RowSerializer serializer = new RowSerializer();
 
     public final DecoratedKey key;
@@ -70,8 +73,11 @@ public class Row
 
         public Row deserialize(DataInput in, int version, ColumnSerializer.Flag flag) throws IOException
         {
-            return new Row(StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in)),
-                           ColumnFamily.serializer.deserialize(in, flag, version));
+            DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
+            logger.warn("### deserialized key: {}", key);
+            ColumnFamily cf = ColumnFamily.serializer.deserialize(in, flag, version);
+            logger.warn("### deserialized cf: {}", cf);
+            return new Row(key, cf);
         }
 
         public Row deserialize(DataInput in, int version) throws IOException

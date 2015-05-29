@@ -30,9 +30,12 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FastByteArrayInputStream;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class RangeSliceReply
 {
+    private static final Logger logger = LoggerFactory.getLogger(RangeSliceReply.class);
     public static final RangeSliceReplySerializer serializer = new RangeSliceReplySerializer();
 
     public final List<Row> rows;
@@ -72,9 +75,11 @@ public class RangeSliceReply
         public RangeSliceReply deserialize(DataInput in, int version) throws IOException
         {
             int rowCount = in.readInt();
+            logger.warn("### number of rows in range slice reply: {}", rowCount);
             List<Row> rows = new ArrayList<Row>(rowCount);
             for (int i = 0; i < rowCount; i++)
                 rows.add(Row.serializer.deserialize(in, version));
+            logger.warn("### finished deserializing range slice reply: {}", rows.isEmpty() ? "(empty)" : rows.get(0));
             return new RangeSliceReply(rows);
         }
 

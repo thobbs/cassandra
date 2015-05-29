@@ -294,6 +294,7 @@ public class Mutation implements IMutation
 
             ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
             int size = in.readInt();
+            logger.warn("#### deserializing {} mutations for key {}", size, ByteBufferUtil.bytesToHex(key));
             assert size > 0;
 
             Map<UUID, ColumnFamily> modifications;
