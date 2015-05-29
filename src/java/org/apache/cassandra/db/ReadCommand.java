@@ -385,10 +385,16 @@ public abstract class ReadCommand implements ReadQuery
     /**
      * Creates a message for this command.
      */
-    public MessageOut<ReadCommand> createMessage()
+    public MessageOut<ReadCommand> createMessage(int version)
     {
-        // TODO: we should use different verbs for old message (RANGE_SLICE, PAGED_RANGE)
-        return new MessageOut<>(MessagingService.Verb.READ, this, serializer);
+        if (version >= MessagingService.VERSION_30)
+            return new MessageOut<>(MessagingService.Verb.READ, this, serializer);
+
+        if (this.kind == Kind.SINGLE_PARTITION)
+            return new MessageOut<>(MessagingService.Verb.READ, this, legacyReadCommandSerializer);
+        else
+            // TODO separate serializer needed for paged commands
+            return new MessageOut<>(MessagingService.Verb.RANGE_SLICE, this, legacyRangeSliceCommandSerializer);
     }
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
@@ -555,8 +561,12 @@ public abstract class ReadCommand implements ReadQuery
                 NamesPartitionFilter filter = (NamesPartitionFilter) rangeCommand.dataRange().partitionFilter;
                 PartitionColumns columns = filter.queriedColumns().columns();
                 out.writeInt(columns.size());
+
                 for (ColumnDefinition column : columns)
-                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null), out);
+                {
+                    Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
+                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null), out);
+                }
 
                 // see serializeNamesCommand() for an explanation of the countCql3Rows  ield
                 if (metadata.isCompactTable() && !(command.limits().kind() == DataLimits.Kind.CQL_LIMIT && command.limits().perPartitionCount() == 1))
@@ -722,8 +732,9 @@ public abstract class ReadCommand implements ReadQuery
                 size = sizes.sizeof(columns.size());
                 for (ColumnDefinition column : columns)
                 {
-                    ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null);
-                    size += sizes.sizeof((short) columnName.remaining()) + columnName.remaining();
+                    Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
+                    ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null);
+                    size += ByteBufferUtil.serializedSizeWithShortLength(columnName, sizes);
                 }
 
                 size += sizes.sizeof(true);  // countCql3Rows
@@ -952,7 +963,11 @@ public abstract class ReadCommand implements ReadQuery
             PartitionColumns columns = command.queriedColumns().columns();
             out.writeInt(columns.size());
             for (ColumnDefinition column : columns)
-                ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null), out);
+            {
+                // TODO this is not correct for the clustering value when the clustering columns exist and are fully specified
+                Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
+                ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null), out);
+            }
 
             // countCql3Rows should be true if it's not a DISTINCT query and it's fetching a range of cells, meaning
             // one of the following is true:
@@ -975,7 +990,8 @@ public abstract class ReadCommand implements ReadQuery
             long size = sizes.sizeof(columns.size());
             for (ColumnDefinition column : columns)
             {
-                ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, Clustering.EMPTY, column.name.bytes, null);
+                Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
+                ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null);
                 size += sizes.sizeof((short) columnName.remaining()) + columnName.remaining();
             }
 

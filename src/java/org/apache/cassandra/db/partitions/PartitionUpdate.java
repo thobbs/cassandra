@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -590,14 +591,14 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                 LegacyLayout.LegacyDeletionInfo.serializer.serialize(
                         update.metadata, LegacyLayout.LegacyDeletionInfo.from(update.deletionInfo), out, version);
 
-                int cellsWritten = 0;
-                // columns + row marker per row
-                int expectedCellCount = update.size() * (update.columns().size() + 1); // TODO this may not always produce the right number of cells
-                out.writeInt(expectedCellCount);
+                // TODO it's inefficient to pull everything into a list first, but it seems like the only sane way
+                // of getting an accurate cell count
                 Iterator<LegacyLayout.LegacyCell> cellIterator = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
-                while (cellIterator.hasNext())
+                ArrayList<LegacyLayout.LegacyCell> cells = Lists.newArrayList(cellIterator);
+
+                out.writeInt(cells.size());
+                for (LegacyLayout.LegacyCell cell : cells)
                 {
-                    LegacyLayout.LegacyCell cell = cellIterator.next();
                     ByteBufferUtil.writeWithShortLength(cell.name.encode(update.metadata), out);
 
                     if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
@@ -622,9 +623,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
 
                     out.writeLong(cell.timestamp);
                     ByteBufferUtil.writeWithLength(cell.value, out);
-                    cellsWritten++;
                 }
-                assert cellsWritten == expectedCellCount : String.format("Expected to write %d cells, actually wrote %d", expectedCellCount, cellsWritten);
                 return;
             }
 
