@@ -612,7 +612,7 @@ public abstract class ReadCommand implements ReadQuery
 
             out.writeUTF(metadata.ksName);
             out.writeUTF(metadata.cfName);
-            out.writeLong(rangeCommand.nowInSec() * 1000);  // convert from seconds to millis
+            out.writeLong(rangeCommand.nowInSec() * 1000L);  // convert from seconds to millis
 
             // begin DiskAtomFilterSerializer.serialize()
             if (rangeCommand.isNamesQuery())
@@ -955,7 +955,7 @@ public abstract class ReadCommand implements ReadQuery
             out.writeUTF(metadata.ksName);
             ByteBufferUtil.writeWithShortLength(singleReadCommand.partitionKey().getKey(), out);
             out.writeUTF(metadata.cfName);
-            out.writeLong(singleReadCommand.nowInSec() * 1000);  // convert from seconds to millis
+            out.writeLong(singleReadCommand.nowInSec() * 1000L);  // convert from seconds to millis
 
             if (singleReadCommand.partitionFilter().getKind() == PartitionFilter.Kind.SLICE)
                 serializeSliceCommand((SinglePartitionSliceCommand) singleReadCommand, out, version);
