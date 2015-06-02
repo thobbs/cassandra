@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -540,7 +541,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         // To deal with that problem, we record which complex columns have been updated (for the current
         // row) and if we detect a violation of our assumption, we switch the row we're writing
         // into (which is ok because everything will be sorted and merged in maybeSort()).
-        private final Set<ColumnDefinition> updatedComplex = new HashSet();
+        private final Set<ColumnDefinition> updatedComplex = new HashSet<>();
         private ColumnDefinition lastUpdatedComplex;
         private CellPath lastUpdatedComplexPath;
 
@@ -601,28 +602,51 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException();
+                if (update.isEmpty())
+                {
+                    out.writeBoolean(false);
+                    return;
+                }
 
-                // if (cf == null)
-                // {
-                //     out.writeBoolean(false);
-                //     return;
-                // }
+                out.writeBoolean(true);
+                CFMetaData.serializer.serialize(update.metadata, out, version);
+                LegacyLayout.LegacyDeletionInfo.serializer.serialize(
+                        update.metadata, LegacyLayout.LegacyDeletionInfo.from(update.deletionInfo), out, version);
 
-                // out.writeBoolean(true);
-                // serializeCfId(cf.id(), out, version);
-                // cf.getComparator().deletionInfoSerializer().serialize(cf.deletionInfo(), out, version);
-                // ColumnSerializer columnSerializer = cf.getComparator().columnSerializer();
-                // int count = cf.getColumnCount();
-                // out.writeInt(count);
-                // int written = 0;
-                // for (Cell cell : cf)
-                // {
-                //     columnSerializer.serialize(cell, out);
-                //     written++;
-                // }
-                // assert count == written: "Table had " + count + " columns, but " + written + " written";
+                // TODO it's inefficient to pull everything into a list first, but it seems like the only sane way
+                // of getting an accurate cell count
+                Iterator<LegacyLayout.LegacyCell> cellIterator = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
+                ArrayList<LegacyLayout.LegacyCell> cells = Lists.newArrayList(cellIterator);
+
+                out.writeInt(cells.size());
+                for (LegacyLayout.LegacyCell cell : cells)
+                {
+                    ByteBufferUtil.writeWithShortLength(cell.name.encode(update.metadata), out);
+
+                    if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                    {
+                        out.writeByte(LegacyLayout.COUNTER_MASK);
+                        out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                    {
+                        out.writeByte(LegacyLayout.EXPIRATION_MASK);
+                        out.writeInt(cell.ttl);
+                        out.writeLong(cell.localDeletionTime);
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                    {
+                        out.writeByte(LegacyLayout.DELETION_MASK);
+                    }
+                    else
+                    {
+                        out.writeByte(0);  // serialization flags
+                    }
+
+                    out.writeLong(cell.timestamp);
+                    ByteBufferUtil.writeWithLength(cell.value, out);
+                }
+                return;
             }
 
             try (UnfilteredRowIterator iter = update.sliceableUnfilteredIterator())
@@ -682,18 +706,36 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException("Version is " + version);
-                //if (cf == null)
-                //{
-                //    return typeSizes.sizeof(false);
-                //}
-                //else
-                //{
-                //    return typeSizes.sizeof(true)  /* nullness bool */
-                //        + cfIdSerializedSize(cf.id(), typeSizes, version)  /* id */
-                //        + contentSerializedSize(cf, typeSizes, version);
-                //}
+                if (update.isEmpty())
+                    return sizes.sizeof(false);
+
+                long size = sizes.sizeof(true);
+                size += CFMetaData.serializer.serializedSize(update.metadata, version, sizes);
+                size += LegacyLayout.LegacyDeletionInfo.serializer.serializedSize(
+                        update.metadata, LegacyLayout.LegacyDeletionInfo.from(update.deletionInfo), sizes, version);
+
+                size += sizes.sizeof(update.size());
+                Iterator<LegacyLayout.LegacyCell> cellIterator = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
+                while (cellIterator.hasNext())
+                {
+                    LegacyLayout.LegacyCell cell = cellIterator.next();
+                    size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(update.metadata), sizes);
+
+                    size += 1; // serialization flags
+                    if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                    {
+                        size += sizes.sizeof(Long.MIN_VALUE);  // timestampOfLastDelete
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                    {
+                        size += sizes.sizeof(cell.ttl);
+                        size += sizes.sizeof(cell.localDeletionTime);
+                    }
+
+                    size += sizes.sizeof(cell.timestamp);
+                    size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+                }
+                return size;
             }
 
             try (UnfilteredRowIterator iter = update.sliceableUnfilteredIterator())

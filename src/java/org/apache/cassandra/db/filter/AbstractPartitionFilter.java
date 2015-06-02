@@ -28,19 +28,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 
 public abstract class AbstractPartitionFilter implements PartitionFilter
 {
-    protected enum Kind
-    {
-        SLICE (SlicePartitionFilter.deserializer),
-        NAMES (NamesPartitionFilter.deserializer);
-
-        private final InternalDeserializer deserializer;
-
-        private Kind(InternalDeserializer deserializer)
-        {
-            this.deserializer = deserializer;
-        }
-    }
-
     static final Serializer serializer = new FilterSerializer();
 
     private final Kind kind;
@@ -62,6 +49,11 @@ public abstract class AbstractPartitionFilter implements PartitionFilter
     public boolean isReversed()
     {
         return reversed;
+    }
+
+    public Kind getKind()
+    {
+        return kind;
     }
 
     protected abstract void serializeInternal(DataOutputPlus out, int version) throws IOException;
@@ -111,10 +103,5 @@ public abstract class AbstractPartitionFilter implements PartitionFilter
                  + sizes.sizeof(filter.isReversed())
                  + filter.serializedSizeInternal(version, sizes);
         }
-    }
-
-    protected static abstract class InternalDeserializer
-    {
-        public abstract PartitionFilter deserialize(DataInput in, int version, CFMetaData metadata, ColumnsSelection columns, boolean reversed) throws IOException;
     }
 }

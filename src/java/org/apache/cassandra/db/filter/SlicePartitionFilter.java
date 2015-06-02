@@ -166,7 +166,7 @@ public class SlicePartitionFilter extends AbstractPartitionFilter
         return Slices.serializer.serializedSize(slices, version, sizes);
     }
 
-    private static class SliceDeserializer extends InternalDeserializer
+    private static class SliceDeserializer implements InternalDeserializer
     {
         public PartitionFilter deserialize(DataInput in, int version, CFMetaData metadata, ColumnsSelection columns, boolean reversed) throws IOException
         {

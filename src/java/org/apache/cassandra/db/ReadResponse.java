@@ -27,11 +27,16 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class ReadResponse
 {
+    private static final Logger logger = LoggerFactory.getLogger(ReadResponse.class);
+
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
     public static final IVersionedSerializer<ReadResponse> legacyRangeSliceReplySerializer = new LegacyRangeSliceReplySerializer();
 
@@ -186,8 +191,14 @@ public abstract class ReadResponse
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException();
+                boolean isDigest = response.isDigestQuery();
+                out.writeInt(isDigest ? response.digest().remaining() : 0);
+                ByteBuffer buffer = isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER;
+                out.write(buffer);
+                out.writeBoolean(isDigest);
+                if (!isDigest)
+                    UnfilteredPartitionIterators.serializerForIntraNode().serialize(response.makeIterator(), out, version);
+                return;
             }
 
             assert !(response instanceof LocalDataResponse);
@@ -207,8 +218,23 @@ public abstract class ReadResponse
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException();
+                ByteBuffer digest = ByteBufferUtil.readWithShortLength(in);
+                boolean isDigest = in.readBoolean();
+                assert isDigest == digest.hasRemaining();
+                if (isDigest)
+                {
+                    return new DigestResponse(digest);
+                }
+
+                // ReadResponses from older versions are always single-partition (ranges are handled by RangeSliceReply)
+                DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
+
+                boolean present = in.readBoolean();
+                assert present;
+
+                UnfilteredRowIterator atomIterator = UnfilteredPartitionIterators.serializerForIntraNode().deserializePartition(in, key, version);
+                UnfilteredPartitionIterator iterator = new UnfilteredPartitionIterators.SingletonPartitionIterator(atomIterator, true);
+                return new LocalDataResponse(iterator);
             }
 
             ByteBuffer digest = ByteBufferUtil.readWithShortLength(in);
@@ -222,14 +248,19 @@ public abstract class ReadResponse
 
         public long serializedSize(ReadResponse response, int version)
         {
-            if (version < MessagingService.VERSION_30)
-            {
-                // TODO
-                throw new UnsupportedOperationException();
-            }
-
             TypeSizes sizes = TypeSizes.NATIVE;
             boolean isDigest = response.isDigestQuery();
+
+            if (version < MessagingService.VERSION_30)
+            {
+                long size = ByteBufferUtil.serializedSizeWithLength(isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER, sizes);
+                size += sizes.sizeof(isDigest);
+                // TODO is the partition iterator reusable?
+                if (!isDigest)
+                    size += UnfilteredPartitionIterators.serializerForIntraNode().serializedSize(response.makeIterator(), version);
+                return size;
+            }
+
             long size = ByteBufferUtil.serializedSizeWithShortLength(isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER, sizes);
 
             if (!isDigest)
@@ -248,32 +279,43 @@ public abstract class ReadResponse
     {
         public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
         {
-            // TODO
-            throw new UnsupportedOperationException();
-            //        out.writeInt(rsr.rows.size());
-            //        for (Row row : rsr.rows)
-            //            Row.serializer.serialize(row, out, version);
+            // TODO this is currently really inefficient because we have to iterate over all of the results twice
+            int numPartitions = 0;
+            try (UnfilteredPartitionIterator iterator = response.makeIterator())
+            {
+                while (iterator.hasNext())
+                {
+                    try (UnfilteredRowIterator atomIterator = iterator.next())
+                    {
+                        numPartitions++;
+
+                        // we have to fully exhaust the subiterator
+                        while(atomIterator.hasNext())
+                            atomIterator.next();
+                    }
+                }
+            }
+            out.writeInt(numPartitions);
+            try (UnfilteredPartitionIterator iterator = response.makeIterator())
+            {
+                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iterator, out, version);
+            }
         }
 
         public ReadResponse deserialize(DataInput in, int version) throws IOException
         {
-            // TODO
-            throw new UnsupportedOperationException();
-            //        int rowCount = in.readInt();
-            //        List<Row> rows = new ArrayList<Row>(rowCount);
-            //        for (int i = 0; i < rowCount; i++)
-            //            rows.add(Row.serializer.deserialize(in, version));
-            //        return new RangeSliceReply(rows);
+            in.readInt();  // rowCount
+            return new LocalDataResponse(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.LOCAL));
         }
 
         public long serializedSize(ReadResponse response, int version)
         {
-            // TODO
-            throw new UnsupportedOperationException();
-            //        int size = TypeSizes.NATIVE.sizeof(rsr.rows.size());
-            //        for (Row row : rsr.rows)
-            //            size += Row.serializer.serializedSize(row, version);
-            //        return size;
+            int size = TypeSizes.NATIVE.sizeof(0);  // number of partitions
+            try (UnfilteredPartitionIterator iterator = response.makeIterator())
+            {
+                size += UnfilteredPartitionIterators.serializerForIntraNode().serializedSize(iterator, version);
+            }
+            return size;
         }
     }
 }

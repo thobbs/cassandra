@@ -276,7 +276,7 @@ public class NamesPartitionFilter extends AbstractPartitionFilter
         return size;
     }
 
-    private static class NamesDeserializer extends InternalDeserializer
+    private static class NamesDeserializer implements InternalDeserializer
     {
         public PartitionFilter deserialize(DataInput in, int version, CFMetaData metadata, ColumnsSelection columns, boolean reversed) throws IOException
         {

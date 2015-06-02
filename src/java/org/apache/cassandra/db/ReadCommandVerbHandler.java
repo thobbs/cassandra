@@ -18,6 +18,7 @@
 package org.apache.cassandra.db;
 
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessageOut;
@@ -27,6 +28,11 @@ import org.apache.cassandra.tracing.Tracing;
 
 public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 {
+    protected IVersionedSerializer<ReadResponse> serializer()
+    {
+        return ReadResponse.serializer;
+    }
+
     public void doVerb(MessageIn<ReadCommand> message, int id)
     {
         if (StorageService.instance.isBootstrapMode())
@@ -38,7 +44,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         CFMetaData cfm = command.metadata();
         ColumnFamilyStore cfStore = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
         ReadResponse response = command.makeResponse(command.executeLocally(cfStore), false);
-        MessageOut<ReadResponse> reply = new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, response, ReadResponse.serializer);
+        MessageOut<ReadResponse> reply = new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, response, serializer());
 
         Tracing.trace("Enqueuing response to {}", message.from);
         MessagingService.instance().sendReply(reply, id, message.from);

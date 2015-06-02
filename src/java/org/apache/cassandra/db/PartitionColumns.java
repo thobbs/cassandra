@@ -44,13 +44,13 @@ public class PartitionColumns implements Iterable<ColumnDefinition>
     public static PartitionColumns of(ColumnDefinition column)
     {
         return new PartitionColumns(column.isStatic() ? Columns.of(column) : Columns.NONE,
-                                    column.isStatic() ? Columns.NONE : Columns.of(column));
+                column.isStatic() ? Columns.NONE : Columns.of(column));
     }
 
     public PartitionColumns without(ColumnDefinition column)
     {
         return new PartitionColumns(column.isStatic() ? statics.without(column) : statics,
-                                    column.isStatic() ? regulars : regulars.without(column));
+                column.isStatic() ? regulars : regulars.without(column));
     }
 
     public PartitionColumns withoutStatics()
@@ -81,6 +81,11 @@ public class PartitionColumns implements Iterable<ColumnDefinition>
     public Iterator<ColumnDefinition> selectOrderIterator()
     {
         return Iterators.concat(statics.selectOrderIterator(), regulars.selectOrderIterator());
+    }
+
+    public int size()
+    {
+        return regulars.columnCount() + statics.columnCount();
     }
 
     @Override

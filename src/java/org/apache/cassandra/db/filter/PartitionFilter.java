@@ -39,6 +39,24 @@ public interface PartitionFilter
 {
     public static Serializer serializer = AbstractPartitionFilter.serializer;
 
+    public enum Kind
+    {
+        SLICE (SlicePartitionFilter.deserializer),
+        NAMES (NamesPartitionFilter.deserializer);
+
+        protected final InternalDeserializer deserializer;
+
+        private Kind(InternalDeserializer deserializer)
+        {
+            this.deserializer = deserializer;
+        }
+    }
+
+    static interface InternalDeserializer
+    {
+        public PartitionFilter deserialize(DataInput in, int version, CFMetaData metadata, ColumnsSelection columns, boolean reversed) throws IOException;
+    }
+
     /**
      * The non-PK columns that are selected by the filter.
      *
@@ -141,6 +159,8 @@ public interface PartitionFilter
      * @return whether {@code sstable} should be included to answer this filter.
      */
     public boolean shouldInclude(SSTableReader sstable);
+
+    public Kind getKind();
 
     public String toString(CFMetaData metadata);
     public String toCQLString(CFMetaData metadata);

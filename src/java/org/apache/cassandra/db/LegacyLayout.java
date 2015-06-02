@@ -49,9 +49,9 @@ public abstract class LegacyLayout
 
     public final static int MAX_CELL_NAME_LENGTH = FBUtilities.MAX_UNSIGNED_SHORT;
 
-    private final static int DELETION_MASK        = 0x01;
-    private final static int EXPIRATION_MASK      = 0x02;
-    private final static int COUNTER_MASK         = 0x04;
+    public final static int DELETION_MASK        = 0x01;
+    public final static int EXPIRATION_MASK      = 0x02;
+    public final static int COUNTER_MASK         = 0x04;
     private final static int COUNTER_UPDATE_MASK  = 0x08;
     private final static int RANGE_TOMBSTONE_MASK = 0x10;
 
@@ -179,7 +179,7 @@ public abstract class LegacyLayout
         return new LegacyBound(sb, metadata.isCompound() && CompositeType.isStaticName(bound), collectionName);
     }
 
-    public static ByteBuffer encodeCellName(CFMetaData metadata, Clustering clustering, ByteBuffer columnName, ByteBuffer collectionElement)
+    public static ByteBuffer encodeCellName(CFMetaData metadata, ClusteringPrefix clustering, ByteBuffer columnName, ByteBuffer collectionElement)
     {
         boolean isStatic = clustering == Clustering.STATIC_CLUSTERING;
 
@@ -205,7 +205,7 @@ public abstract class LegacyLayout
             }
 
             ByteBuffer v = clustering.get(i);
-            // we can have null (only for dense compound tables for backward compatibility reasons) but that
+            // we can have null (only for dense compound tables for backward compatibility: reasons) but that
             // means we're done and should stop there as far as building the composite is concerned.
             if (v == null)
                 return CompositeType.build(Arrays.copyOfRange(values, 0, i));
@@ -441,7 +441,7 @@ public abstract class LegacyLayout
     {
         return new AbstractIterator<LegacyCell>()
         {
-            private Iterator<LegacyCell> currentRow = staticRow.isEmpty()
+            private Iterator<LegacyCell> currentRow = staticRow == null || staticRow.isEmpty()
                                                     ? Collections.<LegacyLayout.LegacyCell>emptyIterator()
                                                     : fromRow(metadata, staticRow);
 
@@ -481,6 +481,7 @@ public abstract class LegacyLayout
                     return endOfData();
 
                 Cell cell = cells.next();
+                // TODO may need to take alias of the Clustering here
                 return makeLegacyCell(row.clustering(), cell);
             }
         };
@@ -1215,9 +1216,13 @@ public abstract class LegacyLayout
         {
             public void serialize(CFMetaData metadata, LegacyDeletionInfo info, DataOutputPlus out, int version) throws IOException
             {
-                throw new UnsupportedOperationException();
-                //DeletionTime.serializer.serialize(info.topLevel, out);
-                //rtlSerializer.serialize(info.ranges, out, version);
+                DeletionTime.serializer.serialize(info.deletionInfo.getPartitionDeletion(), out);
+
+                out.writeInt(info.inRowTombstones.size());
+                if (info.inRowTombstones.isEmpty())
+                    return;
+                else
+                    throw new UnsupportedOperationException("Range tombstones aren't supported yet");
             }
 
             public LegacyDeletionInfo deserialize(CFMetaData metadata, DataInput in, int version) throws IOException
@@ -1248,9 +1253,15 @@ public abstract class LegacyLayout
 
             public long serializedSize(CFMetaData metadata, LegacyDeletionInfo info, TypeSizes typeSizes, int version)
             {
-                throw new UnsupportedOperationException();
-                //long size = DeletionTime.serializer.serializedSize(info.topLevel, typeSizes);
-                //return size + rtlSerializer.serializedSize(info.ranges, typeSizes, version);
+                TypeSizes sizes = TypeSizes.NATIVE;
+
+                long size = DeletionTime.serializer.serializedSize(info.deletionInfo.getPartitionDeletion(), sizes);
+                size += sizes.sizeof(info.inRowTombstones.size());
+
+                if (!info.inRowTombstones.isEmpty())
+                    throw new UnsupportedOperationException("Range tombstones aren't supported yet");
+
+                return size;
             }
         }
     }

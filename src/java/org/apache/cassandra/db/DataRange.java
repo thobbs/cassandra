@@ -153,6 +153,16 @@ public class DataRange
     }
 
     /**
+     * Whether the data range is for a paged request or not.
+     *
+     * @return true if for paging, false otherwise
+     */
+    public boolean isPaging()
+    {
+        return false;
+    }
+
+    /**
      * The columns queried by the underlying partition filter.
      *
      * @return the columns queried by the underlying partition filter.
@@ -360,6 +370,12 @@ public class DataRange
             return range.left.equals(keyRange().left)
                  ? new Paging(range, partitionFilter, comparator, lastReturned, inclusive)
                  : new DataRange(range, partitionFilter);
+        }
+
+        @Override
+        public boolean isPaging()
+        {
+            return true;
         }
 
         @Override
