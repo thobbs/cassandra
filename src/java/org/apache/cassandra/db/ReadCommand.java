@@ -693,8 +693,8 @@ public abstract class ReadCommand implements ReadQuery
                 PartitionFilter filter;
                 int compositesToGroup = 0;
                 int perPartitionLimit = -1;
-                boolean isNamesQuery = in.readBoolean();  // 0 for slices, 1 for names
-                if (isNamesQuery)
+                byte readType = in.readByte();  // 0 for slices, 1 for names
+                if (readType == 1)
                 {
                     // TODO unify with single-partition names query deser
                     int numCellNames = in.readInt();
@@ -786,7 +786,7 @@ public abstract class ReadCommand implements ReadQuery
             size += sizes.sizeof(metadata.cfName);
             size += sizes.sizeof((long) rangeCommand.nowInSec());
 
-            size += 1;  // 0 for slices, 1 for names
+            size += 1;  // single byte flag: 0 for slices, 1 for names
             if (rangeCommand.isNamesQuery())
             {
                 PartitionColumns columns = command.queriedColumns().columns();
@@ -949,7 +949,7 @@ public abstract class ReadCommand implements ReadQuery
 
             CFMetaData metadata = singleReadCommand.metadata();
 
-            out.writeByte(LegacyType.fromPartitionFilterKind(singleReadCommand.partitionFilter().getKind()).ordinal());
+            out.writeByte(LegacyType.fromPartitionFilterKind(singleReadCommand.partitionFilter().getKind()).serializedValue);
 
             out.writeBoolean(singleReadCommand.isDigestQuery());
             out.writeUTF(metadata.ksName);
