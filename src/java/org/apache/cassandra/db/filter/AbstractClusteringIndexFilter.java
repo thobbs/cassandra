@@ -28,6 +28,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 
 public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFilter
 {
+    /*
     protected enum Kind
     {
         SLICE (ClusteringIndexSliceFilter.deserializer),
@@ -40,10 +41,9 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
             this.deserializer = deserializer;
         }
     }
+    */
 
     static final Serializer serializer = new FilterSerializer();
-
-    abstract Kind kind();
 
     protected final boolean reversed;
 
@@ -101,10 +101,5 @@ public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFi
                  + sizes.sizeof(filter.isReversed())
                  + filter.serializedSizeInternal(version, sizes);
         }
-    }
-
-    protected static abstract class InternalDeserializer
-    {
-        public abstract ClusteringIndexFilter deserialize(DataInput in, int version, CFMetaData metadata, boolean reversed) throws IOException;
     }
 }

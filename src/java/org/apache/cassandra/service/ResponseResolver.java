@@ -51,6 +51,9 @@ public abstract class ResponseResolver
 
     public void preprocess(MessageIn<ReadResponse> message)
     {
+        if (command.rowsInPartitionAreReversed())
+            message.payload.maybeReverse();
+        message.payload.applySliceRestriction(command);
         responses.add(message);
     }
 

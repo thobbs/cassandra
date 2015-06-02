@@ -23,14 +23,19 @@ import java.io.IOException;
 import java.security.MessageDigest;
 import java.util.*;
 
+import com.google.common.collect.AbstractIterator;
+import com.google.common.collect.Lists;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.utils.MergeIterator;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.*;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -411,6 +416,38 @@ public abstract class UnfilteredPartitionIterators
         };
     }
 
+    public static class SingletonPartitionIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    {
+        private final UnfilteredRowIterator iterator;
+        private boolean returned;
+        private boolean isForThrift;
+
+        public SingletonPartitionIterator(UnfilteredRowIterator iterator, boolean isForThrift)
+        {
+            this.iterator = iterator;
+            this.isForThrift = isForThrift;
+        }
+
+        protected UnfilteredRowIterator computeNext()
+        {
+            if (returned)
+                return endOfData();
+
+            returned = true;
+            return iterator;
+        }
+
+        public void close()
+        {
+            iterator.close();
+        }
+
+        public boolean isForThrift()
+        {
+            return isForThrift;
+        }
+    }
+
     /**
      * Serialize each UnfilteredSerializer one after the other, with an initial byte that indicates whether
      * we're done or not.
@@ -420,7 +457,19 @@ public abstract class UnfilteredPartitionIterators
         public void serialize(UnfilteredPartitionIterator iter, DataOutputPlus out, int version) throws IOException
         {
             if (version < MessagingService.VERSION_30)
-                throw new UnsupportedOperationException();
+            {
+                {
+                    while (iter.hasNext())
+                    {
+                        try (UnfilteredRowIterator partition = iter.next())
+                        {
+                            serializePartition(partition, out, version);
+                        }
+                    }
+                    return;
+                }
+
+            }
 
             out.writeBoolean(iter.isForThrift());
             while (iter.hasNext())
@@ -437,7 +486,46 @@ public abstract class UnfilteredPartitionIterators
         public UnfilteredPartitionIterator deserialize(final DataInput in, final int version, final SerializationHelper.Flag flag) throws IOException
         {
             if (version < MessagingService.VERSION_30)
-                throw new UnsupportedOperationException();
+            {
+                int partitionCount = in.readInt();
+                ArrayList<UnfilteredRowIterator> partitions = new ArrayList<>(partitionCount);
+                for (int i = 0; i < partitionCount; i++)
+                {
+                    DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
+                    boolean present = in.readBoolean();
+                    assert present;
+                    partitions.add(deserializePartition(in, key, version));
+                }
+                final Iterator<UnfilteredRowIterator> iterator = partitions.iterator();
+
+                return new AbstractUnfilteredPartitionIterator()
+                {
+                    UnfilteredRowIterator next = null;
+
+                    public boolean isForThrift()
+                    {
+                        return true;
+                    }
+
+                    public boolean hasNext()
+                    {
+                        return iterator.hasNext();
+                    }
+
+                    public UnfilteredRowIterator next()
+                    {
+                        next = iterator.next();
+                        return next;
+                    }
+
+                    @Override
+                    public void close()
+                    {
+                        if (next != null)
+                            next.close();
+                    }
+                };
+            }
 
             final boolean isForThrift = in.readBoolean();
 
@@ -498,6 +586,159 @@ public abstract class UnfilteredPartitionIterators
                         next.close();
                 }
             };
+        }
+
+        void serializePartition(UnfilteredRowIterator partition, DataOutputPlus out, int version) throws IOException
+        {
+            assert version < MessagingService.VERSION_30;
+
+            ByteBufferUtil.writeWithShortLength(partition.partitionKey().getKey(), out);
+            Pair<DeletionInfo, Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>>> pair = LegacyLayout.fromUnfilteredRowIterator(partition);
+            DeletionInfo deletionInfo = pair.left;
+            LegacyLayout.LegacyRangeTombstoneList rtl = pair.right.left;
+
+            // Processing the cell iterator results in the LegacyRangeTombstoneList being populated, so we do this
+            // before we use the LegacyRangeTombstoneList at all
+            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right.right);
+
+            out.writeBoolean(true);
+            UUIDSerializer.serializer.serialize(partition.metadata().cfId, out, version);
+            DeletionTime.serializer.serialize(deletionInfo.getPartitionDeletion(), out);
+
+            if (deletionInfo.hasRanges())
+            {
+                Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);
+                while (rangeTombstoneIterator.hasNext())
+                {
+                    RangeTombstone rt = rangeTombstoneIterator.next();
+                    Slice slice = rt.deletedSlice();
+                    LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                    LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                    rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
+                }
+            }
+
+            rtl.serialize(out, partition.metadata());
+
+            // begin cell serialization
+            out.writeInt(cells.size());
+            for (LegacyLayout.LegacyCell cell : cells)
+            {
+                ByteBufferUtil.writeWithShortLength(cell.name.encode(partition.metadata()), out);
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                {
+                    out.writeByte(LegacyLayout.EXPIRATION_MASK);  // serialization flags
+                    out.writeInt(cell.ttl);
+                    out.writeInt(cell.localDeletionTime);
+                }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                {
+                    out.writeByte(LegacyLayout.DELETION_MASK);  // serialization flags
+                    out.writeLong(cell.timestamp);
+                    out.writeInt(TypeSizes.NATIVE.sizeof(cell.localDeletionTime));
+                    out.writeInt(cell.localDeletionTime);
+                    continue;
+                }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                {
+                    out.writeByte(LegacyLayout.COUNTER_MASK);  // serialization flags
+                    out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete
+                }
+                else
+                {
+                    out.writeByte(0);  // serialization flags
+                }
+
+                out.writeLong(cell.timestamp);
+                ByteBufferUtil.writeWithLength(cell.value, out);
+            }
+        }
+
+        public UnfilteredRowIterator deserializePartition(DataInput in, DecoratedKey key, int version) throws IOException
+        {
+            assert version < MessagingService.VERSION_30;
+
+            CFMetaData metadata = CFMetaData.serializer.deserialize(in, version);
+            LegacyLayout.LegacyDeletionInfo info = LegacyLayout.LegacyDeletionInfo.serializer.deserialize(metadata, in, version);
+            int size = in.readInt();
+            // TODO double-check that this is the correct flag to use
+            SerializationHelper helper = new SerializationHelper(version, SerializationHelper.Flag.FROM_REMOTE, ColumnFilter.all(metadata));
+            Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.deserializeCells(metadata, in, SerializationHelper.Flag.FROM_REMOTE, size);
+            return LegacyLayout.onWireCellstoUnfilteredRowIterator(metadata, key, info, cells, false, helper);
+        }
+
+        public long serializedSize(UnfilteredPartitionIterator iter, int version)
+        {
+            assert version < MessagingService.VERSION_30;
+            TypeSizes sizes = TypeSizes.NATIVE;
+
+            if (!iter.hasNext())
+                return sizes.sizeof(false);
+
+            long size = sizes.sizeof(true);
+            while (iter.hasNext())
+            {
+                try (UnfilteredRowIterator partition = iter.next())
+                {
+                    size += serializedPartitionSize(partition, version);
+                }
+            }
+            return size;
+        }
+
+        long serializedPartitionSize(UnfilteredRowIterator partition, int version)
+        {
+            assert version < MessagingService.VERSION_30;
+            TypeSizes sizes = TypeSizes.NATIVE;
+
+            long size = ByteBufferUtil.serializedSizeWithShortLength(partition.partitionKey().getKey(), sizes);
+            Pair<DeletionInfo, Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>>> pair = LegacyLayout.fromUnfilteredRowIterator(partition);
+            DeletionInfo deletionInfo = pair.left;
+            LegacyLayout.LegacyRangeTombstoneList rtl = pair.right.left;
+
+            // Processing the cell iterator results in the LegacyRangeTombstoneList being populated, so we do this
+            // before we use the LegacyRangeTombstoneList at all
+            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right.right);
+
+            size += sizes.sizeof(true);
+            size += UUIDSerializer.serializer.serializedSize(partition.metadata().cfId, version);
+            size += DeletionTime.serializer.serializedSize(pair.left.getPartitionDeletion(), sizes);
+
+            if (deletionInfo.hasRanges())
+            {
+                Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);
+                while (rangeTombstoneIterator.hasNext())
+                {
+                    RangeTombstone rt = rangeTombstoneIterator.next();
+                    Slice slice = rt.deletedSlice();
+                    LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                    LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                    rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
+                }
+            }
+
+            size += rtl.serializedSize(sizes, partition.metadata());
+
+            // begin cell serialization
+            size += sizes.sizeof(cells.size());
+            for (LegacyLayout.LegacyCell cell : cells)
+            {
+                size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(partition.metadata()), sizes);
+                size += 1;  // serialization flags
+                if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                {
+                    size += sizes.sizeof(cell.ttl);
+                    size += sizes.sizeof(cell.localDeletionTime);
+                }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                {
+                    size += sizes.sizeof(Long.MAX_VALUE);
+                }
+                size += sizes.sizeof(cell.timestamp);
+                size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+            }
+
+            return size;
         }
     }
 }

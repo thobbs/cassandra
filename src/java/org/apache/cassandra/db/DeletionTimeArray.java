@@ -93,7 +93,7 @@ public class DeletionTimeArray
 
     public boolean isLive(int i)
     {
-        return markedForDeleteAts[i] > Long.MIN_VALUE;
+        return markedForDeleteAts[i] == Long.MIN_VALUE;
     }
 
     public void clear()

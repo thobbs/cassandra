@@ -150,6 +150,16 @@ public class DataRange
     }
 
     /**
+     * Whether the data range is for a paged request or not.
+     *
+     * @return true if for paging, false otherwise
+     */
+    public boolean isPaging()
+    {
+        return false;
+    }
+
+    /**
      * Whether the range queried by this {@code DataRange} actually wraps around.
      *
      * @return whether the range queried by this {@code DataRange} actually wraps around.
@@ -348,6 +358,12 @@ public class DataRange
             return range.left.equals(keyRange().left)
                  ? new Paging(range, clusteringIndexFilter, comparator, lastReturned, inclusive)
                  : new DataRange(range, clusteringIndexFilter);
+        }
+
+        @Override
+        public boolean isPaging()
+        {
+            return true;
         }
 
         @Override

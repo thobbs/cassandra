@@ -24,6 +24,9 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Lists;
+import org.apache.cassandra.db.context.CounterContext;
+import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -547,7 +550,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         // To deal with that problem, we record which complex columns have been updated (for the current
         // row) and if we detect a violation of our assumption, we switch the row we're writing
         // into (which is ok because everything will be sorted and merged in maybeSort()).
-        private final Set<ColumnDefinition> updatedComplex = new HashSet();
+        private final Set<ColumnDefinition> updatedComplex = new HashSet<>();
         private ColumnDefinition lastUpdatedComplex;
         private CellPath lastUpdatedComplexPath;
 
@@ -613,28 +616,92 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException();
+                out.writeBoolean(true);
+                CFMetaData.serializer.serialize(update.metadata, out, version);
 
-                // if (cf == null)
-                // {
-                //     out.writeBoolean(false);
-                //     return;
-                // }
+                Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>> results = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
+                LegacyLayout.LegacyRangeTombstoneList rtl = results.left;
+                ArrayList<LegacyLayout.LegacyCell> cells = Lists.newArrayList(results.right);
 
-                // out.writeBoolean(true);
-                // serializeCfId(cf.id(), out, version);
-                // cf.getComparator().deletionInfoSerializer().serialize(cf.deletionInfo(), out, version);
-                // ColumnSerializer columnSerializer = cf.getComparator().columnSerializer();
-                // int count = cf.getColumnCount();
-                // out.writeInt(count);
-                // int written = 0;
-                // for (Cell cell : cf)
-                // {
-                //     columnSerializer.serialize(cell, out);
-                //     written++;
-                // }
-                // assert count == written: "Table had " + count + " columns, but " + written + " written";
+                // It's inefficient to pull everything into a list first, but it's the only way to get an accurate
+                // cell count and merge single-row tombstones with normal range tombstones
+                DeletionTime.serializer.serialize(update.deletionInfo.getPartitionDeletion(), out);
+
+                // convert single-row deletions into RangeTombstones and merge them into the list
+                DeletionInfo deletionInfo = update.deletionInfo.copy();
+                DeletionTimeArray.Cursor cursor = new DeletionTimeArray.Cursor();
+                int rowIndex = 0;
+                for (Row row : update)
+                {
+                    if (!update.deletions.isLive(rowIndex))
+                    {
+                        RangeTombstone rt = new RangeTombstone(Slice.make(update.metadata.comparator, row.clustering()),
+                                                               cursor.setTo(update.deletions, rowIndex).takeAlias());
+                        deletionInfo.add(rt, update.metadata.comparator);
+                    }
+                    rowIndex++;
+                }
+
+                if (deletionInfo.hasRanges())
+                {
+                    Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);  // TODO reversed?
+                    while (rangeTombstoneIterator.hasNext())
+                    {
+                        RangeTombstone rt = rangeTombstoneIterator.next();
+                        Slice slice = rt.deletedSlice();
+                        LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                        LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                        rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
+                    }
+                }
+
+                rtl.serialize(out, update.metadata);
+
+                out.writeInt(cells.size());
+                for (LegacyLayout.LegacyCell cell : cells)
+                {
+                    ByteBufferUtil.writeWithShortLength(cell.name.encode(update.metadata), out);
+
+                    if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                    {
+                        out.writeByte(LegacyLayout.COUNTER_UPDATE_MASK);
+                        out.writeLong(cell.timestamp);
+                        CounterContext.ContextState state = CounterContext.ContextState.wrap(cell.value);
+                        if (state.isLocal())
+                        {
+                            out.writeInt(TypeSizes.NATIVE.sizeof(state.getCount()));
+                            out.writeLong(state.getCount());
+                        }
+                        else
+                        {
+                            assert state.isGlobal();
+                            ByteBufferUtil.writeWithLength(cell.value, out);
+                        }
+                        continue;
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                    {
+                        out.writeByte(LegacyLayout.DELETION_MASK);
+                        out.writeLong(cell.timestamp);
+                        out.writeInt(TypeSizes.NATIVE.sizeof(cell.localDeletionTime));
+                        out.writeInt(cell.localDeletionTime);
+                        continue;
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                    {
+                        out.writeByte(LegacyLayout.EXPIRATION_MASK);
+                        out.writeInt(cell.ttl);
+                        out.writeInt(cell.localDeletionTime);
+                    }
+                    else
+                    {
+                        out.writeByte(0);  // serialization flags
+                    }
+
+                    out.writeLong(cell.timestamp);
+                    ByteBufferUtil.writeWithLength(cell.value, out);
+                }
+                return;
             }
 
             try (UnfilteredRowIterator iter = update.sliceableUnfilteredIterator())
@@ -695,18 +762,88 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         {
             if (version < MessagingService.VERSION_30)
             {
-                // TODO
-                throw new UnsupportedOperationException("Version is " + version);
-                //if (cf == null)
-                //{
-                //    return typeSizes.sizeof(false);
-                //}
-                //else
-                //{
-                //    return typeSizes.sizeof(true)  /* nullness bool */
-                //        + cfIdSerializedSize(cf.id(), typeSizes, version)  /* id */
-                //        + contentSerializedSize(cf, typeSizes, version);
-                //}
+                if (update.isEmpty())
+                    return sizes.sizeof(false);
+
+                long size = sizes.sizeof(true);
+                size += CFMetaData.serializer.serializedSize(update.metadata, version, sizes);
+
+                size += DeletionTime.serializer.serializedSize(update.deletionInfo.getPartitionDeletion(), sizes);
+
+                Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>> results = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
+                LegacyLayout.LegacyRangeTombstoneList rtl = results.left;
+                ArrayList<LegacyLayout.LegacyCell> cells = Lists.newArrayList(results.right);
+
+                // convert single-row deletions into RangeTombstones and merge them into the list
+                DeletionInfo deletionInfo = update.deletionInfo.copy();
+                DeletionTimeArray.Cursor cursor = new DeletionTimeArray.Cursor();
+                int rowIndex = 0;
+                for (Row row : update)
+                {
+                    if (!update.deletions.isLive(rowIndex))
+                    {
+                        RangeTombstone rt = new RangeTombstone(Slice.make(update.metadata.comparator, row.clustering()),
+                                                               cursor.setTo(update.deletions, rowIndex).takeAlias());
+                        deletionInfo.add(rt, update.metadata.comparator);
+                    }
+                    rowIndex++;
+                }
+
+                if (deletionInfo.hasRanges())
+                {
+                    Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);
+                    while (rangeTombstoneIterator.hasNext())
+                    {
+                        RangeTombstone rt = rangeTombstoneIterator.next();
+                        Slice slice = rt.deletedSlice();
+                        LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                        LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                        rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
+                    }
+                }
+
+                size += rtl.serializedSize(sizes, update.metadata);
+
+                size += sizes.sizeof(cells.size());
+                for (LegacyLayout.LegacyCell cell : cells)
+                {
+                    size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(update.metadata), sizes);
+
+                    size += 1; // serialization flags
+                    if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+                    {
+                        size += sizes.sizeof(cell.timestamp);
+                        CounterContext.ContextState state = CounterContext.ContextState.wrap(cell.value);
+                        if (state.isLocal())
+                        {
+                            // counter count (extracted from cell value)
+                            size += sizes.sizeof(8);
+                            size += sizes.sizeof(state.getCount());
+                        }
+                        else
+                        {
+                            assert state.isGlobal();
+                            size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+                        }
+                        continue;
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                    {
+                        size += sizes.sizeof(cell.timestamp);
+                        size += sizes.sizeof(4);
+                        size += sizes.sizeof(cell.localDeletionTime);
+                        continue;
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                    {
+                        size += sizes.sizeof(cell.ttl);
+                        size += sizes.sizeof(cell.localDeletionTime);
+                    }
+
+                    size += sizes.sizeof(cell.timestamp);
+                    size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+                }
+                return size;
             }
 
             try (UnfilteredRowIterator iter = update.sliceableUnfilteredIterator())
