@@ -218,12 +218,19 @@ public abstract class ReadResponse
         {
             if (version < MessagingService.VERSION_30)
             {
-                ByteBuffer digest = ByteBufferUtil.readWithShortLength(in);
+                byte[] digest = null;
+                int digestSize = in.readInt();
+                if (digestSize > 0)
+                {
+                    digest = new byte[digestSize];
+                    in.readFully(digest, 0, digestSize);
+                }
                 boolean isDigest = in.readBoolean();
-                assert isDigest == digest.hasRemaining();
+                assert isDigest == digestSize > 0;
                 if (isDigest)
                 {
-                    return new DigestResponse(digest);
+                    assert digest != null;
+                    return new DigestResponse(ByteBuffer.wrap(digest));
                 }
 
                 // ReadResponses from older versions are always single-partition (ranges are handled by RangeSliceReply)
