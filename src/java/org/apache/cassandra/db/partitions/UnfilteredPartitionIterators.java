@@ -464,52 +464,44 @@ public abstract class UnfilteredPartitionIterators
         {
             if (version < MessagingService.VERSION_30)
             {
+                int partitionCount = in.readInt();
+                ArrayList<UnfilteredRowIterator> partitions = new ArrayList<>(partitionCount);
+                for (int i = 0; i < partitionCount; i++)
                 {
-                    return new AbstractUnfilteredPartitionIterator()
-                    {
-                        private UnfilteredRowIterator next;
-                        private final int partitionCount = in.readInt();
-                        private int partitionsSeen = 0;
-
-                        public boolean isForThrift()
-                        {
-                            return true;
-                        }
-
-                        public boolean hasNext()
-                        {
-                            return partitionsSeen < partitionCount;
-                        }
-
-                        public UnfilteredRowIterator next()
-                        {
-                            if (!hasNext())
-                                throw new NoSuchElementException();
-
-                            try
-                            {
-                                DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
-
-                                boolean present = in.readBoolean();
-                                assert present;
-                                next = deserializePartition(in, key, version);
-                                return next;
-                            }
-                            catch (IOException e)
-                            {
-                                throw new IOError(e);
-                            }
-                        }
-
-                        @Override
-                        public void close()
-                        {
-                            if (next != null)
-                                next.close();
-                        }
-                    };
+                    DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
+                    boolean present = in.readBoolean();
+                    assert present;
+                    partitions.add(deserializePartition(in, key, version));
                 }
+                final Iterator<UnfilteredRowIterator> iterator = partitions.iterator();
 
+                return new AbstractUnfilteredPartitionIterator()
+                {
+                    UnfilteredRowIterator next = null;
+
+                    public boolean isForThrift()
+                    {
+                        return true;
+                    }
+
+                    public boolean hasNext()
+                    {
+                        return iterator.hasNext();
+                    }
+
+                    public UnfilteredRowIterator next()
+                    {
+                        next = iterator.next();
+                        return next;
+                    }
+
+                    @Override
+                    public void close()
+                    {
+                        if (next != null)
+                            next.close();
+                    }
+                };
             }
 
             final boolean isForThrift = in.readBoolean();
@@ -662,8 +654,8 @@ public abstract class UnfilteredPartitionIterators
             LegacyLayout.LegacyDeletionInfo info = LegacyLayout.LegacyDeletionInfo.serializer.deserialize(metadata, in, version);
             int size = in.readInt();
             // TODO double-check that this is the correct flag to use
-            SerializationHelper helper = new SerializationHelper(version, SerializationHelper.Flag.LOCAL, FBUtilities.nowInSeconds());
-            Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.deserializeCells(metadata, in, SerializationHelper.Flag.LOCAL, size);
+            SerializationHelper helper = new SerializationHelper(version, SerializationHelper.Flag.FROM_REMOTE, FBUtilities.nowInSeconds());
+            Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.deserializeCells(metadata, in, SerializationHelper.Flag.FROM_REMOTE, size);
             return LegacyLayout.onWireCellstoUnfilteredRowIterator(metadata, key, info, cells, false, helper);
         }
 
