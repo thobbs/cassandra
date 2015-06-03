@@ -67,6 +67,7 @@ public class Row
     {
         public void serialize(Row row, DataOutputPlus out, int version) throws IOException
         {
+            logger.warn("#### serializing partition with key {}", row.key);
             ByteBufferUtil.writeWithShortLength(row.key.getKey(), out);
             ColumnFamily.serializer.serialize(row.cf, out, version);
         }

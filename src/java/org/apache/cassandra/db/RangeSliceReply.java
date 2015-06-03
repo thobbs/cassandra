@@ -67,9 +67,13 @@ public class RangeSliceReply
     {
         public void serialize(RangeSliceReply rsr, DataOutputPlus out, int version) throws IOException
         {
+            logger.warn("#### serializing {} rows in RangeSliceReply", rsr.rows.size());
             out.writeInt(rsr.rows.size());
             for (Row row : rsr.rows)
+            {
+                logger.warn("####   cells in partition: {}", row.cf.getColumnCount());
                 Row.serializer.serialize(row, out, version);
+            }
         }
 
         public RangeSliceReply deserialize(DataInput in, int version) throws IOException
