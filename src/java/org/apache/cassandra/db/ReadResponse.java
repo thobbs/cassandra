@@ -236,11 +236,13 @@ public abstract class ReadResponse
                 // ReadResponses from older versions are always single-partition (ranges are handled by RangeSliceReply)
                 DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
 
+                UnfilteredRowIterator rowIterator;
                 boolean present = in.readBoolean();
-                assert present;
+                if (!present)
+                    return new LocalDataResponse(UnfilteredPartitionIterators.EMPTY);
 
-                UnfilteredRowIterator atomIterator = UnfilteredPartitionIterators.serializerForIntraNode().deserializePartition(in, key, version);
-                UnfilteredPartitionIterator iterator = new UnfilteredPartitionIterators.SingletonPartitionIterator(atomIterator, true);
+                rowIterator = UnfilteredPartitionIterators.serializerForIntraNode().deserializePartition(in, key, version);
+                UnfilteredPartitionIterator iterator = new UnfilteredPartitionIterators.SingletonPartitionIterator(rowIterator, true);
                 return new LocalDataResponse(iterator);
             }
 
