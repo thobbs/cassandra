@@ -32,6 +32,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.IReadCommand;
 import org.apache.cassandra.service.RowDataResolver;
 import org.apache.cassandra.service.pager.Pageable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class ReadCommand implements IReadCommand, Pageable
 {
@@ -131,6 +133,7 @@ public abstract class ReadCommand implements IReadCommand, Pageable
 
 class ReadCommandSerializer implements IVersionedSerializer<ReadCommand>
 {
+    private static final Logger logger = LoggerFactory.getLogger(ReadCommand.class);
     public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
     {
         out.writeByte(command.commandType.serializedValue);
@@ -149,12 +152,16 @@ class ReadCommandSerializer implements IVersionedSerializer<ReadCommand>
 
     public ReadCommand deserialize(DataInput in, int version) throws IOException
     {
-        ReadCommand.Type msgType = ReadCommand.Type.fromSerializedValue(in.readByte());
+        byte type = in.readByte();
+        logger.warn("#### deserializing ReadCommand with type {}", type);
+        ReadCommand.Type msgType = ReadCommand.Type.fromSerializedValue(type);
         switch (msgType)
         {
             case GET_BY_NAMES:
+                logger.warn("####    ReadCommand is names");
                 return SliceByNamesReadCommand.serializer.deserialize(in, version);
             case GET_SLICES:
+                logger.warn("####    ReadCommand is slice");
                 return SliceFromReadCommand.serializer.deserialize(in, version);
             default:
                 throw new AssertionError();

@@ -347,6 +347,7 @@ public class OutboundTcpConnection extends Thread
 
     private void disconnect()
     {
+        logger.warn("########## disconnecting from {}", poolReference.endPoint());
         if (socket != null)
         {
             try

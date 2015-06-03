@@ -34,6 +34,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.pager.Pageable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class RangeSliceCommand extends AbstractRangeCommand implements Pageable
 {
@@ -150,6 +152,7 @@ public class RangeSliceCommand extends AbstractRangeCommand implements Pageable
 
 class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceCommand>
 {
+    private static final Logger logger = LoggerFactory.getLogger(RangeSliceCommandSerializer.class);
     public void serialize(RangeSliceCommand sliceCommand, DataOutputPlus out, int version) throws IOException
     {
         out.writeUTF(sliceCommand.keyspace);
@@ -180,10 +183,12 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
 
     public RangeSliceCommand deserialize(DataInput in, int version) throws IOException
     {
+        logger.warn("#### deserializing range slice command");
         String keyspace = in.readUTF();
         String columnFamily = in.readUTF();
         long timestamp = in.readLong();
 
+        logger.warn("####     ks: {}, table: {}, timestamp: {}", keyspace, columnFamily, timestamp);
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
         if (metadata == null)
         {
@@ -194,6 +199,7 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
         }
 
         IDiskAtomFilter predicate = metadata.comparator.diskAtomFilterSerializer().deserialize(in, version);
+        logger.warn("####     predicate: {}", predicate);
 
         List<IndexExpression> rowFilter;
         int filterCount = in.readInt();
@@ -203,10 +209,12 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
             rowFilter.add(IndexExpression.readFrom(in));
         }
         AbstractBounds<RowPosition> range = AbstractBounds.serializer.deserialize(in, version).toRowBounds();
+        logger.warn("####     range: {}", range);
 
         int maxResults = in.readInt();
         boolean countCQL3Rows = in.readBoolean();
         boolean isPaging = in.readBoolean();
+        logger.warn("####     maxResults: {}, countCQL3Rows: {}, isPaging: {}", maxResults, countCQL3Rows, isPaging);
         return new RangeSliceCommand(keyspace, columnFamily, timestamp, predicate, range, rowFilter, maxResults, countCQL3Rows, isPaging);
     }
 

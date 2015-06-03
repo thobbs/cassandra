@@ -31,6 +31,8 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PagedRangeCommand extends AbstractRangeCommand
 {
@@ -123,6 +125,7 @@ public class PagedRangeCommand extends AbstractRangeCommand
 
     private static class Serializer implements IVersionedSerializer<PagedRangeCommand>
     {
+        private static final Logger logger = LoggerFactory.getLogger(PagedRangeCommand.Serializer.class);
         public void serialize(PagedRangeCommand cmd, DataOutputPlus out, int version) throws IOException
         {
             out.writeUTF(cmd.keyspace);
@@ -154,6 +157,7 @@ public class PagedRangeCommand extends AbstractRangeCommand
 
         public PagedRangeCommand deserialize(DataInput in, int version) throws IOException
         {
+            logger.warn("#### deserializing paged range command");
             String keyspace = in.readUTF();
             String columnFamily = in.readUTF();
             long timestamp = in.readLong();

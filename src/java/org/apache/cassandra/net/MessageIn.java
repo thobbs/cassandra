@@ -96,7 +96,9 @@ public class MessageIn<T>
         }
         if (payloadSize == 0 || serializer == null)
             return create(from, null, parameters, verb, version);
+        logger.warn("#### going to deserialize {} payload with size {} using serializer {}", verb, payloadSize, serializer);
         T2 payload = serializer.deserialize(in, version);
+        logger.warn("#### done deserializing {} payload with size {}", verb, payloadSize);
         return MessageIn.create(from, payload, parameters, verb, version);
     }
 

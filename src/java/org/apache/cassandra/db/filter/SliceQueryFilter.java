@@ -508,8 +508,12 @@ public class SliceQueryFilter implements IDiskAtomFilter
         {
             ColumnSlice[] slices;
             slices = new ColumnSlice[in.readInt()];
+            logger.warn("#### deserializing {} slices", slices.length);
             for (int i = 0; i < slices.length; i++)
+            {
                 slices[i] = type.sliceSerializer().deserialize(in, version);
+                logger.warn("#### deserialized slice: {}", slices[i]);
+            }
             boolean reversed = in.readBoolean();
             int count = in.readInt();
             int compositesToGroup = in.readInt();

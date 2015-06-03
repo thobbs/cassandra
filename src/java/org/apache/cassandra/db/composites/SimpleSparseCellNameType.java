@@ -26,9 +26,13 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.CQL3Row;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SimpleSparseCellNameType extends AbstractSimpleCellNameType
 {
+    private static final Logger logger = LoggerFactory.getLogger(SimpleSparseCellNameType.class);
     // Simple sparse means static thrift CF or non-clustered CQL3. This means that cell names will mainly
     // be those that have been declared and we can intern the whole CellName instances.
     private final Map<ByteBuffer, CellName> internedNames;
@@ -77,8 +81,12 @@ public class SimpleSparseCellNameType extends AbstractSimpleCellNameType
     public Composite fromByteBuffer(ByteBuffer bb)
     {
         if (!bb.hasRemaining())
+        {
+            logger.warn("#### SimpleSparseCellName.fromByteBuffer() called on empty buffer");
             return Composites.EMPTY;
+        }
 
+        logger.warn("#### SimpleSparseCellName.fromByteBuffer() called on: {}", ByteBufferUtil.bytesToHex(bb));
         CellName cn = internedNames.get(bb);
         return cn == null ? new SimpleSparseCellName(new ColumnIdentifier(bb, type)) : cn;
     }

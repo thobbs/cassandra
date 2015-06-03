@@ -156,6 +156,7 @@ public class SliceFromReadCommand extends ReadCommand
 
 class SliceFromReadCommandSerializer implements IVersionedSerializer<ReadCommand>
 {
+    private static final Logger logger = LoggerFactory.getLogger(SliceFromReadCommandSerializer.class);
     public void serialize(ReadCommand rm, DataOutputPlus out, int version) throws IOException
     {
         SliceFromReadCommand realRM = (SliceFromReadCommand)rm;
@@ -175,6 +176,7 @@ class SliceFromReadCommandSerializer implements IVersionedSerializer<ReadCommand
         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
         String cfName = in.readUTF();
         long timestamp = in.readLong();
+        logger.warn("#### slice attrs: isDigest: {}; keyspace: {}; cfName: {}, key: {}, timestamp: {}", isDigest, keyspaceName, cfName, ByteBufferUtil.bytesToHex(key), timestamp);
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, cfName);
         if (metadata == null)
         {
@@ -184,6 +186,7 @@ class SliceFromReadCommandSerializer implements IVersionedSerializer<ReadCommand
             throw new UnknownColumnFamilyException(message, null);
         }
         SliceQueryFilter filter = metadata.comparator.sliceQueryFilterSerializer().deserialize(in, version);
+        logger.warn("#### deserialized SliceQueryFilter: {}", filter);
         return new SliceFromReadCommand(keyspaceName, key, cfName, timestamp, filter).setIsDigestQuery(isDigest);
     }
 

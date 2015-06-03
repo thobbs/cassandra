@@ -31,6 +31,8 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Given an implementation-specific description of what columns to look for, provides methods
@@ -41,6 +43,8 @@ import org.apache.cassandra.io.util.FileDataInput;
  */
 public interface IDiskAtomFilter
 {
+    static final Logger logger = LoggerFactory.getLogger(IDiskAtomFilter.class);
+
     /**
      * returns an iterator that returns columns from the given columnFamily
      * matching the Filter criteria in sorted order.
@@ -122,10 +126,12 @@ public interface IDiskAtomFilter
             int b = in.readByte();
             if (b == 0)
             {
+                logger.warn("#### filter is a slice");
                 return type.sliceQueryFilterSerializer().deserialize(in, version);
             }
             else
             {
+                logger.warn("#### filter is names");
                 assert b == 1;
                 return type.namesQueryFilterSerializer().deserialize(in, version);
             }
