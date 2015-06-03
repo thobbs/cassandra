@@ -281,6 +281,9 @@ public abstract class LegacyLayout
                                                                            boolean reversed,
                                                                            SerializationHelper helper)
     {
+        List<LegacyCell> l = new ArrayList<>();
+        Iterators.addAll(l, cells);
+
         // If the table is a static compact, the "column_metadata" are now internally encoded as
         // static. This has already been recognized by decodeCellName, but it means the cells
         // provided are not in the expected order (the "static" cells are not necessarily at the front).
@@ -288,14 +291,9 @@ public abstract class LegacyLayout
         // Further, if the query is reversed, then the on-wire format still has cells in non-reversed
         // order, but we need to have them reverse in the final UnfilteredRowIterator. So reverse them.
         if (metadata.isStaticCompactTable() || reversed)
-        {
-            List<LegacyCell> l = new ArrayList<>();
-            Iterators.addAll(l, cells);
             Collections.sort(l, legacyCellComparator(metadata, reversed));
-            cells = l.iterator();
-        }
 
-        return toUnfilteredRowIterator(metadata, key, delInfo, cells, reversed, helper);
+        return toUnfilteredRowIterator(metadata, key, delInfo, l.iterator(), reversed, helper);
     }
 
     private static UnfilteredRowIterator toUnfilteredRowIterator(CFMetaData metadata,
