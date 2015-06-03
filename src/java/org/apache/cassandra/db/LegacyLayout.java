@@ -179,6 +179,20 @@ public abstract class LegacyLayout
         return new LegacyBound(sb, metadata.isCompound() && CompositeType.isStaticName(bound), collectionName);
     }
 
+    public static ByteBuffer encodeBound(CFMetaData metadata, Slice.Bound bound, boolean isStart)
+    {
+        if (bound == Slice.Bound.BOTTOM || bound == Slice.Bound.TOP)
+            return ByteBufferUtil.EMPTY_BYTE_BUFFER;
+
+        ClusteringPrefix clustering = bound.clustering();
+        CompositeType ctype = CompositeType.getInstance(metadata.comparator.subtypes());
+        CompositeType.Builder builder = ctype.builder();
+        for (int i = 0; i < clustering.size(); i++)
+            builder.add(clustering.get(i));
+
+        return isStart ? builder.build() : builder.buildAsEndOfRange();
+    }
+
     public static ByteBuffer encodeCellName(CFMetaData metadata, ClusteringPrefix clustering, ByteBuffer columnName, ByteBuffer collectionElement)
     {
         boolean isStatic = clustering == Clustering.STATIC_CLUSTERING;

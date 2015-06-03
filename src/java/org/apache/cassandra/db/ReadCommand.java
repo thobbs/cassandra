@@ -1114,10 +1114,10 @@ public abstract class ReadCommand implements ReadQuery
             out.writeInt(slices.size());
             for (Slice slice : slices)
             {
-                ByteBuffer sliceStart = LegacyLayout.encodeCellName(metadata, slice.start().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
+                // TODO may need to handle static slices specially?
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start(), true);
                 ByteBufferUtil.writeWithShortLength(sliceStart, out);
-
-                ByteBuffer sliceEnd = LegacyLayout.encodeCellName(metadata, slice.end().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
+                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end(), false);
                 ByteBufferUtil.writeWithShortLength(sliceEnd, out);
             }
         }
@@ -1138,10 +1138,10 @@ public abstract class ReadCommand implements ReadQuery
 
             for (Slice slice : slices)
             {
-                ByteBuffer sliceStart = LegacyLayout.encodeCellName(metadata, slice.start().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
-                ByteBuffer sliceEnd = LegacyLayout.encodeCellName(metadata, slice.end().clustering(), ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
-                size += sizes.sizeof((short) sliceStart.remaining()) + sliceStart.remaining();
-                size += sizes.sizeof((short) sliceEnd.remaining()) + sliceEnd.remaining();
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start(), true);
+                size += ByteBufferUtil.serializedSizeWithShortLength(sliceStart, sizes);
+                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end(), false);
+                size += ByteBufferUtil.serializedSizeWithShortLength(sliceEnd, sizes);
             }
             return size;
         }
