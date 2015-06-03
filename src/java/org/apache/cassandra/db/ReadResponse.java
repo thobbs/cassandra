@@ -311,7 +311,6 @@ public abstract class ReadResponse
 
         public ReadResponse deserialize(DataInput in, int version) throws IOException
         {
-            in.readInt();  // rowCount
             return new LocalDataResponse(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.LOCAL));
         }
 
