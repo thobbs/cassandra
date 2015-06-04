@@ -617,23 +617,9 @@ public abstract class ReadCommand implements ReadQuery
             // begin DiskAtomFilterSerializer.serialize()
             if (rangeCommand.isNamesQuery())
             {
-                // TODO unify with single-partition names query serialization
                 out.writeByte(1);  // 0 for slices, 1 for names
                 NamesPartitionFilter filter = (NamesPartitionFilter) rangeCommand.dataRange().partitionFilter;
-                PartitionColumns columns = filter.queriedColumns().columns();
-                out.writeInt(columns.size());
-
-                for (ColumnDefinition column : columns)
-                {
-                    Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
-                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null), out);
-                }
-
-                // see serializeNamesCommand() for an explanation of the countCql3Rows  ield
-                if (metadata.isCompactTable() && !(command.limits().kind() == DataLimits.Kind.CQL_LIMIT && command.limits().perPartitionCount() == 1))
-                    out.writeBoolean(true);  // it's compact and not a DISTINCT query
-                else
-                    out.writeBoolean(false);
+                LegacyReadCommandSerializer.serializeNamesFilter(command, filter, out);
             }
             else
             {
@@ -1019,15 +1005,26 @@ public abstract class ReadCommand implements ReadQuery
 
         private void serializeNamesCommand(SinglePartitionNamesCommand command, DataOutputPlus out, int version) throws IOException
         {
-            CFMetaData metadata = command.metadata();
+            serializeNamesFilter(command, command.partitionFilter(), out);
+        }
 
-            PartitionColumns columns = command.queriedColumns().columns();
-            out.writeInt(columns.size());
-            for (ColumnDefinition column : columns)
+        public static void serializeNamesFilter(ReadCommand command, NamesPartitionFilter filter, DataOutputPlus out) throws IOException
+        {
+            CFMetaData metadata = command.metadata();
+            SortedSet<Clustering> requestedRows = filter.requestedRows();
+            if (requestedRows.isEmpty())
             {
-                // TODO this is not correct for the clustering value when the clustering columns exist and are fully specified
-                Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
-                ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null), out);
+                // only static columns are requested
+                PartitionColumns columns = command.queriedColumns().columns();
+                out.writeInt(columns.size());
+                for (ColumnDefinition column : columns)
+                    ByteBufferUtil.writeWithShortLength(column.name.bytes, out);
+            }
+            else
+            {
+                out.writeInt(requestedRows.size());
+                for (Clustering clustering : requestedRows)
+                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, null, null), out);
             }
 
             // countCql3Rows should be true if it's not a DISTINCT query and it's fetching a range of cells, meaning
