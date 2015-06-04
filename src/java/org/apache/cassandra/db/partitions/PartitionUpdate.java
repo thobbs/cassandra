@@ -625,7 +625,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
 
                     if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                     {
-                        out.writeByte(LegacyLayout.COUNTER_MASK);
+                        out.writeByte(LegacyLayout.COUNTER_UPDATE_MASK);
                         out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete
                     }
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
