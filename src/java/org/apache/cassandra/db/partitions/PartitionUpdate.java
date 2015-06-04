@@ -25,6 +25,7 @@ import java.util.*;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import org.apache.cassandra.db.context.CounterContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -626,7 +627,19 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                     if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                     {
                         out.writeByte(LegacyLayout.COUNTER_UPDATE_MASK);
-                        out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete
+                        out.writeLong(cell.timestamp);
+                        CounterContext.ContextState state = CounterContext.ContextState.wrap(cell.value);
+                        if (state.isLocal())
+                        {
+                            out.writeInt(TypeSizes.NATIVE.sizeof(state.getCount()));
+                            out.writeLong(state.getCount());
+                        }
+                        else
+                        {
+                            assert state.isGlobal();
+                            ByteBufferUtil.writeWithLength(cell.value, out);
+                        }
+                        continue;
                     }
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
                     {
@@ -724,7 +737,20 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                     size += 1; // serialization flags
                     if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                     {
-                        size += sizes.sizeof(Long.MIN_VALUE);  // timestampOfLastDelete
+                        size += sizes.sizeof(cell.timestamp);
+                        CounterContext.ContextState state = CounterContext.ContextState.wrap(cell.value);
+                        if (state.isLocal())
+                        {
+                            // counter count (extracted from cell value)
+                            size += sizes.sizeof(8);
+                            size += sizes.sizeof(state.getCount());
+                        }
+                        else
+                        {
+                            assert state.isGlobal();
+                            size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+                        }
+                        continue;
                     }
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
                     {
