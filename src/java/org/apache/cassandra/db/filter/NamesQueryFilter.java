@@ -251,8 +251,13 @@ public class NamesQueryFilter implements IDiskAtomFilter
             SortedSet<CellName> columns = new TreeSet<CellName>(type);
             ISerializer<CellName> serializer = type.cellSerializer();
             for (int i = 0; i < size; ++i)
-                columns.add(serializer.deserialize(in));
+            {
+                CellName name = serializer.deserialize(in);
+                columns.add(name);
+                logger.warn("#### deserialized cell name: {}", type.getString(name));
+            }
             boolean countCQL3Rows = in.readBoolean();
+            logger.warn("### countCQL3Rows? {}", countCQL3Rows);
             return new NamesQueryFilter(columns, countCQL3Rows);
         }
 

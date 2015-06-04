@@ -29,6 +29,8 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class SliceByNamesReadCommand extends ReadCommand
 {
@@ -73,6 +75,8 @@ public class SliceByNamesReadCommand extends ReadCommand
 
 class SliceByNamesReadCommandSerializer implements IVersionedSerializer<ReadCommand>
 {
+    private static final Logger logger = LoggerFactory.getLogger(SliceByNamesReadCommandSerializer.class);
+
     public void serialize(ReadCommand cmd, DataOutputPlus out, int version) throws IOException
     {
         SliceByNamesReadCommand command = (SliceByNamesReadCommand) cmd;
@@ -93,6 +97,7 @@ class SliceByNamesReadCommandSerializer implements IVersionedSerializer<ReadComm
         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
         String cfName = in.readUTF();
         long timestamp = in.readLong();
+        logger.warn("#### command attrs: isDigest: {}; keyspace: {}; cfName: {}, key: {}, timestamp: {}", isDigest, keyspaceName, cfName, ByteBufferUtil.bytesToHex(key), timestamp);
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, cfName);
         if (metadata == null)
         {
@@ -102,6 +107,7 @@ class SliceByNamesReadCommandSerializer implements IVersionedSerializer<ReadComm
             throw new UnknownColumnFamilyException(message, null);
         }
         NamesQueryFilter filter = metadata.comparator.namesQueryFilterSerializer().deserialize(in, version);
+        logger.warn("#### names query filter: {}", filter);
         return new SliceByNamesReadCommand(keyspaceName, key, cfName, timestamp, filter).setIsDigestQuery(isDigest);
     }
 
