@@ -632,9 +632,7 @@ public abstract class UnfilteredPartitionIterators
                 else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                 {
                     out.writeByte(LegacyLayout.COUNTER_MASK);  // serialization flags
-                    // TODO this is what to write according to Aleksey, but judging by the 2.x code it should be
-                    // Long.MIN_VALUE instead; need to double check
-                    out.writeLong(Long.MAX_VALUE);  // timestampOfLastDelete
+                    out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete
                 }
                 else
                 {

@@ -1187,8 +1187,8 @@ public abstract class ReadCommand implements ReadQuery
                 }
                 else
                 {
-                    finish = LegacyLayout.decodeBound(metadata, finishBuffers[i], false).bound;
-                    start = LegacyLayout.decodeBound(metadata, startBuffers[i], true).bound;
+                    finish = LegacyLayout.decodeBound(metadata, startBuffers[i], false).bound;
+                    start = LegacyLayout.decodeBound(metadata, finishBuffers[i], true).bound;
                 }
                 slicesBuilder.add(Slice.make(start, finish));
             }

@@ -161,20 +161,37 @@ public abstract class LegacyLayout
         if (!bound.hasRemaining())
             return isStart ? LegacyBound.BOTTOM : LegacyBound.TOP;
 
-        List<ByteBuffer> components = metadata.isCompound()
-                                    ? CompositeType.splitName(bound)
-                                    : Collections.singletonList(bound);
+        List<CompositeType.CompositeComponent> components = metadata.isCompound()
+                ? CompositeType.deconstruct(bound)
+                : Collections.singletonList(new CompositeType.CompositeComponent(bound, (byte) 0));
 
         // Either it's a prefix of the clustering, or it's the bound of a collection range tombstone (and thus has
         // the collection column name)
         assert components.size() <= metadata.comparator.size() || (!metadata.isCompactTable() && components.size() == metadata.comparator.size() + 1);
 
-        List<ByteBuffer> prefix = components.size() <= metadata.comparator.size() ? components : components.subList(0, metadata.comparator.size());
-        Slice.Bound sb = Slice.Bound.create(isStart ? Slice.Bound.Kind.INCL_START_BOUND : Slice.Bound.Kind.INCL_END_BOUND,
-                                            prefix.toArray(new ByteBuffer[prefix.size()]));
+        List<CompositeType.CompositeComponent> prefix = components.size() <= metadata.comparator.size() ? components : components.subList(0, metadata.comparator.size());
+        Slice.Bound.Kind boundKind;
+        if (isStart)
+        {
+            if (components.get(components.size() - 1).eoc > 0)
+                boundKind = Slice.Bound.Kind.EXCL_START_BOUND;
+            else
+                boundKind = Slice.Bound.Kind.INCL_START_BOUND;
+        }
+        else
+        {
+            if (components.get(components.size() - 1).eoc < 0)
+                boundKind = Slice.Bound.Kind.EXCL_END_BOUND;
+            else
+                boundKind = Slice.Bound.Kind.INCL_END_BOUND;
+        }
+        ByteBuffer[] prefixValues = new ByteBuffer[prefix.size()];
+        for (int i = 0; i < prefix.size(); i++)
+            prefixValues[i] = prefix.get(i).value;
+        Slice.Bound sb = Slice.Bound.create(boundKind, prefixValues);
 
         ColumnDefinition collectionName = components.size() == metadata.comparator.size() + 1
-                                        ? metadata.getColumnDefinition(components.get(metadata.comparator.size()))
+                                        ? metadata.getColumnDefinition(components.get(metadata.comparator.size()).value)
                                         : null;
         return new LegacyBound(sb, metadata.isCompound() && CompositeType.isStaticName(bound), collectionName);
     }
@@ -496,7 +513,7 @@ public abstract class LegacyLayout
                     return endOfData();
 
                 Cell cell = cells.next();
-                return makeLegacyCell(row.clustering(), cell);
+                return makeLegacyCell(row.clustering().takeAlias(), cell);
             }
         };
     }
