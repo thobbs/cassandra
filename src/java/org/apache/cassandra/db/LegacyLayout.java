@@ -179,7 +179,7 @@ public abstract class LegacyLayout
         return new LegacyBound(sb, metadata.isCompound() && CompositeType.isStaticName(bound), collectionName);
     }
 
-    public static ByteBuffer encodeBound(CFMetaData metadata, Slice.Bound bound, boolean isStart)
+    public static ByteBuffer encodeBound(CFMetaData metadata, Slice.Bound bound)
     {
         if (bound == Slice.Bound.BOTTOM || bound == Slice.Bound.TOP)
             return ByteBufferUtil.EMPTY_BYTE_BUFFER;
@@ -190,7 +190,10 @@ public abstract class LegacyLayout
         for (int i = 0; i < clustering.size(); i++)
             builder.add(clustering.get(i));
 
-        return isStart ? builder.build() : builder.buildAsEndOfRange();
+        if (bound.isStart())
+            return bound.isInclusive() ? builder.build() : builder.buildAsEndOfRange();
+        else
+            return bound.isInclusive() ? builder.buildAsEndOfRange() : builder.build();
     }
 
     public static ByteBuffer encodeCellName(CFMetaData metadata, ClusteringPrefix clustering, ByteBuffer columnName, ByteBuffer collectionElement)
@@ -493,7 +496,6 @@ public abstract class LegacyLayout
                     return endOfData();
 
                 Cell cell = cells.next();
-                // TODO may need to take alias of the Clustering here
                 return makeLegacyCell(row.clustering(), cell);
             }
         };
