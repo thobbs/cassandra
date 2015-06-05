@@ -21,6 +21,7 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 
+import org.apache.cassandra.db.filter.ColumnsSelection;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -40,6 +41,8 @@ public abstract class ReadResponse
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
     public static final IVersionedSerializer<ReadResponse> legacyRangeSliceReplySerializer = new LegacyRangeSliceReplySerializer();
 
+    protected final boolean mayRequireReversal;
+
     public static ReadResponse createDataResponse(UnfilteredPartitionIterator data)
     {
         try (UnfilteredPartitionIterator iter = data)
@@ -56,10 +59,10 @@ public abstract class ReadResponse
         }
     }
 
-    public static ReadResponse createLocalDataResponse(UnfilteredPartitionIterator data)
+    public static ReadResponse createLocalDataResponse(UnfilteredPartitionIterator data, boolean mayRequireReversal)
     {
         // We don't consume the data ourselves so we shouldn't close it.
-        return new LocalDataResponse(data);
+        return new LocalDataResponse(data, mayRequireReversal);
     }
 
     public abstract UnfilteredPartitionIterator makeIterator();
@@ -73,12 +76,22 @@ public abstract class ReadResponse
         return ByteBuffer.wrap(digest.digest());
     }
 
+    public void maybeReverse()
+    {
+    }
+
+    protected ReadResponse (boolean mayRequireReversal)
+    {
+        this.mayRequireReversal = mayRequireReversal;
+    }
+
     private static class DigestResponse extends ReadResponse
     {
         private final ByteBuffer digest;
 
         private DigestResponse(ByteBuffer digest)
         {
+            super(false);
             assert digest.hasRemaining();
             this.digest = digest;
         }
@@ -107,12 +120,14 @@ public abstract class ReadResponse
 
         private DataResponse(ByteBuffer data)
         {
+            super(false);
             this.data = data;
             this.flag = SerializationHelper.Flag.FROM_REMOTE;
         }
 
         private DataResponse(UnfilteredPartitionIterator iter)
         {
+            super(false);
             DataOutputBuffer buffer = new DataOutputBuffer();
             try
             {
@@ -157,11 +172,12 @@ public abstract class ReadResponse
 
     private static class LocalDataResponse extends ReadResponse
     {
-        private final UnfilteredPartitionIterator iterator;
+        private UnfilteredPartitionIterator iterator;
         private boolean returned;
 
-        private LocalDataResponse(UnfilteredPartitionIterator iterator)
+        private LocalDataResponse(UnfilteredPartitionIterator iterator, boolean mayRequireReversal)
         {
+            super(mayRequireReversal);
             this.iterator = iterator;
         }
 
@@ -172,6 +188,47 @@ public abstract class ReadResponse
 
             returned = true;
             return iterator;
+        }
+
+        @Override
+        public void maybeReverse()
+        {
+            if (!mayRequireReversal)
+                return;
+
+            final UnfilteredPartitionIterator unreversedPartitionIterator = iterator;
+            iterator = new UnfilteredPartitionIterator()
+            {
+                UnfilteredRowIterator next;
+
+                @Override
+                public boolean isForThrift()
+                {
+                    return unreversedPartitionIterator.isForThrift();
+                }
+
+                @Override
+                public boolean hasNext()
+                {
+                    return unreversedPartitionIterator.hasNext();
+                }
+
+                @Override
+                public UnfilteredRowIterator next()
+                {
+                    final UnfilteredRowIterator unreversedNext = unreversedPartitionIterator.next();
+                    next = ArrayBackedPartition.create(unreversedNext).unfilteredIterator(
+                            ColumnsSelection.withoutSubselection(unreversedNext.columns()), Slices.ALL, true, unreversedNext.nowInSec());
+                    return next;
+                }
+
+                @Override
+                public void close()
+                {
+                    if (next != null)
+                        next.close();
+                }
+            };
         }
 
         public ByteBuffer digest()
@@ -239,11 +296,11 @@ public abstract class ReadResponse
                 UnfilteredRowIterator rowIterator;
                 boolean present = in.readBoolean();
                 if (!present)
-                    return new LocalDataResponse(UnfilteredPartitionIterators.EMPTY);
+                    return new LocalDataResponse(UnfilteredPartitionIterators.EMPTY, false);
 
                 rowIterator = UnfilteredPartitionIterators.serializerForIntraNode().deserializePartition(in, key, version);
                 UnfilteredPartitionIterator iterator = new UnfilteredPartitionIterators.SingletonPartitionIterator(rowIterator, true);
-                return new LocalDataResponse(iterator);
+                return new LocalDataResponse(iterator, true);
             }
 
             ByteBuffer digest = ByteBufferUtil.readWithShortLength(in);
@@ -313,7 +370,7 @@ public abstract class ReadResponse
 
         public ReadResponse deserialize(DataInput in, int version) throws IOException
         {
-            return new LocalDataResponse(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.LOCAL));
+            return new LocalDataResponse(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.FROM_REMOTE), true);
         }
 
         public long serializedSize(ReadResponse response, int version)

@@ -272,6 +272,11 @@ public class PartitionRangeReadCommand extends ReadCommand
         return searcher == null ? result : searcher.postReconciliationProcessing(columnFilter(), result);
     }
 
+    public boolean rowsInPartitionAreReversed()
+    {
+        return dataRange.partitionFilter.isReversed();
+    }
+
     @Override
     public String toString()
     {

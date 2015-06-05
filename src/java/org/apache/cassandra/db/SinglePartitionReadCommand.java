@@ -412,6 +412,11 @@ public abstract class SinglePartitionReadCommand<F extends PartitionFilter> exte
 
     protected abstract UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs, boolean copyOnHeap);
 
+    public boolean rowsInPartitionAreReversed()
+    {
+        return partitionFilter.isReversed();
+    }
+
     @Override
     public String toString()
     {

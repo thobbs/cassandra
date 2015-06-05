@@ -243,6 +243,8 @@ public abstract class ReadCommand implements ReadQuery
      */
     public abstract boolean selects(DecoratedKey partitionKey, Clustering clustering);
 
+    public abstract boolean rowsInPartitionAreReversed();
+
     protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs);
 
     public ReadResponse makeResponse(UnfilteredPartitionIterator iter, boolean isLocalDataQuery)
@@ -250,7 +252,7 @@ public abstract class ReadCommand implements ReadQuery
         if (isDigestQuery())
             return ReadResponse.createDigestResponse(iter);
         else if (isLocalDataQuery)
-            return ReadResponse.createLocalDataResponse(iter);
+            return ReadResponse.createLocalDataResponse(iter, !isLocalDataQuery);
         else
             return ReadResponse.createDataResponse(iter);
     }
@@ -1112,9 +1114,9 @@ public abstract class ReadCommand implements ReadQuery
             for (Slice slice : slices)
             {
                 // TODO may need to handle static slices specially?
-                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start(), true);
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start());
                 ByteBufferUtil.writeWithShortLength(sliceStart, out);
-                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end(), false);
+                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end());
                 ByteBufferUtil.writeWithShortLength(sliceEnd, out);
             }
         }
@@ -1135,9 +1137,9 @@ public abstract class ReadCommand implements ReadQuery
 
             for (Slice slice : slices)
             {
-                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start(), true);
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start());
                 size += ByteBufferUtil.serializedSizeWithShortLength(sliceStart, sizes);
-                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end(), false);
+                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end());
                 size += ByteBufferUtil.serializedSizeWithShortLength(sliceEnd, sizes);
             }
             return size;
