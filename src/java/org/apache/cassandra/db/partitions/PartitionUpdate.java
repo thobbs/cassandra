@@ -766,14 +766,39 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
 
                 long size = sizes.sizeof(true);
                 size += CFMetaData.serializer.serializedSize(update.metadata, version, sizes);
-                size += LegacyLayout.LegacyDeletionInfo.serializer.serializedSize(
-                        update.metadata, LegacyLayout.LegacyDeletionInfo.from(update.deletionInfo), sizes, version);
+
+                size += DeletionTime.serializer.serializedSize(update.deletionInfo.getPartitionDeletion(), sizes);
 
                 // TODO need account for single-row deletions (update.deletions)
                 for (int i = 0; i < update.deletions.size(); i++)
                     if (update.deletions.isLive(i))
                         throw new UnsupportedOperationException("Single-row tombstones aren't supported yet");
 
+                // begin serialization of the range tombstone list
+                size += sizes.sizeof(update.deletionInfo.rangeCount());
+                if (update.deletionInfo.hasRanges())
+                {
+                    Iterator<RangeTombstone> rangeTombstoneIterator = update.deletionInfo.rangeIterator(false);
+                    CompositeType type = CompositeType.getInstance(update.deletionInfo.rangeComparator().subtypes());
+                    while (rangeTombstoneIterator.hasNext())
+                    {
+                        RangeTombstone rt = rangeTombstoneIterator.next();
+                        Slice slice = rt.deletedSlice();
+                        CompositeType.Builder startBuilder = type.builder();
+                        CompositeType.Builder finishBuilder = type.builder();
+                        for (int i = 0; i < slice.start().clustering().size(); i++)
+                        {
+                            startBuilder.add(slice.start().get(i));
+                            finishBuilder.add(slice.end().get(i));
+                        }
+
+                        // TODO double check inclusive ends
+                        size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build(), sizes);
+                        size += ByteBufferUtil.serializedSizeWithShortLength(finishBuilder.build(), sizes);
+                        size += sizes.sizeof(rt.deletionTime().localDeletionTime());
+                        size += sizes.sizeof(rt.deletionTime().markedForDeleteAt());
+                    }
+                }
 
                 size += sizes.sizeof(update.size());
                 Iterator<LegacyLayout.LegacyCell> cellIterator = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
