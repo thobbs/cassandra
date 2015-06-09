@@ -26,6 +26,7 @@ import java.util.*;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.apache.cassandra.db.context.CounterContext;
+import org.apache.cassandra.db.marshal.CompositeType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -611,8 +612,40 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
 
                 out.writeBoolean(true);
                 CFMetaData.serializer.serialize(update.metadata, out, version);
-                LegacyLayout.LegacyDeletionInfo.serializer.serialize(
-                        update.metadata, LegacyLayout.LegacyDeletionInfo.from(update.deletionInfo), out, version);
+
+                // TODO unify with UnfilteredPartitionIterators serialization, move to LegacyLayout?
+
+                DeletionTime.serializer.serialize(update.deletionInfo.getPartitionDeletion(), out);
+
+                // begin serialization of the range tombstone list
+                out.writeInt(update.deletionInfo.rangeCount());
+                if (update.deletionInfo.hasRanges())
+                {
+                    Iterator<RangeTombstone> rangeTombstoneIterator = update.deletionInfo.rangeIterator(false);  // TODO reversed?
+                    CompositeType type = CompositeType.getInstance(update.deletionInfo.rangeComparator().subtypes());
+                    while (rangeTombstoneIterator.hasNext())
+                    {
+                        RangeTombstone rt = rangeTombstoneIterator.next();
+                        Slice slice = rt.deletedSlice();
+                        CompositeType.Builder startBuilder = type.builder();
+                        CompositeType.Builder finishBuilder = type.builder();
+                        for (int i = 0; i < slice.start().clustering().size(); i++)
+                        {
+                            startBuilder.add(slice.start().get(i));
+                            finishBuilder.add(slice.end().get(i));
+                        }
+
+                        // TODO double check inclusive ends
+                        ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
+                        if (slice.end().isInclusive())
+                            ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
+                        else
+                            ByteBufferUtil.writeWithShortLength(startBuilder.buildAsEndOfRange(), out);
+
+                        out.writeInt(rt.deletionTime().localDeletionTime());
+                        out.writeLong(rt.deletionTime().markedForDeleteAt());
+                    }
+                }
 
                 // TODO it's inefficient to pull everything into a list first, but it seems like the only sane way
                 // of getting an accurate cell count
@@ -650,6 +683,10 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
                     {
                         out.writeByte(LegacyLayout.DELETION_MASK);
+                        out.writeLong(cell.timestamp);
+                        out.writeInt(TypeSizes.NATIVE.sizeof(cell.localDeletionTime));
+                        out.writeInt(cell.localDeletionTime);
+                        continue;
                     }
                     else
                     {
@@ -756,6 +793,13 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                     {
                         size += sizes.sizeof(cell.ttl);
                         size += sizes.sizeof(cell.localDeletionTime);
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                    {
+                        size += sizes.sizeof(cell.timestamp);
+                        size += sizes.sizeof(4);
+                        size += sizes.sizeof(cell.localDeletionTime);
+                        continue;
                     }
 
                     size += sizes.sizeof(cell.timestamp);

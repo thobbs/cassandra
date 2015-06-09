@@ -628,6 +628,10 @@ public abstract class UnfilteredPartitionIterators
                 else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
                 {
                     out.writeByte(LegacyLayout.DELETION_MASK);  // serialization flags
+                    out.writeLong(cell.timestamp);
+                    out.writeInt(TypeSizes.NATIVE.sizeof(cell.localDeletionTime));
+                    out.writeInt(cell.localDeletionTime);
+                    continue;
                 }
                 else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                 {

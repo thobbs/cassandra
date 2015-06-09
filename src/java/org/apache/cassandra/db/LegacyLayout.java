@@ -25,6 +25,7 @@ import java.util.*;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
 import com.google.common.collect.PeekingIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1230,7 +1231,18 @@ public abstract class LegacyLayout
 
         public static LegacyDeletionInfo from(DeletionInfo info)
         {
-            return new LegacyDeletionInfo(info, Collections.<LegacyRangeTombstone>emptyList());
+            List<LegacyRangeTombstone> rangeTombstones = new ArrayList<>(info.rangeCount());
+            Iterator<RangeTombstone> iterator = info.rangeIterator(false);
+            while (iterator.hasNext())
+            {
+                RangeTombstone rt = iterator.next();
+                Slice slice = rt.deletedSlice();
+                // TODO need to handle collection element somehow?
+                rangeTombstones.add(new LegacyRangeTombstone(new LegacyBound(slice.start(), false, null),
+                                                             new LegacyBound(slice.end(), false, null),
+                                                             rt.deletionTime()));
+            }
+            return new LegacyDeletionInfo(info, rangeTombstones);
         }
 
         public static LegacyDeletionInfo live()
