@@ -724,9 +724,8 @@ public abstract class ReadCommand implements ReadQuery
                 }
                 else
                 {
-                    int numFilters = in.readInt();
-                    columnFilter = ColumnFilter.create(numFilters);
-                    for (int i = 0; i < numFilters; i++)
+                    columnFilter = ColumnFilter.create(numColumnFilters);
+                    for (int i = 0; i < numColumnFilters; i++)
                     {
                         ByteBuffer columnName = ByteBufferUtil.readWithShortLength(in);
                         ColumnDefinition column = metadata.getColumnDefinition(columnName);
