@@ -617,6 +617,11 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
 
                 DeletionTime.serializer.serialize(update.deletionInfo.getPartitionDeletion(), out);
 
+                // TODO need to merge single-row deletions (update.deletions) with range tombstones in sorted order
+                for (int i = 0; i < update.deletions.size(); i++)
+                    if (update.deletions.isLive(i))
+                        throw new UnsupportedOperationException("Single-row tombstones aren't supported yet");
+
                 // begin serialization of the range tombstone list
                 out.writeInt(update.deletionInfo.rangeCount());
                 if (update.deletionInfo.hasRanges())
@@ -763,6 +768,12 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                 size += CFMetaData.serializer.serializedSize(update.metadata, version, sizes);
                 size += LegacyLayout.LegacyDeletionInfo.serializer.serializedSize(
                         update.metadata, LegacyLayout.LegacyDeletionInfo.from(update.deletionInfo), sizes, version);
+
+                // TODO need account for single-row deletions (update.deletions)
+                for (int i = 0; i < update.deletions.size(); i++)
+                    if (update.deletions.isLive(i))
+                        throw new UnsupportedOperationException("Single-row tombstones aren't supported yet");
+
 
                 size += sizes.sizeof(update.size());
                 Iterator<LegacyLayout.LegacyCell> cellIterator = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
