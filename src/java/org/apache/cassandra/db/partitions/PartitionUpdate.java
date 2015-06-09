@@ -638,9 +638,9 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                         // TODO double check inclusive ends
                         ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
                         if (slice.end().isInclusive())
-                            ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
+                            ByteBufferUtil.writeWithShortLength(finishBuilder.build(), out);
                         else
-                            ByteBufferUtil.writeWithShortLength(startBuilder.buildAsEndOfRange(), out);
+                            ByteBufferUtil.writeWithShortLength(finishBuilder.buildAsEndOfRange(), out);
 
                         out.writeInt(rt.deletionTime().localDeletionTime());
                         out.writeLong(rt.deletionTime().markedForDeleteAt());
