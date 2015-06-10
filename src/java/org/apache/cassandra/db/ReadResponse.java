@@ -41,8 +41,6 @@ public abstract class ReadResponse
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
     public static final IVersionedSerializer<ReadResponse> legacyRangeSliceReplySerializer = new LegacyRangeSliceReplySerializer();
 
-    protected final boolean mayRequireReversal;
-
     public static ReadResponse createDataResponse(UnfilteredPartitionIterator data)
     {
         try (UnfilteredPartitionIterator iter = data)
@@ -59,14 +57,16 @@ public abstract class ReadResponse
         }
     }
 
-    public static ReadResponse createLocalDataResponse(UnfilteredPartitionIterator data, boolean mayRequireReversal)
+    public static ReadResponse createLocalDataResponse(UnfilteredPartitionIterator data)
     {
         // We don't consume the data ourselves so we shouldn't close it.
-        return new LocalDataResponse(data, mayRequireReversal);
+        return new LocalDataResponse(data);
     }
 
     public abstract UnfilteredPartitionIterator makeIterator();
+
     public abstract ByteBuffer digest();
+
     public abstract boolean isDigestQuery();
 
     protected static ByteBuffer makeDigest(UnfilteredPartitionIterator iterator)
@@ -80,18 +80,12 @@ public abstract class ReadResponse
     {
     }
 
-    protected ReadResponse (boolean mayRequireReversal)
-    {
-        this.mayRequireReversal = mayRequireReversal;
-    }
-
     private static class DigestResponse extends ReadResponse
     {
         private final ByteBuffer digest;
 
         private DigestResponse(ByteBuffer digest)
         {
-            super(false);
             assert digest.hasRemaining();
             this.digest = digest;
         }
@@ -120,14 +114,12 @@ public abstract class ReadResponse
 
         private DataResponse(ByteBuffer data)
         {
-            super(false);
             this.data = data;
             this.flag = SerializationHelper.Flag.FROM_REMOTE;
         }
 
         private DataResponse(UnfilteredPartitionIterator iter)
         {
-            super(false);
             DataOutputBuffer buffer = new DataOutputBuffer();
             try
             {
@@ -175,9 +167,8 @@ public abstract class ReadResponse
         private UnfilteredPartitionIterator iterator;
         private boolean returned;
 
-        private LocalDataResponse(UnfilteredPartitionIterator iterator, boolean mayRequireReversal)
+        private LocalDataResponse(UnfilteredPartitionIterator iterator)
         {
-            super(mayRequireReversal);
             this.iterator = iterator;
         }
 
@@ -190,11 +181,69 @@ public abstract class ReadResponse
             return iterator;
         }
 
+        public ByteBuffer digest()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public boolean isDigestQuery()
+        {
+            return false;
+        }
+    }
+
+    /**
+     * A remote response from a pre-3.0 node.  This needs a separate class in order to cleanly handle reversal of
+     * results when the read command calls for it.  (Pre-3.0 nodes always return results in the normal sorted order,
+     * even if the query asks for reversed results.)
+     */
+    private static class LegacyRemoteDataResponse extends ReadResponse
+    {
+        private UnfilteredPartitionIterator iterator;
+        private ByteBuffer data;
+
+        private LegacyRemoteDataResponse(UnfilteredPartitionIterator iterator)
+        {
+            this.iterator = iterator;
+            this.data = null;
+        }
+
+        private void buildDataBuffer()
+        {
+            DataOutputBuffer buffer = new DataOutputBuffer();
+            try
+            {
+                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iterator, buffer, MessagingService.current_version);
+                this.data = buffer.buffer();
+            }
+            catch (IOException e)
+            {
+                // We're serializing in memory so this shouldn't happen
+                throw new RuntimeException(e);
+            }
+        }
+
+        public UnfilteredPartitionIterator makeIterator()
+        {
+            if (data == null)
+                buildDataBuffer();
+
+            try
+            {
+                DataInput in = new DataInputStream(ByteBufferUtil.inputStream(data));
+                return UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, MessagingService.current_version, SerializationHelper.Flag.FROM_REMOTE);
+            }
+            catch (IOException e)
+            {
+                // We're deserializing in memory so this shouldn't happen
+                throw new RuntimeException(e);
+            }
+        }
+
         @Override
         public void maybeReverse()
         {
-            if (!mayRequireReversal)
-                return;
+            assert data == null : "reversal should have happened before data was accessed";
 
             final UnfilteredPartitionIterator unreversedPartitionIterator = iterator;
             iterator = new UnfilteredPartitionIterator()
@@ -233,7 +282,10 @@ public abstract class ReadResponse
 
         public ByteBuffer digest()
         {
-            throw new UnsupportedOperationException();
+            try (UnfilteredPartitionIterator iterator = makeIterator())
+            {
+                return makeDigest(iterator);
+            }
         }
 
         public boolean isDigestQuery()
@@ -296,11 +348,13 @@ public abstract class ReadResponse
                 UnfilteredRowIterator rowIterator;
                 boolean present = in.readBoolean();
                 if (!present)
-                    return new LocalDataResponse(UnfilteredPartitionIterators.EMPTY, false);
+                {
+                    return new LegacyRemoteDataResponse(UnfilteredPartitionIterators.EMPTY);
+                }
 
                 rowIterator = UnfilteredPartitionIterators.serializerForIntraNode().deserializePartition(in, key, version);
                 UnfilteredPartitionIterator iterator = new UnfilteredPartitionIterators.SingletonPartitionIterator(rowIterator, true);
-                return new LocalDataResponse(iterator, true);
+                return new LegacyRemoteDataResponse(iterator);
             }
 
             ByteBuffer digest = ByteBufferUtil.readWithShortLength(in);
@@ -370,7 +424,7 @@ public abstract class ReadResponse
 
         public ReadResponse deserialize(DataInput in, int version) throws IOException
         {
-            return new LocalDataResponse(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.FROM_REMOTE), true);
+            return new LegacyRemoteDataResponse(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.FROM_REMOTE));
         }
 
         public long serializedSize(ReadResponse response, int version)

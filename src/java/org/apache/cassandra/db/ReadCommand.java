@@ -252,7 +252,7 @@ public abstract class ReadCommand implements ReadQuery
         if (isDigestQuery())
             return ReadResponse.createDigestResponse(iter);
         else if (isLocalDataQuery)
-            return ReadResponse.createLocalDataResponse(iter, !isLocalDataQuery);
+            return ReadResponse.createLocalDataResponse(iter);
         else
             return ReadResponse.createDataResponse(iter);
     }
