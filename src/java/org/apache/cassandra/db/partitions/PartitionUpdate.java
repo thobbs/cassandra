@@ -604,12 +604,6 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
         {
             if (version < MessagingService.VERSION_30)
             {
-                if (update.isEmpty())
-                {
-                    out.writeBoolean(false);
-                    return;
-                }
-
                 out.writeBoolean(true);
                 CFMetaData.serializer.serialize(update.metadata, out, version);
 
