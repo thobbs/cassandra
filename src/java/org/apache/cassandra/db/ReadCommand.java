@@ -629,7 +629,7 @@ public abstract class ReadCommand implements ReadQuery
 
                 // slice filter serialization
                 SlicePartitionFilter filter = (SlicePartitionFilter) rangeCommand.dataRange().partitionFilter;
-                LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), metadata);
+                LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), filter.isReversed(), metadata);
 
                 out.writeBoolean(filter.isReversed());
                 out.writeInt(command.limits().perPartitionCount());  // TODO check that this is the right count for the slice limit
@@ -1092,7 +1092,7 @@ public abstract class ReadCommand implements ReadQuery
             CFMetaData metadata = command.metadata();
 
             // slice filter serialization
-            serializeSlices(out, command.partitionFilter().requestedSlices(), metadata);
+            serializeSlices(out, command.partitionFilter().requestedSlices(), command.partitionFilter().isReversed(), metadata);
 
             out.writeBoolean(command.partitionFilter().isReversed());
             out.writeInt(command.limits().count());
@@ -1107,15 +1107,15 @@ public abstract class ReadCommand implements ReadQuery
             out.writeInt(compositesToGroup);
         }
 
-        static void serializeSlices(DataOutputPlus out, Slices slices, CFMetaData metadata) throws IOException
+        static void serializeSlices(DataOutputPlus out, Slices slices, boolean isReversed, CFMetaData metadata) throws IOException
         {
             out.writeInt(slices.size());
             for (Slice slice : slices)
             {
                 // TODO may need to handle static slices specially?
-                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start());
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, isReversed ? slice.end() : slice.start(), !isReversed);
                 ByteBufferUtil.writeWithShortLength(sliceStart, out);
-                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end());
+                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, isReversed ? slice.start() : slice.end(), isReversed);
                 ByteBufferUtil.writeWithShortLength(sliceEnd, out);
             }
         }
@@ -1136,9 +1136,9 @@ public abstract class ReadCommand implements ReadQuery
 
             for (Slice slice : slices)
             {
-                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start());
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, slice.start(), true);
                 size += ByteBufferUtil.serializedSizeWithShortLength(sliceStart, sizes);
-                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end());
+                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end(), false);
                 size += ByteBufferUtil.serializedSizeWithShortLength(sliceEnd, sizes);
             }
             return size;
