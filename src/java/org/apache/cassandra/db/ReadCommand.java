@@ -1151,7 +1151,8 @@ public abstract class ReadCommand implements ReadQuery
             else if ((kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && command.limits().perPartitionCount() == 1)
                 compositesToGroup = -2;  // for DISTINCT queries (CASSANDRA-8490)
             else
-                compositesToGroup = metadata.clusteringColumns().size();
+                compositesToGroup = metadata.isDense() ? -1 : metadata.clusteringColumns().size();
+
             out.writeInt(compositesToGroup);
         }
 
