@@ -933,6 +933,7 @@ public abstract class ReadCommand implements ReadQuery
             assert command.kind == Kind.SINGLE_PARTITION;
 
             SinglePartitionReadCommand singleReadCommand = (SinglePartitionReadCommand) command;
+            singleReadCommand = maybleConvertNamesToSlice(singleReadCommand);
 
             CFMetaData metadata = singleReadCommand.metadata();
 
@@ -1009,11 +1010,51 @@ public abstract class ReadCommand implements ReadQuery
             serializeNamesFilter(command, command.partitionFilter(), out);
         }
 
+        private SinglePartitionReadCommand maybleConvertNamesToSlice(SinglePartitionReadCommand command)
+        {
+            if (command.partitionFilter().getKind() != PartitionFilter.Kind.NAMES)
+                return command;
+
+            PartitionColumns columns = command.queriedColumns().columns();
+            CFMetaData metadata = command.metadata();
+            NamesPartitionFilter filter = ((SinglePartitionNamesCommand) command).partitionFilter();
+            SortedSet<Clustering> requestedRows = filter.requestedRows();
+
+            // pre-3.0 nodes don't support names filters for reading collections, so if we're requesting any of those,
+            // we need to convert this to a slice filter
+            for (ColumnDefinition column : columns)
+            {
+                if (column.type.isMultiCell())
+                {
+                    Slices slices;
+                    if (requestedRows.isEmpty() || requestedRows.size() == 1 && requestedRows.first().size() == 0)
+                    {
+                        slices = Slices.ALL;
+                    }
+                    else
+                    {
+                        Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
+                        for (Clustering clustering : requestedRows)
+                            slicesBuilder.add(Slice.Bound.inclusiveStartOf(clustering), Slice.Bound.inclusiveEndOf(clustering));
+                        slices = slicesBuilder.build();
+                    }
+
+                    SlicePartitionFilter sliceFilter = new SlicePartitionFilter(columns, slices, filter.isReversed());
+                    SinglePartitionSliceCommand sliceCommand = new SinglePartitionSliceCommand(
+                            command.isDigestQuery(), command.isForThrift(), metadata, command.nowInSec(),
+                            command.columnFilter(), command.limits(), command.partitionKey(), sliceFilter);
+                    return sliceCommand;
+                }
+            }
+            return command;
+        }
+
         public static void serializeNamesFilter(ReadCommand command, NamesPartitionFilter filter, DataOutputPlus out) throws IOException
         {
+            PartitionColumns columns = command.queriedColumns().columns();
             CFMetaData metadata = command.metadata();
             SortedSet<Clustering> requestedRows = filter.requestedRows();
-            PartitionColumns columns = command.queriedColumns().columns();
+
             if (requestedRows.isEmpty())
             {
                 // only static columns are requested
