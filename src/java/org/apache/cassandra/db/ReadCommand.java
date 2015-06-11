@@ -1013,13 +1013,20 @@ public abstract class ReadCommand implements ReadQuery
         {
             CFMetaData metadata = command.metadata();
             SortedSet<Clustering> requestedRows = filter.requestedRows();
+            PartitionColumns columns = command.queriedColumns().columns();
             if (requestedRows.isEmpty())
             {
                 // only static columns are requested
-                PartitionColumns columns = command.queriedColumns().columns();
                 out.writeInt(columns.size());
                 for (ColumnDefinition column : columns)
                     ByteBufferUtil.writeWithShortLength(column.name.bytes, out);
+            }
+            else if (requestedRows.size() == 1 && requestedRows.first().size() == 0)
+            {
+                // they're not static columns, but there are no clustering columns
+                out.writeInt(columns.size());
+                for (ColumnDefinition column : columns)
+                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, requestedRows.first(), column.name.bytes, null), out);
             }
             else
             {
