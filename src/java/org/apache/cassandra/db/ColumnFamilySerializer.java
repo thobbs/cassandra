@@ -58,6 +58,7 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
         {
             if (cf == null)
             {
+                logger.warn("#### ColumnFamilySerializer: CF was null");
                 out.writeBoolean(false);
                 return;
             }
@@ -67,6 +68,7 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
             cf.getComparator().deletionInfoSerializer().serialize(cf.deletionInfo(), out, version);
             ColumnSerializer columnSerializer = cf.getComparator().columnSerializer();
             int count = cf.getColumnCount();
+            logger.warn("#### serializing mutation with deletion info {}, cells: {}", cf.deletionInfo(), count);
             out.writeInt(count);
             int written = 0;
             for (Cell cell : cf)

@@ -139,6 +139,7 @@ public class ColumnSerializer implements ISerializer<Cell>
         {
             long ts = in.readLong();
             ByteBuffer value = ByteBufferUtil.readWithLength(in);
+            logger.warn("#### deserialized cell ts: {}; value: {}", ts, ByteBufferUtil.bytesToHex(value));
             return (mask & COUNTER_UPDATE_MASK) != 0
                    ? new BufferCounterUpdateCell(name, value, ts)
                    : ((mask & DELETION_MASK) == 0

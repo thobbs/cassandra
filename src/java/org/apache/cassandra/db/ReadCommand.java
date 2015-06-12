@@ -140,9 +140,11 @@ class ReadCommandSerializer implements IVersionedSerializer<ReadCommand>
         switch (command.commandType)
         {
             case GET_BY_NAMES:
+                logger.warn("#### serializing slice command: {}", command);
                 SliceByNamesReadCommand.serializer.serialize(command, out, version);
                 break;
             case GET_SLICES:
+                logger.warn("#### serializing names command: {}", command);
                 SliceFromReadCommand.serializer.serialize(command, out, version);
                 break;
             default:

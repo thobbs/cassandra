@@ -35,9 +35,12 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class Commit
 {
+    private static final Logger logger = LoggerFactory.getLogger(ColumnFamilySerializer.class);
     public static final CommitSerializer serializer = new CommitSerializer();
 
     public final ByteBuffer key;
@@ -132,6 +135,7 @@ public class Commit
         {
             ByteBufferUtil.writeWithShortLength(commit.key, out);
             UUIDSerializer.serializer.serialize(commit.ballot, out, version);
+            logger.warn("#### serializing update CF for Commit");
             ColumnFamily.serializer.serialize(commit.update, out, version);
         }
 

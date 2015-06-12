@@ -517,6 +517,7 @@ public class SliceQueryFilter implements IDiskAtomFilter
             boolean reversed = in.readBoolean();
             int count = in.readInt();
             int compositesToGroup = in.readInt();
+            logger.warn("#### reversed? {}; count: {}; compositesToGroup: {}", reversed, count, compositesToGroup);
 
             return new SliceQueryFilter(slices, reversed, count, compositesToGroup);
         }

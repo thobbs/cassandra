@@ -775,10 +775,10 @@ public class SystemKeyspace
         Token minToken = StorageService.getPartitioner().getMinimumToken();
 
         return schemaCFS(schemaCfName).getRangeSlice(new Range<RowPosition>(minToken.minKeyBound(), minToken.maxKeyBound()),
-                                                     null,
-                                                     new IdentityQueryFilter(),
-                                                     Integer.MAX_VALUE,
-                                                     System.currentTimeMillis());
+                null,
+                new IdentityQueryFilter(),
+                Integer.MAX_VALUE,
+                System.currentTimeMillis());
     }
 
     public static Collection<Mutation> serializeSchema()
@@ -872,15 +872,21 @@ public class SystemKeyspace
         String req = "SELECT * FROM system.%s WHERE row_key = ? AND cf_id = ?";
         UntypedResultSet results = executeInternal(String.format(req, PAXOS_CF), key, metadata.cfId);
         if (results.isEmpty())
+        {
+            logger.warn("#### paxos row is empty, returning fresh PaxosState");
             return new PaxosState(key, metadata);
+        }
         UntypedResultSet.Row row = results.one();
+        logger.warn("#### loading in_progress_ballot");
         Commit promised = row.has("in_progress_ballot")
                         ? new Commit(key, row.getUUID("in_progress_ballot"), ArrayBackedSortedColumns.factory.create(metadata))
                         : Commit.emptyCommit(key, metadata);
+        logger.warn("#### loading proposal");
         // either we have both a recently accepted ballot and update or we have neither
         Commit accepted = row.has("proposal")
                         ? new Commit(key, row.getUUID("proposal_ballot"), ColumnFamily.fromBytes(row.getBytes("proposal")))
                         : Commit.emptyCommit(key, metadata);
+        logger.warn("#### loading most_recent_commit");
         // either most_recent_commit and most_recent_commit_at will both be set, or neither
         Commit mostRecent = row.has("most_recent_commit")
                           ? new Commit(key, row.getUUID("most_recent_commit_at"), ColumnFamily.fromBytes(row.getBytes("most_recent_commit")))

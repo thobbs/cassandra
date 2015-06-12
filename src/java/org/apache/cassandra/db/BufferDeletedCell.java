@@ -68,6 +68,7 @@ public class BufferDeletedCell extends BufferCell implements DeletedCell
     @Override
     public int getLocalDeletionTime()
     {
+        // logger.warn("### getLocalDeletionTime(), value: {}", ByteBufferUtil.bytesToHex(value()));
        return value().getInt(value.position());
     }
 

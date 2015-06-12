@@ -32,9 +32,12 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.UUIDSerializer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class PrepareResponse
 {
+    private static final Logger logger = LoggerFactory.getLogger(PrepareResponse.class);
     public static final PrepareResponseSerializer serializer = new PrepareResponseSerializer();
 
     public final boolean promised;
@@ -79,7 +82,21 @@ public class PrepareResponse
         {
             boolean success = in.readBoolean();
             ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
-            return new PrepareResponse(success,
+            logger.warn("#### deserializing PrepareResponse, success: {}; key: {}", success, ByteBufferUtil.bytesToHex(key));
+            Commit inProgress = new Commit(key,
+                    UUIDSerializer.serializer.deserialize(in, version),
+                    ColumnFamily.serializer.deserialize(in,
+                            ArrayBackedSortedColumns.factory,
+                            ColumnSerializer.Flag.LOCAL, version));
+            logger.warn("#### deserialized inProgress Commit: {}", inProgress);
+            Commit mostRecent =         new Commit(key,
+                    UUIDSerializer.serializer.deserialize(in, version),
+                    ColumnFamily.serializer.deserialize(in,
+                            ArrayBackedSortedColumns.factory,
+                            ColumnSerializer.Flag.LOCAL, version));
+            logger.warn("#### deserialized mostRecent Commit: {}", mostRecent);
+            return new PrepareResponse(success, inProgress, mostRecent);
+            /*
                                        new Commit(key,
                                                   UUIDSerializer.serializer.deserialize(in, version),
                                                   ColumnFamily.serializer.deserialize(in,
@@ -90,6 +107,7 @@ public class PrepareResponse
                                                   ColumnFamily.serializer.deserialize(in,
                                                                                       ArrayBackedSortedColumns.factory,
                                                                                       ColumnSerializer.Flag.LOCAL, version)));
+            */
         }
 
         public long serializedSize(PrepareResponse response, int version)

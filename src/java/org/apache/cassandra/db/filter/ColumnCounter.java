@@ -115,6 +115,7 @@ public class ColumnCounter
 
             CellName current = cell.name();
             assert current.size() >= toGroup;
+            // assert current.size() >= toGroup : "toGroup = " + toGroup + "; composite size = " + current.size() + "; cell name: '" + type.getString(current) + "'";
 
             if (previous != null)
             {

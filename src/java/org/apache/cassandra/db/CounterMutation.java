@@ -41,9 +41,13 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CounterMutation implements IMutation
 {
+    private static final Logger logger = LoggerFactory.getLogger(CounterMutation.class);
+
     public static final CounterMutationSerializer serializer = new CounterMutationSerializer();
 
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentCounterWriters() * 1024);
@@ -108,6 +112,7 @@ public class CounterMutation implements IMutation
      */
     public Mutation apply() throws WriteTimeoutException
     {
+        logger.warn("#### in CounterMutation.apply() for {}", this);
         Mutation result = new Mutation(getKeyspaceName(), key());
         Keyspace keyspace = Keyspace.open(getKeyspaceName());
 
@@ -122,6 +127,7 @@ public class CounterMutation implements IMutation
             grabCounterLocks(keyspace, locks);
             for (ColumnFamily cf : getColumnFamilies())
                 result.add(processModifications(cf));
+            logger.warn("#### applying result in CounterMutation.apply() for {}", this);
             result.apply();
             updateCounterCache(result, keyspace);
             return result;
@@ -181,10 +187,12 @@ public class CounterMutation implements IMutation
         ColumnFamilyStore cfs = Keyspace.open(getKeyspaceName()).getColumnFamilyStore(changesCF.id());
 
         ColumnFamily resultCF = changesCF.cloneMeShallow();
+        logger.warn("#### counter update CF: {}", resultCF);
 
         List<CounterUpdateCell> counterUpdateCells = new ArrayList<>(changesCF.getColumnCount());
         for (Cell cell : changesCF)
         {
+            logger.warn("#### cell in counter update CF: {}", cell);
             if (cell instanceof CounterUpdateCell)
                 counterUpdateCells.add((CounterUpdateCell)cell);
             else
@@ -192,8 +200,12 @@ public class CounterMutation implements IMutation
         }
 
         if (counterUpdateCells.isEmpty())
+        {
+            logger.warn("#### CounterMutation {} only contains deletes", this);
             return resultCF; // only DELETEs
+        }
 
+        logger.warn("#### Updating current counter values");
         ClockAndCount[] currentValues = getCurrentValues(counterUpdateCells, cfs);
         for (int i = 0; i < counterUpdateCells.size(); i++)
         {
@@ -201,7 +213,9 @@ public class CounterMutation implements IMutation
             CounterUpdateCell update = counterUpdateCells.get(i);
 
             long clock = currentValue.clock + 1L;
+            logger.warn("#### counter value before update: {}", currentValue.count);
             long count = currentValue.count + update.delta();
+            logger.warn("#### counter value after update with delta {}: {}", update.delta(), currentValue.count);
 
             resultCF.addColumn(new BufferCounterCell(update.name(),
                                                      CounterContext.instance().createGlobal(CounterId.getLocalId(), clock, count),

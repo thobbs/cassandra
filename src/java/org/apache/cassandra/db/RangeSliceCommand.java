@@ -155,6 +155,7 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
     private static final Logger logger = LoggerFactory.getLogger(RangeSliceCommandSerializer.class);
     public void serialize(RangeSliceCommand sliceCommand, DataOutputPlus out, int version) throws IOException
     {
+        logger.warn("#### serializing range slice command for {}.{}", sliceCommand.keyspace, sliceCommand.columnFamily);
         out.writeUTF(sliceCommand.keyspace);
         out.writeUTF(sliceCommand.columnFamily);
         out.writeLong(sliceCommand.timestamp);
@@ -172,6 +173,7 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
             out.writeInt(sliceCommand.rowFilter.size());
             for (IndexExpression expr : sliceCommand.rowFilter)
             {
+                logger.warn("#### serializing index expression: {}", expr);
                 expr.writeTo(out);
             }
         }
