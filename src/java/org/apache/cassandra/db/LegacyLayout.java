@@ -203,6 +203,13 @@ public abstract class LegacyLayout
             return ByteBufferUtil.EMPTY_BYTE_BUFFER;
 
         ClusteringPrefix clustering = bound.clustering();
+
+        if (!metadata.isCompound())
+        {
+            assert clustering.size() == 1;
+            return clustering.get(0);
+        }
+
         CompositeType ctype = CompositeType.getInstance(metadata.comparator.subtypes());
         CompositeType.Builder builder = ctype.builder();
         for (int i = 0; i < clustering.size(); i++)
