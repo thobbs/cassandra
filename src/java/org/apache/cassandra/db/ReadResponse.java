@@ -20,10 +20,18 @@ package org.apache.cassandra.db;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
+import java.util.Iterator;
 
+import com.google.common.collect.AbstractIterator;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.filter.ColumnsSelection;
+import org.apache.cassandra.db.filter.PartitionFilter;
+import org.apache.cassandra.db.filter.SlicePartitionFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -77,6 +85,10 @@ public abstract class ReadResponse
     }
 
     public void maybeReverse()
+    {
+    }
+
+    public void applySliceRestriction(ReadCommand command)
     {
     }
 
@@ -238,6 +250,60 @@ public abstract class ReadResponse
                 // We're deserializing in memory so this shouldn't happen
                 throw new RuntimeException(e);
             }
+        }
+
+        // TODO unify with reversal
+        // Pre-3.0, we didn't have a way to express exclusivity for non-composite comparators, so all slices were
+        // inclusive on both ends.  If we have exclusive slice ends, we need to filter the results here.
+        public void applySliceRestriction(ReadCommand command)
+        {
+            if (command.metadata().isCompound())
+                return;
+
+            final UnfilteredPartitionIterator unreversedPartitionIterator = iterator;
+            iterator = new UnfilteredPartitionIterator()
+            {
+                UnfilteredRowIterator next;
+
+                @Override
+                public boolean isForThrift()
+                {
+                    return unreversedPartitionIterator.isForThrift();
+                }
+
+                @Override
+                public boolean hasNext()
+                {
+                    return unreversedPartitionIterator.hasNext();
+                }
+
+                @Override
+                public UnfilteredRowIterator next()
+                {
+                    UnfilteredRowIterator unreversedNext = unreversedPartitionIterator.next();
+                    PartitionFilter filter = command.partitionFilter(unreversedNext.partitionKey());
+                    if (filter.getKind() == PartitionFilter.Kind.SLICE)
+                    {   ArrayBackedPartition partition = ArrayBackedPartition.create(unreversedNext);
+                        logger.warn("#### number of rows in partition: {}", partition.rowCount());
+                        next = partition.unfilteredIterator(
+                                filter.queriedColumns(), ((SlicePartitionFilter) filter).requestedSlices(),
+                                filter.isReversed(), unreversedNext.nowInSec());
+                    }
+                    else
+                    {
+                        next = unreversedNext;
+                    }
+
+                    return next;
+                }
+
+                @Override
+                public void close()
+                {
+                    if (next != null)
+                        next.close();
+                }
+            };
         }
 
         @Override
