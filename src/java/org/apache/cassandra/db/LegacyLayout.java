@@ -512,7 +512,7 @@ public abstract class LegacyLayout
                 if (!hasReturnedRowMarker)
                 {
                     hasReturnedRowMarker = true;
-                    LegacyCellName cellName = new LegacyCellName(row.clustering(), null, null);
+                    LegacyCellName cellName = new LegacyCellName(row.clustering().takeAlias(), null, null);
                     LivenessInfo info = row.primaryKeyLivenessInfo();
                     return new LegacyCell(LegacyCell.Kind.REGULAR, cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER, info.timestamp(), info.localDeletionTime(), info.ttl());
                 }
