@@ -1175,16 +1175,31 @@ public abstract class ReadCommand implements ReadQuery
             out.writeInt(compositesToGroup);
         }
 
+        private static void serializeSlice(DataOutputPlus out, Slice slice, boolean isReversed, CFMetaData metadata) throws IOException
+        {
+            // TODO may need to handle static slices specially?
+            ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, isReversed ? slice.end() : slice.start(), !isReversed);
+            ByteBufferUtil.writeWithShortLength(sliceStart, out);
+
+            ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, isReversed ? slice.start() : slice.end(), isReversed);
+            ByteBufferUtil.writeWithShortLength(sliceEnd, out);
+        }
+
         static void serializeSlices(DataOutputPlus out, Slices slices, boolean isReversed, CFMetaData metadata) throws IOException
         {
             out.writeInt(slices.size());
-            for (Slice slice : slices)
+
+            // In 3.0 we always store the slices in normal comparator order.  Pre-3.0 nodes expect the slices to
+            // be in reversed order if the query is reversed, so we handle that here.
+            if (isReversed)
             {
-                // TODO may need to handle static slices specially?
-                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, isReversed ? slice.end() : slice.start(), !isReversed);
-                ByteBufferUtil.writeWithShortLength(sliceStart, out);
-                ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, isReversed ? slice.start() : slice.end(), isReversed);
-                ByteBufferUtil.writeWithShortLength(sliceEnd, out);
+                for (int i = slices.size() - 1; i >= 0; i--)
+                    serializeSlice(out, slices.get(i), isReversed, metadata);
+            }
+            else
+            {
+                for (Slice slice : slices)
+                    serializeSlice(out, slice, isReversed, metadata);
             }
         }
 
