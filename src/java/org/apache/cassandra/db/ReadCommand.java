@@ -632,7 +632,7 @@ public abstract class ReadCommand implements ReadQuery
                 LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), filter.isReversed(), metadata);
 
                 out.writeBoolean(filter.isReversed());
-                out.writeInt(command.limits().perPartitionCount());  // TODO check that this is the right count for the slice limit
+                out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(command.limits().count(), filter.requestedSlices()));
                 int compositesToGroup;
                 DataLimits.Kind kind = command.limits().kind();
                 if (kind == DataLimits.Kind.THRIFT_LIMIT)
@@ -1040,10 +1040,9 @@ public abstract class ReadCommand implements ReadQuery
                     }
 
                     SlicePartitionFilter sliceFilter = new SlicePartitionFilter(columns, slices, filter.isReversed());
-                    SinglePartitionSliceCommand sliceCommand = new SinglePartitionSliceCommand(
+                    return new SinglePartitionSliceCommand(
                             command.isDigestQuery(), command.isForThrift(), metadata, command.nowInSec(),
                             command.columnFilter(), command.limits(), command.partitionKey(), sliceFilter);
-                    return sliceCommand;
                 }
             }
             return command;
@@ -1135,6 +1134,26 @@ public abstract class ReadCommand implements ReadQuery
             return new SinglePartitionNamesCommand(isDigest, true, metadata, nowInSeconds, ColumnFilter.NONE, DataLimits.NONE, key, filter);
         }
 
+        static int updateLimitForQuery(int limit, Slices slices)
+        {
+            // Pre-3.0 nodes don't support exclusive bounds for slices. Instead, we query one more element if necessary
+            // and filter it later (in LegacyRemoteDataResponse)
+            if (!slices.hasLowerBound() && ! slices.hasUpperBound())
+                return limit;
+
+            for (Slice slice : slices)
+            {
+                if (limit == Integer.MAX_VALUE)
+                    return limit;
+
+                if (!slice.start().isInclusive())
+                    limit++;
+                if (!slice.end().isInclusive())
+                    limit++;
+            }
+            return limit;
+        }
+
         private void serializeSliceCommand(SinglePartitionSliceCommand command, DataOutputPlus out, int version) throws IOException
         {
             CFMetaData metadata = command.metadata();
@@ -1143,7 +1162,7 @@ public abstract class ReadCommand implements ReadQuery
             serializeSlices(out, command.partitionFilter().requestedSlices(), command.partitionFilter().isReversed(), metadata);
 
             out.writeBoolean(command.partitionFilter().isReversed());
-            out.writeInt(command.limits().count());
+            out.writeInt(updateLimitForQuery(command.limits().count(), command.partitionFilter().requestedSlices()));
             int compositesToGroup;
             DataLimits.Kind kind = command.limits().kind();
             if (kind == DataLimits.Kind.THRIFT_LIMIT)
