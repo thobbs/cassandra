@@ -280,11 +280,14 @@ public abstract class ReadResponse
                 @Override
                 public UnfilteredRowIterator next()
                 {
+                    if (next != null && next.hasNext())
+                        throw new IllegalStateException("Cannot call hasNext() until the previous iterator has been fully consumed");
+
                     UnfilteredRowIterator unreversedNext = unreversedPartitionIterator.next();
                     PartitionFilter filter = command.partitionFilter(unreversedNext.partitionKey());
-                    if (filter.getKind() == PartitionFilter.Kind.SLICE)
-                    {   ArrayBackedPartition partition = ArrayBackedPartition.create(unreversedNext);
-                        logger.warn("#### number of rows in partition: {}", partition.rowCount());
+                    if (filter.getKind() == PartitionFilter.Kind.SLICE && !filter.selectsAllPartition())
+                    {
+                        ArrayBackedPartition partition = ArrayBackedPartition.create(unreversedNext);
                         next = partition.unfilteredIterator(
                                 filter.queriedColumns(), ((SlicePartitionFilter) filter).requestedSlices(),
                                 filter.isReversed(), unreversedNext.nowInSec());
@@ -300,8 +303,15 @@ public abstract class ReadResponse
                 @Override
                 public void close()
                 {
-                    if (next != null)
-                        next.close();
+                    try
+                    {
+                        iterator.close();
+                    }
+                    finally
+                    {
+                        if (next != null)
+                            next.close();
+                    }
                 }
             };
         }
@@ -340,8 +350,15 @@ public abstract class ReadResponse
                 @Override
                 public void close()
                 {
-                    if (next != null)
-                        next.close();
+                    try
+                    {
+                        unreversedPartitionIterator.close();
+                    }
+                    finally
+                    {
+                        if (next != null)
+                            next.close();
+                    }
                 }
             };
         }
