@@ -632,7 +632,7 @@ public abstract class ReadCommand implements ReadQuery
                 LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), filter.isReversed(), metadata);
 
                 out.writeBoolean(filter.isReversed());
-                out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(command.limits().count(), filter.requestedSlices()));
+                out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(command.limits().perPartitionCount(), filter.requestedSlices()));
                 int compositesToGroup;
                 DataLimits.Kind kind = command.limits().kind();
                 if (kind == DataLimits.Kind.THRIFT_LIMIT)
@@ -664,7 +664,12 @@ public abstract class ReadCommand implements ReadQuery
             // key range serialization
             AbstractBounds.rowPositionSerializer.serialize(rangeCommand.dataRange().keyRange(), out, version);
             out.writeInt(rangeCommand.limits().count());  // maxResults
-            out.writeBoolean(!rangeCommand.isForThrift());  // countCQL3Rows TODO probably not correct, need to handle DISTINCT
+            boolean countCQL3Rows = true;
+            if (rangeCommand.isForThrift())
+                countCQL3Rows = false;
+            else if (rangeCommand.limits().perPartitionCount() == 1)
+                countCQL3Rows = false;  // for DISTINCT queries
+            out.writeBoolean(countCQL3Rows);
             out.writeBoolean(rangeCommand.dataRange().isPaging());  // isPaging
         }
 
