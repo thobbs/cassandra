@@ -56,6 +56,12 @@ public abstract class Clustering extends AbstractClusteringPrefix
         }
 
         @Override
+        public String toString()
+        {
+            return "STATIC";
+        }
+
+        @Override
         public String toString(CFMetaData metadata)
         {
             return "STATIC";
@@ -122,6 +128,12 @@ public abstract class Clustering extends AbstractClusteringPrefix
         public long unsharedHeapSize()
         {
             return 0;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "EMPTY";
         }
 
         @Override
