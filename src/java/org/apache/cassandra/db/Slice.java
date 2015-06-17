@@ -375,6 +375,14 @@ public class Slice
             return create(Kind.EXCL_END_BOUND, values);
         }
 
+        public static Bound inclusiveStartOf(ClusteringPrefix prefix)
+        {
+            ByteBuffer[] values = new ByteBuffer[prefix.size()];
+            for (int i = 0; i < prefix.size(); i++)
+                values[i] = prefix.get(i);
+            return inclusiveStartOf(values);
+        }
+
         public static Bound exclusiveStartOf(ClusteringPrefix prefix)
         {
             ByteBuffer[] values = new ByteBuffer[prefix.size()];
