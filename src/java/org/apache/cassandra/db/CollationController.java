@@ -41,9 +41,13 @@ import org.apache.cassandra.io.sstable.SSTableReader;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.memory.HeapAllocator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class CollationController
 {
+    private static final Logger logger = LoggerFactory.getLogger(CollationController.class);
+
     private final ColumnFamilyStore cfs;
     private final QueryFilter filter;
     private final int gcBefore;
@@ -312,6 +316,8 @@ public class CollationController
 
             Tracing.trace("Merging data from memtables and {} sstables", sstablesIterated);
             filter.collateOnDiskAtom(returnCF, iterators, gcBefore);
+
+            logger.warn("##### collectAllData(), returnCF: {}", returnCF);
 
             // Caller is responsible for final removeDeletedCF.  This is important for cacheRow to work correctly:
             return returnCF;
