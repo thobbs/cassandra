@@ -558,7 +558,7 @@ public abstract class LegacyLayout
     {
         return cell.isTombstone()
              ? SimpleLivenessInfo.forDeletion(cell.timestamp, cell.localDeletionTime)
-             : SimpleLivenessInfo.forUpdate(cell.timestamp, cell.ttl, cell.localDeletionTime, metadata);
+             : SimpleLivenessInfo.forLegacyUpdate(cell.timestamp, cell.ttl, cell.localDeletionTime, metadata);
     }
 
     public static Comparator<LegacyCell> legacyCellComparator(CFMetaData metadata)
