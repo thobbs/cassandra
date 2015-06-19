@@ -53,6 +53,7 @@ public abstract class ResponseResolver
     {
         if (command.rowsInPartitionAreReversed())
             message.payload.maybeReverse();
+        message.payload.applySliceRestriction(command);
         responses.add(message);
     }
 
