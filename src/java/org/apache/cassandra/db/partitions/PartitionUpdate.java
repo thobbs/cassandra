@@ -667,12 +667,6 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                         }
                         continue;
                     }
-                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
-                    {
-                        out.writeByte(LegacyLayout.EXPIRATION_MASK);
-                        out.writeInt(cell.ttl);
-                        out.writeLong(cell.localDeletionTime);
-                    }
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
                     {
                         out.writeByte(LegacyLayout.DELETION_MASK);
@@ -680,6 +674,12 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                         out.writeInt(TypeSizes.NATIVE.sizeof(cell.localDeletionTime));
                         out.writeInt(cell.localDeletionTime);
                         continue;
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                    {
+                        out.writeByte(LegacyLayout.EXPIRATION_MASK);
+                        out.writeInt(cell.ttl);
+                        out.writeInt(cell.localDeletionTime);
                     }
                     else
                     {
@@ -814,17 +814,17 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                         }
                         continue;
                     }
-                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
-                    {
-                        size += sizes.sizeof(cell.ttl);
-                        size += sizes.sizeof(cell.localDeletionTime);
-                    }
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
                     {
                         size += sizes.sizeof(cell.timestamp);
                         size += sizes.sizeof(4);
                         size += sizes.sizeof(cell.localDeletionTime);
                         continue;
+                    }
+                    else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+                    {
+                        size += sizes.sizeof(cell.ttl);
+                        size += sizes.sizeof(cell.localDeletionTime);
                     }
 
                     size += sizes.sizeof(cell.timestamp);
