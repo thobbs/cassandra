@@ -570,51 +570,34 @@ public abstract class UnfilteredPartitionIterators
             assert version < MessagingService.VERSION_30;
 
             ByteBufferUtil.writeWithShortLength(partition.partitionKey().getKey(), out);
-            Pair<DeletionInfo, Iterator<LegacyLayout.LegacyCell>> pair = LegacyLayout.fromUnfilteredRowIterator(partition);
+            Pair<DeletionInfo, Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>>> pair = LegacyLayout.fromUnfilteredRowIterator(partition);
+            DeletionInfo deletionInfo = pair.left;
+            LegacyLayout.LegacyRangeTombstoneList rtl = pair.right.left;
 
-            if (!pair.right.hasNext())
-            {
-                out.writeBoolean(false);
-                return;
-            }
+            // Processing the cell iterator results in the LegacyRangeTombstoneList being populated, so we do this
+            // before we use the LegacyRangeTombstoneList at all
+            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right.right);
 
             out.writeBoolean(true);
             UUIDSerializer.serializer.serialize(partition.metadata().cfId, out, version);
+            DeletionTime.serializer.serialize(deletionInfo.getPartitionDeletion(), out);
 
-            DeletionTime.serializer.serialize(pair.left.getPartitionDeletion(), out);
-
-            // begin serialization of the range tombstone list
-            out.writeInt(pair.left.rangeCount());
-            if (pair.left.hasRanges())
+            if (deletionInfo.hasRanges())
             {
-                Iterator<RangeTombstone> rangeTombstoneIterator = pair.left.rangeIterator(false);  // TODO reversed?
-                CompositeType type = CompositeType.getInstance(pair.left.rangeComparator().subtypes());
+                Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);
                 while (rangeTombstoneIterator.hasNext())
                 {
                     RangeTombstone rt = rangeTombstoneIterator.next();
                     Slice slice = rt.deletedSlice();
-                    CompositeType.Builder startBuilder = type.builder();
-                    CompositeType.Builder finishBuilder = type.builder();
-                    for (int i = 0; i < slice.start().clustering().size(); i++)
-                    {
-                        startBuilder.add(slice.start().get(i));
-                        finishBuilder.add(slice.end().get(i));
-                    }
-
-                    // TODO double check inclusive ends
-                    ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
-                    if (slice.end().isInclusive())
-                        ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
-                    else
-                        ByteBufferUtil.writeWithShortLength(startBuilder.buildAsEndOfRange(), out);
-
-                    out.writeInt(rt.deletionTime().localDeletionTime());
-                    out.writeLong(rt.deletionTime().markedForDeleteAt());
+                    LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                    LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                    rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
                 }
             }
 
+            rtl.serialize(out, partition.metadata());
+
             // begin cell serialization
-            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right);
             out.writeInt(cells.size());
             for (LegacyLayout.LegacyCell cell : cells)
             {
@@ -686,42 +669,34 @@ public abstract class UnfilteredPartitionIterators
             TypeSizes sizes = TypeSizes.NATIVE;
 
             long size = ByteBufferUtil.serializedSizeWithShortLength(partition.partitionKey().getKey(), sizes);
-            Pair<DeletionInfo, Iterator<LegacyLayout.LegacyCell>> pair = LegacyLayout.fromUnfilteredRowIterator(partition);
+            Pair<DeletionInfo, Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>>> pair = LegacyLayout.fromUnfilteredRowIterator(partition);
+            DeletionInfo deletionInfo = pair.left;
+            LegacyLayout.LegacyRangeTombstoneList rtl = pair.right.left;
 
-            if (!pair.right.hasNext())
-                return size + sizes.sizeof(false);
+            // Processing the cell iterator results in the LegacyRangeTombstoneList being populated, so we do this
+            // before we use the LegacyRangeTombstoneList at all
+            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right.right);
 
             size += sizes.sizeof(true);
             size += UUIDSerializer.serializer.serializedSize(partition.metadata().cfId, version);
             size += DeletionTime.serializer.serializedSize(pair.left.getPartitionDeletion(), sizes);
 
-            // begin range tombstone list
-            size += sizes.sizeof(pair.left.rangeCount());
-            if (pair.left.hasRanges())
+            if (deletionInfo.hasRanges())
             {
-                Iterator<RangeTombstone> rangeTombstoneIterator = pair.left.rangeIterator(false);  // TODO reversed?
-                CompositeType type = CompositeType.getInstance(pair.left.rangeComparator().subtypes());
+                Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);
                 while (rangeTombstoneIterator.hasNext())
                 {
                     RangeTombstone rt = rangeTombstoneIterator.next();
                     Slice slice = rt.deletedSlice();
-                    CompositeType.Builder startBuilder = type.builder();
-                    CompositeType.Builder finishBuilder = type.builder();
-                    for (int i = 0; i < slice.start().clustering().size(); i++)
-                    {
-                        startBuilder.add(slice.start().get(i));
-                        finishBuilder.add(slice.end().get(i));
-                    }
-
-                    size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build(), sizes);
-                    size += ByteBufferUtil.serializedSizeWithShortLength(finishBuilder.build(), sizes);
-                    size += sizes.sizeof(rt.deletionTime().localDeletionTime());
-                    size += sizes.sizeof(rt.deletionTime().markedForDeleteAt());
+                    LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                    LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                    rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
                 }
             }
 
+            size += rtl.serializedSize(sizes, partition.metadata());
+
             // begin cell serialization
-            List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right);
             size += sizes.sizeof(cells.size());
             for (LegacyLayout.LegacyCell cell : cells)
             {

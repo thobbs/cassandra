@@ -236,7 +236,7 @@ public class CassandraServer implements Cassandra.Iface
         if (RowIterators.isEmpty(partition))
             return EMPTY_COLUMNS;
 
-        Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.fromRowIterator(partition);
+        Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.fromRowIterator(partition).right;
         List<ColumnOrSuperColumn> result;
         if (partition.metadata().isSuper())
         {
@@ -884,7 +884,7 @@ public class CassandraServer implements Cassandra.Iface
                                                   cState);
             return result == null
                  ? new CASResult(true)
-                 : new CASResult(false).setCurrent_values(thriftifyColumnsAsColumns(metadata, LegacyLayout.fromRowIterator(result)));
+                 : new CASResult(false).setCurrent_values(thriftifyColumnsAsColumns(metadata, LegacyLayout.fromRowIterator(result).right));
         }
         catch (UnknownColumnException e)
         {

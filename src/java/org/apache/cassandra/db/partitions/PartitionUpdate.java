@@ -26,7 +26,7 @@ import java.util.*;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.apache.cassandra.db.context.CounterContext;
-import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -607,49 +607,43 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                 out.writeBoolean(true);
                 CFMetaData.serializer.serialize(update.metadata, out, version);
 
-                // TODO unify with UnfilteredPartitionIterators serialization, move to LegacyLayout?
+                Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>> results = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
+                LegacyLayout.LegacyRangeTombstoneList rtl = results.left;
+                ArrayList<LegacyLayout.LegacyCell> cells = Lists.newArrayList(results.right);
 
+                // It's inefficient to pull everything into a list first, but it's the only way to get an accurate
+                // cell count and merge single-row tombstones with normal range tombstones
                 DeletionTime.serializer.serialize(update.deletionInfo.getPartitionDeletion(), out);
 
-                // TODO need to merge single-row deletions (update.deletions) with range tombstones in sorted order
-                for (int i = 0; i < update.deletions.size(); i++)
-                    if (update.deletions.isLive(i))
-                        throw new UnsupportedOperationException("Single-row tombstones aren't supported yet");
-
-                // begin serialization of the range tombstone list
-                out.writeInt(update.deletionInfo.rangeCount());
-                if (update.deletionInfo.hasRanges())
+                // convert single-row deletions into RangeTombstones and merge them into the list
+                DeletionInfo deletionInfo = update.deletionInfo.copy();
+                DeletionTimeArray.Cursor cursor = new DeletionTimeArray.Cursor();
+                int rowIndex = 0;
+                for (Row row : update)
                 {
-                    Iterator<RangeTombstone> rangeTombstoneIterator = update.deletionInfo.rangeIterator(false);  // TODO reversed?
-                    CompositeType type = CompositeType.getInstance(update.deletionInfo.rangeComparator().subtypes());
+                    if (!update.deletions.isLive(rowIndex))
+                    {
+                        RangeTombstone rt = new RangeTombstone(Slice.make(update.metadata.comparator, row.clustering()),
+                                                               cursor.setTo(update.deletions, rowIndex).takeAlias());
+                        deletionInfo.add(rt, update.metadata.comparator);
+                    }
+                    rowIndex++;
+                }
+
+                if (deletionInfo.hasRanges())
+                {
+                    Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);  // TODO reversed?
                     while (rangeTombstoneIterator.hasNext())
                     {
                         RangeTombstone rt = rangeTombstoneIterator.next();
                         Slice slice = rt.deletedSlice();
-                        CompositeType.Builder startBuilder = type.builder();
-                        CompositeType.Builder finishBuilder = type.builder();
-                        for (int i = 0; i < slice.start().clustering().size(); i++)
-                        {
-                            startBuilder.add(slice.start().get(i));
-                            finishBuilder.add(slice.end().get(i));
-                        }
-
-                        // TODO double check inclusive ends
-                        ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
-                        if (slice.end().isInclusive())
-                            ByteBufferUtil.writeWithShortLength(finishBuilder.build(), out);
-                        else
-                            ByteBufferUtil.writeWithShortLength(finishBuilder.buildAsEndOfRange(), out);
-
-                        out.writeInt(rt.deletionTime().localDeletionTime());
-                        out.writeLong(rt.deletionTime().markedForDeleteAt());
+                        LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                        LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                        rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
                     }
                 }
 
-                // TODO it's inefficient to pull everything into a list first, but it seems like the only sane way
-                // of getting an accurate cell count
-                Iterator<LegacyLayout.LegacyCell> cellIterator = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
-                ArrayList<LegacyLayout.LegacyCell> cells = Lists.newArrayList(cellIterator);
+                rtl.serialize(out, update.metadata);
 
                 out.writeInt(cells.size());
                 for (LegacyLayout.LegacyCell cell : cells)
@@ -763,42 +757,43 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
 
                 size += DeletionTime.serializer.serializedSize(update.deletionInfo.getPartitionDeletion(), sizes);
 
-                // TODO need account for single-row deletions (update.deletions)
-                for (int i = 0; i < update.deletions.size(); i++)
-                    if (update.deletions.isLive(i))
-                        throw new UnsupportedOperationException("Single-row tombstones aren't supported yet");
+                Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>> results = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
+                LegacyLayout.LegacyRangeTombstoneList rtl = results.left;
+                ArrayList<LegacyLayout.LegacyCell> cells = Lists.newArrayList(results.right);
 
-                // begin serialization of the range tombstone list
-                size += sizes.sizeof(update.deletionInfo.rangeCount());
-                if (update.deletionInfo.hasRanges())
+                // convert single-row deletions into RangeTombstones and merge them into the list
+                DeletionInfo deletionInfo = update.deletionInfo.copy();
+                DeletionTimeArray.Cursor cursor = new DeletionTimeArray.Cursor();
+                int rowIndex = 0;
+                for (Row row : update)
                 {
-                    Iterator<RangeTombstone> rangeTombstoneIterator = update.deletionInfo.rangeIterator(false);
-                    CompositeType type = CompositeType.getInstance(update.deletionInfo.rangeComparator().subtypes());
+                    if (!update.deletions.isLive(rowIndex))
+                    {
+                        RangeTombstone rt = new RangeTombstone(Slice.make(update.metadata.comparator, row.clustering()),
+                                                               cursor.setTo(update.deletions, rowIndex).takeAlias());
+                        deletionInfo.add(rt, update.metadata.comparator);
+                    }
+                    rowIndex++;
+                }
+
+                if (deletionInfo.hasRanges())
+                {
+                    Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);
                     while (rangeTombstoneIterator.hasNext())
                     {
                         RangeTombstone rt = rangeTombstoneIterator.next();
                         Slice slice = rt.deletedSlice();
-                        CompositeType.Builder startBuilder = type.builder();
-                        CompositeType.Builder finishBuilder = type.builder();
-                        for (int i = 0; i < slice.start().clustering().size(); i++)
-                        {
-                            startBuilder.add(slice.start().get(i));
-                            finishBuilder.add(slice.end().get(i));
-                        }
-
-                        // TODO double check inclusive ends
-                        size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build(), sizes);
-                        size += ByteBufferUtil.serializedSizeWithShortLength(finishBuilder.build(), sizes);
-                        size += sizes.sizeof(rt.deletionTime().localDeletionTime());
-                        size += sizes.sizeof(rt.deletionTime().markedForDeleteAt());
+                        LegacyLayout.LegacyBound start = new LegacyLayout.LegacyBound(slice.start(), false, null);
+                        LegacyLayout.LegacyBound end = new LegacyLayout.LegacyBound(slice.end(), false, null);
+                        rtl.add(start, end, rt.deletionTime().markedForDeleteAt(), rt.deletionTime().localDeletionTime());
                     }
                 }
 
-                size += sizes.sizeof(update.size());
-                Iterator<LegacyLayout.LegacyCell> cellIterator = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
-                while (cellIterator.hasNext())
+                size += rtl.serializedSize(sizes, update.metadata);
+
+                size += sizes.sizeof(cells.size());
+                for (LegacyLayout.LegacyCell cell : cells)
                 {
-                    LegacyLayout.LegacyCell cell = cellIterator.next();
                     size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(update.metadata), sizes);
 
                     size += 1; // serialization flags
