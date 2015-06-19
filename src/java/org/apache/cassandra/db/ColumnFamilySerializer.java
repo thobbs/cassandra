@@ -112,8 +112,9 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
         }
         else
         {
-            cf.delete(cf.getComparator().deletionInfoSerializer().deserialize(in, version));
-            logger.warn("### deserialized deletion info");
+            DeletionInfo deletionInfo = cf.getComparator().deletionInfoSerializer().deserialize(in, version);
+            cf.delete(deletionInfo);
+            logger.warn("### deserialized deletion info: {}", deletionInfo);
 
             ColumnSerializer columnSerializer = cf.getComparator().columnSerializer();
             int size = in.readInt();
@@ -126,7 +127,7 @@ public class ColumnFamilySerializer implements IVersionedSerializer<ColumnFamily
                 cf.addColumn(cell);
             }
         }
-        logger.warn("### returning deserialized cf");
+        logger.warn("### returning deserialized cf: {}", cf);
         return cf;
     }
 

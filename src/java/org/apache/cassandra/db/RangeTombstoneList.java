@@ -833,6 +833,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
         public RangeTombstoneList deserialize(DataInput in, int version) throws IOException
         {
             int size = in.readInt();
+            logger.warn("#### deserializing RangeTombstoneList with {} items", size);
             if (size == 0)
                 return null;
 
@@ -845,6 +846,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
                 int delTime =  in.readInt();
                 long markedAt = in.readLong();
 
+                logger.warn("#### deserialized RangeTombstone: [{}, {}], delTime={}, markedAt={}", type.getString(start), type.getString(end), delTime, markedAt);
                 if (version >= MessagingService.VERSION_20)
                 {
                     tombstones.setInternal(i, start, end, markedAt, delTime);
