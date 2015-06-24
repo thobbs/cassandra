@@ -629,18 +629,29 @@ public abstract class ReadCommand implements ReadQuery
 
                 // slice filter serialization
                 SlicePartitionFilter filter = (SlicePartitionFilter) rangeCommand.dataRange().partitionFilter;
-                LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), filter.isReversed(), metadata);
+
+                boolean makeStaticSlice = !command.queriedColumns().columns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+                LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), filter.isReversed(), makeStaticSlice, metadata);
 
                 out.writeBoolean(filter.isReversed());
-                out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(command.limits().perPartitionCount(), filter.requestedSlices()));
-                int compositesToGroup;
+
+                // limit
+                boolean selectsStatics = !command.queriedColumns().columns().statics.isEmpty() || filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
                 DataLimits.Kind kind = command.limits().kind();
+                boolean isDistinct = (kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && command.limits().perPartitionCount() == 1;
+                if (isDistinct)
+                    out.writeInt(1);
+                else
+                    out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(command.limits().count(), filter.requestedSlices()));
+
+                int compositesToGroup;
                 if (kind == DataLimits.Kind.THRIFT_LIMIT)
                     compositesToGroup = -1;
-                else if ((kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && command.limits().perPartitionCount() == 1)
+                else if (isDistinct && !selectsStatics)
                     compositesToGroup = -2;  // for DISTINCT queries (CASSANDRA-8490)
                 else
-                    compositesToGroup = metadata.clusteringColumns().size();
+                    compositesToGroup = metadata.isDense() ? -1 : metadata.clusteringColumns().size();
+
                 out.writeInt(compositesToGroup);
             }
 
@@ -719,6 +730,12 @@ public abstract class ReadCommand implements ReadQuery
                     filter = LegacyReadCommandSerializer.deserializeSlicePartitionFilter(in, metadata);
                     perPartitionLimit = in.readInt();
                     compositesToGroup = in.readInt();
+
+                    if (compositesToGroup == -2)
+                    {
+                        filter = new SlicePartitionFilter(
+                                PartitionColumns.NONE, ((SlicePartitionFilter) filter).requestedSlices(), filter.isReversed());
+                    }
                 }
 
                 int numColumnFilters = in.readInt();
@@ -747,7 +764,8 @@ public abstract class ReadCommand implements ReadQuery
                 boolean countCQL3Rows = in.readBoolean();
                 boolean isPaging = in.readBoolean();
 
-                boolean isDistinct = compositesToGroup == -2;
+                boolean selectsStatics = (!filter.queriedColumns().columns().statics.isEmpty() || filter.selects(Clustering.STATIC_CLUSTERING));
+                boolean isDistinct = compositesToGroup == -2 || (perPartitionLimit == 1 && selectsStatics);
                 DataLimits limits;
                 if (isDistinct)
                     limits = DataLimits.distinctLimits(maxResults);
@@ -795,7 +813,8 @@ public abstract class ReadCommand implements ReadQuery
             else
             {
                 SlicePartitionFilter filter = (SlicePartitionFilter) rangeCommand.dataRange().partitionFilter;
-                size += LegacyReadCommandSerializer.serializedSlicesSize(filter.requestedSlices(), metadata);
+                boolean makeStaticSlice = !command.queriedColumns().columns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+                size += LegacyReadCommandSerializer.serializedSlicesSize(filter.requestedSlices(), makeStaticSlice, metadata);
                 size += sizes.sizeof(filter.isReversed());
                 size += sizes.sizeof(command.limits().perPartitionCount());
                 size += sizes.sizeof(0); // compositesToGroup
@@ -938,7 +957,7 @@ public abstract class ReadCommand implements ReadQuery
             assert command.kind == Kind.SINGLE_PARTITION;
 
             SinglePartitionReadCommand singleReadCommand = (SinglePartitionReadCommand) command;
-            singleReadCommand = maybleConvertNamesToSlice(singleReadCommand);
+            singleReadCommand = maybeConvertNamesToSlice(singleReadCommand);
 
             CFMetaData metadata = singleReadCommand.metadata();
 
@@ -1015,7 +1034,7 @@ public abstract class ReadCommand implements ReadQuery
             serializeNamesFilter(command, command.partitionFilter(), out);
         }
 
-        private SinglePartitionReadCommand maybleConvertNamesToSlice(SinglePartitionReadCommand command)
+        private SinglePartitionReadCommand maybeConvertNamesToSlice(SinglePartitionReadCommand command)
         {
             if (command.partitionFilter().getKind() != PartitionFilter.Kind.NAMES)
                 return command;
@@ -1162,17 +1181,26 @@ public abstract class ReadCommand implements ReadQuery
         private void serializeSliceCommand(SinglePartitionSliceCommand command, DataOutputPlus out, int version) throws IOException
         {
             CFMetaData metadata = command.metadata();
+            SlicePartitionFilter filter = command.partitionFilter();
 
-            // slice filter serialization
-            serializeSlices(out, command.partitionFilter().requestedSlices(), command.partitionFilter().isReversed(), metadata);
+            Slices slices = filter.requestedSlices();
+            boolean makeStaticSlice = !command.queriedColumns().columns().statics.isEmpty() && !slices.selects(Clustering.STATIC_CLUSTERING);
+            serializeSlices(out, slices, filter.isReversed(), makeStaticSlice, metadata);
 
-            out.writeBoolean(command.partitionFilter().isReversed());
-            out.writeInt(updateLimitForQuery(command.limits().count(), command.partitionFilter().requestedSlices()));
-            int compositesToGroup;
+            out.writeBoolean(filter.isReversed());
+
+            boolean selectsStatics = !command.queriedColumns().columns().statics.isEmpty() || slices.selects(Clustering.STATIC_CLUSTERING);
             DataLimits.Kind kind = command.limits().kind();
+            boolean isDistinct = (kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && command.limits().perPartitionCount() == 1;
+            if (isDistinct)
+                out.writeInt(1);
+            else
+                out.writeInt(updateLimitForQuery(command.limits().count(), filter.requestedSlices()));
+
+            int compositesToGroup;
             if (kind == DataLimits.Kind.THRIFT_LIMIT)
                 compositesToGroup = -1;
-            else if ((kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && command.limits().perPartitionCount() == 1)
+            else if (isDistinct && !selectsStatics)
                 compositesToGroup = -2;  // for DISTINCT queries (CASSANDRA-8490)
             else
                 compositesToGroup = metadata.isDense() ? -1 : metadata.clusteringColumns().size();
@@ -1190,34 +1218,67 @@ public abstract class ReadCommand implements ReadQuery
             ByteBufferUtil.writeWithShortLength(sliceEnd, out);
         }
 
-        static void serializeSlices(DataOutputPlus out, Slices slices, boolean isReversed, CFMetaData metadata) throws IOException
+        private static void serializeStaticSlice(DataOutputPlus out, boolean isReversed, CFMetaData metadata) throws IOException
         {
-            out.writeInt(slices.size());
+            if (!isReversed)
+            {
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, Slice.Bound.BOTTOM, false);
+                ByteBufferUtil.writeWithShortLength(sliceStart, out);
+            }
+
+            out.writeShort(2 + metadata.comparator.size() * 3);  // two bytes + EOC for each component, plus static prefix
+            out.writeShort(LegacyLayout.STATIC_PREFIX);
+            for (int i = 0; i < metadata.comparator.size(); i++)
+            {
+                ByteBufferUtil.writeWithShortLength(ByteBufferUtil.EMPTY_BYTE_BUFFER, out);
+                out.writeByte(i == metadata.comparator.size() - 1 ? 1 : 0);
+            }
+
+            if (isReversed)
+            {
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, Slice.Bound.BOTTOM, false);
+                ByteBufferUtil.writeWithShortLength(sliceStart, out);
+            }
+        }
+
+        static void serializeSlices(DataOutputPlus out, Slices slices, boolean isReversed, boolean makeStaticSlice, CFMetaData metadata) throws IOException
+        {
+            out.writeInt(slices.size() + (makeStaticSlice ? 1 : 0));
 
             // In 3.0 we always store the slices in normal comparator order.  Pre-3.0 nodes expect the slices to
             // be in reversed order if the query is reversed, so we handle that here.
             if (isReversed)
             {
                 for (int i = slices.size() - 1; i >= 0; i--)
-                    serializeSlice(out, slices.get(i), isReversed, metadata);
+                    serializeSlice(out, slices.get(i), true, metadata);
+                if (makeStaticSlice)
+                    serializeStaticSlice(out, true, metadata);
             }
             else
             {
+                if (makeStaticSlice)
+                    serializeStaticSlice(out, false, metadata);
                 for (Slice slice : slices)
-                    serializeSlice(out, slice, isReversed, metadata);
+                    serializeSlice(out, slice, false, metadata);
             }
         }
 
         public long serializedSliceCommandSize(SinglePartitionSliceCommand command, int version)
         {
             TypeSizes sizes = TypeSizes.NATIVE;
-            long size = serializedSlicesSize(command.partitionFilter().requestedSlices(), command.metadata());
+            CFMetaData metadata = command.metadata();
+            SlicePartitionFilter filter = command.partitionFilter();
+
+            Slices slices = filter.requestedSlices();
+            boolean makeStaticSlice = !command.queriedColumns().columns().statics.isEmpty() && !slices.selects(Clustering.STATIC_CLUSTERING);
+
+            long size = serializedSlicesSize(slices, makeStaticSlice, metadata);
             size += sizes.sizeof(command.partitionFilter().isReversed());
             size += sizes.sizeof(command.limits().count());
             return size + sizes.sizeof(0);  // compositesToGroup
         }
 
-        static long serializedSlicesSize(Slices slices, CFMetaData metadata)
+        static long serializedSlicesSize(Slices slices, boolean makeStaticSlice, CFMetaData metadata)
         {
             TypeSizes sizes = TypeSizes.NATIVE;
             long size = sizes.sizeof(slices.size());
@@ -1229,6 +1290,21 @@ public abstract class ReadCommand implements ReadQuery
                 ByteBuffer sliceEnd = LegacyLayout.encodeBound(metadata, slice.end(), false);
                 size += ByteBufferUtil.serializedSizeWithShortLength(sliceEnd, sizes);
             }
+
+            if (makeStaticSlice)
+            {
+                ByteBuffer sliceStart = LegacyLayout.encodeBound(metadata, Slice.Bound.BOTTOM, false);
+                size += ByteBufferUtil.serializedSizeWithShortLength(sliceStart, sizes);
+
+                size += sizes.sizeof((short) (metadata.comparator.size() * 3 + 2));
+                size += sizes.sizeof((short) LegacyLayout.STATIC_PREFIX);
+                for (int i = 0; i < metadata.comparator.size(); i++)
+                {
+                    size += ByteBufferUtil.serializedSizeWithShortLength(ByteBufferUtil.EMPTY_BYTE_BUFFER, sizes);
+                    size += 1;  // EOC
+                }
+            }
+
             return size;
         }
 
@@ -1238,8 +1314,10 @@ public abstract class ReadCommand implements ReadQuery
             int count = in.readInt();
             int compositesToGroup = in.readInt();
 
+            boolean selectsStatics = (!filter.queriedColumns().columns().statics.isEmpty() || filter.selects(Clustering.STATIC_CLUSTERING));
+            boolean isDistinct = compositesToGroup == -2 || (count == 1 && selectsStatics);
             DataLimits limits;
-            if (compositesToGroup == -2)
+            if (compositesToGroup == -2 || isDistinct)
                 limits = DataLimits.distinctLimits(count);  // See CASSANDRA-8490 for the explanation of this value
             else if (compositesToGroup == -1)
                 limits = DataLimits.thriftLimits(1, count);
