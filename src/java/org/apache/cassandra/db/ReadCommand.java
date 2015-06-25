@@ -1085,18 +1085,14 @@ public abstract class ReadCommand implements ReadQuery
                 for (ColumnDefinition column : columns)
                     ByteBufferUtil.writeWithShortLength(column.name.bytes, out);
             }
-            else if (requestedRows.size() == 1 && requestedRows.first().size() == 0)
-            {
-                // they're not static columns, but there are no clustering columns
-                out.writeInt(columns.size());
-                for (ColumnDefinition column : columns)
-                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, requestedRows.first(), column.name.bytes, null), out);
-            }
             else
             {
-                out.writeInt(requestedRows.size());
+                out.writeInt(requestedRows.size() * columns.size());
                 for (Clustering clustering : requestedRows)
-                    ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, null, null), out);
+                {
+                    for (ColumnDefinition column : columns)
+                        ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null), out);
+                }
             }
 
             // countCql3Rows should be true if it's not a DISTINCT query and it's fetching a range of cells, meaning
@@ -1115,14 +1111,27 @@ public abstract class ReadCommand implements ReadQuery
         {
             TypeSizes sizes = TypeSizes.NATIVE;
             CFMetaData metadata = command.metadata();
+            NamesPartitionFilter filter = command.partitionFilter();
 
             PartitionColumns columns = command.queriedColumns().columns();
-            long size = sizes.sizeof(columns.size());
-            for (ColumnDefinition column : columns)
+            SortedSet<Clustering> requestedRows = filter.requestedRows();
+
+            long size = 0;
+            if (requestedRows.isEmpty())
             {
-                Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
-                ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null);
-                size += sizes.sizeof((short) columnName.remaining()) + columnName.remaining();
+                // only static columns are requested
+                size += sizes.sizeof(columns.size());
+                for (ColumnDefinition column : columns)
+                    size += ByteBufferUtil.serializedSizeWithShortLength(column.name.bytes, sizes);
+            }
+            else
+            {
+                size += sizes.sizeof(requestedRows.size() * columns.size());
+                for (Clustering clustering : requestedRows)
+                {
+                    for (ColumnDefinition column : columns)
+                        size += ByteBufferUtil.serializedSizeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null), sizes);
+                }
             }
 
             return size + sizes.sizeof(true);  // countCql3Rows
