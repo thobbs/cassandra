@@ -970,9 +970,9 @@ public abstract class ReadCommand implements ReadQuery
             out.writeLong(singleReadCommand.nowInSec() * 1000L);  // convert from seconds to millis
 
             if (singleReadCommand.partitionFilter().getKind() == PartitionFilter.Kind.SLICE)
-                serializeSliceCommand((SinglePartitionSliceCommand) singleReadCommand, out, version);
+                serializeSliceCommand((SinglePartitionSliceCommand) singleReadCommand, out);
             else
-                serializeNamesCommand((SinglePartitionNamesCommand) singleReadCommand, out, version);
+                serializeNamesCommand((SinglePartitionNamesCommand) singleReadCommand, out);
         }
 
         public ReadCommand deserialize(DataInput in, int version) throws IOException
@@ -992,9 +992,9 @@ public abstract class ReadCommand implements ReadQuery
                 switch (msgType)
                 {
                     case GET_BY_NAMES:
-                        return deserializeNamesCommand(in, version, isDigest, metadata, key, nowInSeconds);
+                        return deserializeNamesCommand(in, isDigest, metadata, key, nowInSeconds);
                     case GET_SLICES:
-                        return deserializeSliceCommand(in, version, isDigest, metadata, key, nowInSeconds);
+                        return deserializeSliceCommand(in, isDigest, metadata, key, nowInSeconds);
                     default:
                         throw new AssertionError();
                 }
@@ -1024,12 +1024,12 @@ public abstract class ReadCommand implements ReadQuery
             size += sizes.sizeof((long) command.nowInSec());
 
             if (singleReadCommand.partitionFilter().getKind() == PartitionFilter.Kind.SLICE)
-                return size + serializedSliceCommandSize((SinglePartitionSliceCommand) singleReadCommand, version);
+                return size + serializedSliceCommandSize((SinglePartitionSliceCommand) singleReadCommand);
             else
-                return size + serializedNamesCommandSize((SinglePartitionNamesCommand) singleReadCommand, version);
+                return size + serializedNamesCommandSize((SinglePartitionNamesCommand) singleReadCommand);
         }
 
-        private void serializeNamesCommand(SinglePartitionNamesCommand command, DataOutputPlus out, int version) throws IOException
+        private void serializeNamesCommand(SinglePartitionNamesCommand command, DataOutputPlus out) throws IOException
         {
             serializeNamesFilter(command, command.partitionFilter(), out);
         }
@@ -1107,7 +1107,7 @@ public abstract class ReadCommand implements ReadQuery
                 out.writeBoolean(false);
         }
 
-        public long serializedNamesCommandSize(SinglePartitionNamesCommand command, int version)
+        public long serializedNamesCommandSize(SinglePartitionNamesCommand command)
         {
             TypeSizes sizes = TypeSizes.NATIVE;
             CFMetaData metadata = command.metadata();
@@ -1137,7 +1137,7 @@ public abstract class ReadCommand implements ReadQuery
             return size + sizes.sizeof(true);  // countCql3Rows
         }
 
-        private SinglePartitionNamesCommand deserializeNamesCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
+        private SinglePartitionNamesCommand deserializeNamesCommand(DataInput in, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
         {
             int numCellNames = in.readInt();
             SortedSet<Clustering> clusterings = new TreeSet<>(metadata.comparator);
@@ -1187,7 +1187,7 @@ public abstract class ReadCommand implements ReadQuery
             return limit;
         }
 
-        private void serializeSliceCommand(SinglePartitionSliceCommand command, DataOutputPlus out, int version) throws IOException
+        private void serializeSliceCommand(SinglePartitionSliceCommand command, DataOutputPlus out) throws IOException
         {
             CFMetaData metadata = command.metadata();
             SlicePartitionFilter filter = command.partitionFilter();
@@ -1272,7 +1272,7 @@ public abstract class ReadCommand implements ReadQuery
             }
         }
 
-        public long serializedSliceCommandSize(SinglePartitionSliceCommand command, int version)
+        public long serializedSliceCommandSize(SinglePartitionSliceCommand command)
         {
             TypeSizes sizes = TypeSizes.NATIVE;
             CFMetaData metadata = command.metadata();
@@ -1317,7 +1317,7 @@ public abstract class ReadCommand implements ReadQuery
             return size;
         }
 
-        private SinglePartitionSliceCommand deserializeSliceCommand(DataInput in, int version, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
+        private SinglePartitionSliceCommand deserializeSliceCommand(DataInput in, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
         {
             SlicePartitionFilter filter = deserializeSlicePartitionFilter(in, metadata);
             int count = in.readInt();
