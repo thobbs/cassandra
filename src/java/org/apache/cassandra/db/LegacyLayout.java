@@ -232,7 +232,7 @@ public abstract class LegacyLayout
             if (isStatic)
                 return columnName;
 
-            assert clustering.size() == 1;
+            assert clustering.size() == 1 : "Expected clustering size to be 1, but was " + clustering.size();
             return clustering.get(0);
         }
 
@@ -566,7 +566,10 @@ public abstract class LegacyLayout
                     {
                         LegacyCellName cellName = new LegacyCellName(row.clustering().takeAlias(), null, null);
                         LivenessInfo info = row.primaryKeyLivenessInfo();
-                        return new LegacyCell(LegacyCell.Kind.REGULAR, cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER, info.timestamp(), info.localDeletionTime(), info.ttl());
+                        if (info.hasTTL())
+                            return new LegacyCell(LegacyCell.Kind.EXPIRING, cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER, info.timestamp(), info.localDeletionTime(), info.ttl());
+                        else
+                            return new LegacyCell(LegacyCell.Kind.REGULAR, cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER, info.timestamp(), info.localDeletionTime(), info.ttl());
                     }
                 }
 
