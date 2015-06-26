@@ -39,6 +39,8 @@ import org.slf4j.LoggerFactory;
 
 public class RangeSliceCommand extends AbstractRangeCommand implements Pageable
 {
+    private static final Logger logger = LoggerFactory.getLogger(RangeSliceCommand.class);
+
     public static final RangeSliceCommandSerializer serializer = new RangeSliceCommandSerializer();
 
     public final int maxResults;
@@ -128,10 +130,17 @@ public class RangeSliceCommand extends AbstractRangeCommand implements Pageable
         ColumnFamilyStore cfs = Keyspace.open(keyspace).getColumnFamilyStore(columnFamily);
 
         ExtendedFilter exFilter = cfs.makeExtendedFilter(keyRange, predicate, rowFilter, maxResults, countCQL3Rows, isPaging, timestamp);
+
+        List<Row> results;
         if (cfs.indexManager.hasIndexFor(rowFilter))
-            return cfs.search(exFilter);
+            results = cfs.search(exFilter);
         else
-            return cfs.getRangeSlice(exFilter);
+            results = cfs.getRangeSlice(exFilter);
+
+        if (!results.isEmpty())
+            logger.warn("#### got {} local rows for range slice: {}", results.size(), results.get(0));
+
+        return results;
     }
 
     @Override

@@ -31,12 +31,15 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.CASRequest;
 import org.apache.cassandra.utils.Pair;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Processed CAS conditions and update on potentially multiple rows of the same partition.
  */
 public class CQL3CasRequest implements CASRequest
 {
+    private static final Logger logger = LoggerFactory.getLogger(CQL3CasRequest.class);
     private final CFMetaData cfm;
     private final ByteBuffer key;
     private final long now;
@@ -223,13 +226,20 @@ public class CQL3CasRequest implements CASRequest
 
         public boolean appliesTo(ColumnFamily current)
         {
+            logger.warn("#### checking IF EXISTS applies to {}", current);
             if (current == null)
                 return false;
 
             Iterator<Cell> iter = current.iterator(new ColumnSlice[]{ rowPrefix.slice() });
             while (iter.hasNext())
+            {
                 if (iter.next().isLive(now))
+                {
+                    logger.warn("##### it does apply");
                     return true;
+                }
+            }
+            logger.warn("##### it doesn't apply");
             return false;
         }
     }
