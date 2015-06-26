@@ -1367,7 +1367,13 @@ public abstract class ReadCommand implements ReadQuery
                 slicesBuilder.add(Slice.make(start, finish));
             }
 
-            return new SlicePartitionFilter(metadata.partitionColumns(), slicesBuilder.build(), reversed);
+            // if a slice query from a pre-3.0 node doesn't cover statics, we shouldn't select them at all
+            Slices slices = slicesBuilder.build();
+            PartitionColumns columns = slices.selects(Clustering.STATIC_CLUSTERING)
+                                       ? metadata.partitionColumns()
+                                       : metadata.partitionColumns().withoutStatics();
+            SlicePartitionFilter filter = new SlicePartitionFilter(columns, slices, reversed);
+            return filter;
         }
     }
 }
