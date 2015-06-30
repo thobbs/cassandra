@@ -635,7 +635,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                 {
                     if (!update.deletions.isLive(rowIndex))
                     {
-                        RangeTombstone rt = new RangeTombstone(Slice.make(update.metadata.comparator, row.clustering()),
+                        RangeTombstone rt = new RangeTombstone(Slice.make(row.clustering()),
                                                                cursor.setTo(update.deletions, rowIndex).takeAlias());
                         deletionInfo.add(rt, update.metadata.comparator);
                     }
@@ -782,7 +782,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                 {
                     if (!update.deletions.isLive(rowIndex))
                     {
-                        RangeTombstone rt = new RangeTombstone(Slice.make(update.metadata.comparator, row.clustering()),
+                        RangeTombstone rt = new RangeTombstone(Slice.make(row.clustering()),
                                                                cursor.setTo(update.deletions, rowIndex).takeAlias());
                         deletionInfo.add(rt, update.metadata.comparator);
                     }
