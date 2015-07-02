@@ -640,7 +640,7 @@ public abstract class ReadCommand implements ReadQuery
                 for (RowFilter.Expression expression : indexExpressions)
                 {
                     ByteBufferUtil.writeWithShortLength(expression.column().name.bytes, out);
-                    out.writeInt(expression.operator().ordinal());
+                    expression.operator().writeTo(out);
                     ByteBufferUtil.writeWithShortLength(expression.getIndexValue(), out);
                 }
             }
