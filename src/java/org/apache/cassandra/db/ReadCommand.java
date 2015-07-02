@@ -581,6 +581,7 @@ public abstract class ReadCommand implements ReadQuery
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
             PartitionRangeReadCommand rangeCommand = (PartitionRangeReadCommand) command;
+            rangeCommand = LegacyReadCommandSerializer.maybeConvertNamesToSlice(rangeCommand);
 
             CFMetaData metadata = rangeCommand.metadata();
 
@@ -593,7 +594,7 @@ public abstract class ReadCommand implements ReadQuery
             {
                 out.writeByte(1);  // 0 for slices, 1 for names
                 ClusteringIndexNamesFilter filter = (ClusteringIndexNamesFilter) rangeCommand.dataRange().clusteringIndexFilter;
-                LegacyReadCommandSerializer.serializeNamesFilter(command, filter, out);
+                LegacyReadCommandSerializer.serializeNamesFilter(rangeCommand, filter, out);
             }
             else
             {
@@ -602,19 +603,19 @@ public abstract class ReadCommand implements ReadQuery
                 // slice filter serialization
                 ClusteringIndexSliceFilter filter = (ClusteringIndexSliceFilter) rangeCommand.dataRange().clusteringIndexFilter;
 
-                boolean makeStaticSlice = !command.columnFilter().fetchedColumns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+                boolean makeStaticSlice = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
                 LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), filter.isReversed(), makeStaticSlice, metadata);
 
                 out.writeBoolean(filter.isReversed());
 
                 // limit
-                boolean selectsStatics = !command.columnFilter().fetchedColumns().statics.isEmpty() || filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
-                DataLimits.Kind kind = command.limits().kind();
-                boolean isDistinct = (kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && command.limits().perPartitionCount() == 1;
+                boolean selectsStatics = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() || filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+                DataLimits.Kind kind = rangeCommand.limits().kind();
+                boolean isDistinct = (kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && rangeCommand.limits().perPartitionCount() == 1;
                 if (isDistinct)
                     out.writeInt(1);
                 else
-                    out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(command.limits().count(), filter.requestedSlices()));
+                    out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(rangeCommand.limits().count(), filter.requestedSlices()));
 
                 int compositesToGroup;
                 if (kind == DataLimits.Kind.THRIFT_LIMIT)
@@ -676,26 +677,17 @@ public abstract class ReadCommand implements ReadQuery
                     // TODO unify with single-partition names query deser
                     int numCellNames = in.readInt();
                     NavigableSet<Clustering> clusterings = new TreeSet<>(metadata.comparator);
-                    Set<ColumnDefinition> staticColumns = new HashSet<>();
-                    Set<ColumnDefinition> columns = new HashSet<>();
                     for (int i = 0; i < numCellNames; i++)
                     {
                         ByteBuffer buffer = ByteBufferUtil.readWithShortLength(in);
                         LegacyLayout.LegacyCellName cellName = LegacyLayout.decodeCellName(metadata, buffer);
                         if (!cellName.clustering.equals(Clustering.STATIC_CLUSTERING))
-                        {
                             clusterings.add(cellName.clustering);
-                            columns.add(cellName.column);
-                        }
-                        else
-                        {
-                            staticColumns.add(cellName.column);
-                        }
                     }
 
                     in.readBoolean();  // countCql3Rows
 
-                    selection = ColumnFilter.selection(new PartitionColumns(Columns.from(staticColumns), Columns.from(columns)));
+                    selection = ColumnFilter.all(metadata);
                     filter = new ClusteringIndexNamesFilter(clusterings, false);
                 }
                 else
@@ -770,6 +762,7 @@ public abstract class ReadCommand implements ReadQuery
 
             assert command.kind == Kind.PARTITION_RANGE;
             PartitionRangeReadCommand rangeCommand = (PartitionRangeReadCommand) command;
+            rangeCommand = LegacyReadCommandSerializer.maybeConvertNamesToSlice(rangeCommand);
             CFMetaData metadata = rangeCommand.metadata();
 
             long size = sizes.sizeof(metadata.ksName);
@@ -779,24 +772,17 @@ public abstract class ReadCommand implements ReadQuery
             size += 1;  // single byte flag: 0 for slices, 1 for names
             if (rangeCommand.isNamesQuery())
             {
-                PartitionColumns columns = command.columnFilter().fetchedColumns();
-                size = sizes.sizeof(columns.size());
-                for (ColumnDefinition column : columns)
-                {
-                    Clustering clustering = LegacyLayout.decodeClustering(metadata, column.name.bytes);
-                    ByteBuffer columnName = LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null);
-                    size += ByteBufferUtil.serializedSizeWithShortLength(columnName, sizes);
-                }
-
-                size += sizes.sizeof(true);  // countCql3Rows
+                PartitionColumns columns = rangeCommand.columnFilter().fetchedColumns();
+                ClusteringIndexNamesFilter filter = (ClusteringIndexNamesFilter) rangeCommand.dataRange().clusteringIndexFilter;
+                size += LegacyReadCommandSerializer.serializedNamesFilterSize(filter, metadata, columns, sizes);
             }
             else
             {
                 ClusteringIndexSliceFilter filter = (ClusteringIndexSliceFilter) rangeCommand.dataRange().clusteringIndexFilter;
-                boolean makeStaticSlice = !command.columnFilter().fetchedColumns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+                boolean makeStaticSlice = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
                 size += LegacyReadCommandSerializer.serializedSlicesSize(filter.requestedSlices(), makeStaticSlice, metadata);
                 size += sizes.sizeof(filter.isReversed());
-                size += sizes.sizeof(command.limits().perPartitionCount());
+                size += sizes.sizeof(rangeCommand.limits().perPartitionCount());
                 size += sizes.sizeof(0); // compositesToGroup
             }
 
@@ -992,6 +978,7 @@ public abstract class ReadCommand implements ReadQuery
 
             assert command.kind == Kind.SINGLE_PARTITION;
             SinglePartitionReadCommand singleReadCommand = (SinglePartitionReadCommand) command;
+            singleReadCommand = maybeConvertNamesToSlice(singleReadCommand);
 
             int keySize = singleReadCommand.partitionKey().getKey().remaining();
 
@@ -1019,38 +1006,88 @@ public abstract class ReadCommand implements ReadQuery
             if (command.clusteringIndexFilter().kind() != ClusteringIndexFilter.Kind.NAMES)
                 return command;
 
-            PartitionColumns columns = command.columnFilter().fetchedColumns();
             CFMetaData metadata = command.metadata();
+            PartitionColumns columns = command.columnFilter().fetchedColumns();
             ClusteringIndexNamesFilter filter = ((SinglePartitionNamesCommand) command).clusteringIndexFilter();
-            SortedSet<Clustering> requestedRows = filter.requestedRows();
 
-            // pre-3.0 nodes don't support names filters for reading collections, so if we're requesting any of those,
-            // we need to convert this to a slice filter
-            for (ColumnDefinition column : columns)
+
+            // On pre-3.0 nodes, due to CASSANDRA-5762, we always do a slice for CQL3 tables (not dense, composite).
+            boolean shouldConvert = (!metadata.isDense() && metadata.isCompound());
+            if (!shouldConvert)
             {
-                if (column.type.isMultiCell())
+                // pre-3.0 nodes don't support names filters for reading collections, so if we're requesting any of those,
+                // we need to convert this to a slice filter
+                for (ColumnDefinition column : columns)
                 {
-                    Slices slices;
-                    if (requestedRows.isEmpty() || requestedRows.size() == 1 && requestedRows.first().size() == 0)
+                    if (column.type.isMultiCell())
                     {
-                        slices = Slices.ALL;
+                        shouldConvert = true;
+                        break;
                     }
-                    else
-                    {
-                        Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
-                        for (Clustering clustering : requestedRows)
-                            slicesBuilder.add(Slice.Bound.inclusiveStartOf(clustering), Slice.Bound.inclusiveEndOf(clustering));
-                        slices = slicesBuilder.build();
-                    }
-
-                    ColumnFilter selection = ColumnFilter.selection(columns);
-                    ClusteringIndexSliceFilter sliceFilter = new ClusteringIndexSliceFilter(slices, filter.isReversed());
-                    return new SinglePartitionSliceCommand(
-                            command.isDigestQuery(), command.isForThrift(), metadata, command.nowInSec(),
-                            selection, command.rowFilter(), command.limits(), command.partitionKey(), sliceFilter);
                 }
             }
-            return command;
+
+            if (!shouldConvert)
+                return command;
+
+            ClusteringIndexSliceFilter sliceFilter = convertNameFilterToSliceFilter(filter, metadata);
+            return new SinglePartitionSliceCommand(
+                    command.isDigestQuery(), command.isForThrift(), metadata, command.nowInSec(),
+                    ColumnFilter.selection(columns), command.rowFilter(), command.limits(), command.partitionKey(), sliceFilter);
+        }
+
+        static PartitionRangeReadCommand maybeConvertNamesToSlice(PartitionRangeReadCommand command)
+        {
+            if (!command.dataRange().isNamesQuery())
+                return command;
+
+            CFMetaData metadata = command.metadata();
+            PartitionColumns columns = command.columnFilter().fetchedColumns();
+            ClusteringIndexNamesFilter filter = (ClusteringIndexNamesFilter) command.dataRange().clusteringIndexFilter;
+
+            // On pre-3.0 nodes, due to CASSANDRA-5762, we always do a slice for CQL3 tables (not dense, composite).
+            boolean shouldConvert = (!metadata.isDense() && metadata.isCompound());
+            if (!shouldConvert)
+            {
+                // pre-3.0 nodes don't support names filters for reading collections, so if we're requesting any of those,
+                // we need to convert this to a slice filter
+                for (ColumnDefinition column : columns)
+                {
+                    if (column.type.isMultiCell())
+                    {
+                        shouldConvert = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!shouldConvert)
+                return command;
+
+            ClusteringIndexSliceFilter sliceFilter = convertNameFilterToSliceFilter(filter, metadata);
+            DataRange newRange = new DataRange(command.dataRange().keyRange(), sliceFilter);
+            return new PartitionRangeReadCommand(
+                    command.isDigestQuery(), command.isForThrift(), metadata, command.nowInSec(),
+                    ColumnFilter.selection(columns), command.rowFilter(), command.limits(), newRange);
+        }
+
+        private static ClusteringIndexSliceFilter convertNameFilterToSliceFilter(ClusteringIndexNamesFilter filter, CFMetaData metadata)
+        {
+            SortedSet<Clustering> requestedRows = filter.requestedRows();
+            Slices slices;
+            if (requestedRows.isEmpty() || requestedRows.size() == 1 && requestedRows.first().size() == 0)
+            {
+                slices = Slices.ALL;
+            }
+            else
+            {
+                Slices.Builder slicesBuilder = new Slices.Builder(metadata.comparator);
+                for (Clustering clustering : requestedRows)
+                    slicesBuilder.add(Slice.Bound.inclusiveStartOf(clustering), Slice.Bound.inclusiveEndOf(clustering));
+                slices = slicesBuilder.build();
+            }
+
+            return new ClusteringIndexSliceFilter(slices, filter.isReversed());
         }
 
         public static void serializeNamesFilter(ReadCommand command, ClusteringIndexNamesFilter filter, DataOutputPlus out) throws IOException
@@ -1088,34 +1125,36 @@ public abstract class ReadCommand implements ReadQuery
                 out.writeBoolean(false);
         }
 
-        public long serializedNamesCommandSize(SinglePartitionNamesCommand command)
+        public static long serializedNamesFilterSize(ClusteringIndexNamesFilter filter, CFMetaData metadata, PartitionColumns fetchedColumns, TypeSizes sizes)
         {
-            TypeSizes sizes = TypeSizes.NATIVE;
-            CFMetaData metadata = command.metadata();
-            ClusteringIndexNamesFilter filter = command.clusteringIndexFilter();
-
-            PartitionColumns columns = command.columnFilter().fetchedColumns();
             SortedSet<Clustering> requestedRows = filter.requestedRows();
 
             long size = 0;
             if (requestedRows.isEmpty())
             {
                 // only static columns are requested
-                size += sizes.sizeof(columns.size());
-                for (ColumnDefinition column : columns)
+                size += sizes.sizeof(fetchedColumns.size());
+                for (ColumnDefinition column : fetchedColumns)
                     size += ByteBufferUtil.serializedSizeWithShortLength(column.name.bytes, sizes);
             }
             else
             {
-                size += sizes.sizeof(requestedRows.size() * columns.size());
+                size += sizes.sizeof(requestedRows.size() * fetchedColumns.size());
                 for (Clustering clustering : requestedRows)
                 {
-                    for (ColumnDefinition column : columns)
+                    for (ColumnDefinition column : fetchedColumns)
                         size += ByteBufferUtil.serializedSizeWithShortLength(LegacyLayout.encodeCellName(metadata, clustering, column.name.bytes, null), sizes);
                 }
             }
 
             return size + sizes.sizeof(true);  // countCql3Rows
+        }
+
+        public long serializedNamesCommandSize(SinglePartitionNamesCommand command)
+        {
+            ClusteringIndexNamesFilter filter = command.clusteringIndexFilter();
+            PartitionColumns columns = command.columnFilter().fetchedColumns();
+            return serializedNamesFilterSize(filter, command.metadata(), columns, TypeSizes.NATIVE);
         }
 
         private SinglePartitionNamesCommand deserializeNamesCommand(DataInput in, boolean isDigest, CFMetaData metadata, DecoratedKey key, int nowInSeconds) throws IOException, UnknownColumnException
