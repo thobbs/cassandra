@@ -21,7 +21,10 @@ import java.io.File;
 import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.Runnables;
 
+import org.apache.cassandra.cache.InstrumentingCache;
+import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -212,6 +215,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
 
         final List<DecoratedKey> invalidateKeys = new ArrayList<>();
         invalidateKeys.addAll(cachedKeys.keySet());
+        newReader.setupKeyCache();
         for (Map.Entry<DecoratedKey, RowIndexEntry> cacheKey : cachedKeys.entrySet())
             newReader.cacheKey(cacheKey.getKey(), cacheKey.getValue());
 
@@ -226,17 +230,7 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             if (latest.first.compareTo(lowerbound) > 0)
                 continue;
 
-            final Runnable runOnClose = new Runnable()
-            {
-                public void run()
-                {
-                    // this is somewhat racey, in that we could theoretically be closing this old reader
-                    // when an even older reader is still in use, but it's not likely to have any major impact
-                    for (DecoratedKey key : invalidateKeys)
-                        latest.invalidateCacheKey(key);
-                }
-            };
-
+            Runnable runOnClose = new InvalidateKeys(latest, invalidateKeys);
             if (lowerbound.compareTo(latest.last) >= 0)
             {
                 if (!transaction.isObsolete(latest))
@@ -251,6 +245,28 @@ public class SSTableRewriter extends Transactional.AbstractTransactional impleme
             assert newStart != null;
             SSTableReader replacement = latest.cloneWithNewStart(newStart, runOnClose);
             transaction.update(replacement, true);
+        }
+    }
+
+    private static final class InvalidateKeys implements Runnable
+    {
+        final List<KeyCacheKey> cacheKeys = new ArrayList<>();
+        final InstrumentingCache<KeyCacheKey, ?> cache;
+
+        private InvalidateKeys(SSTableReader reader, Collection<DecoratedKey> invalidate)
+        {
+            this.cache = reader.getKeyCache();
+            if (cache != null)
+            {
+                for (DecoratedKey key : invalidate)
+                    cacheKeys.add(reader.getCacheKey(key));
+            }
+        }
+
+        public void run()
+        {
+            for (KeyCacheKey key : cacheKeys)
+                cache.remove(key);
         }
     }
 

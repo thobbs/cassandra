@@ -27,15 +27,16 @@ import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.PeekingIterator;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.*;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.thrift.ColumnDef;
 import org.apache.cassandra.utils.*;
@@ -372,7 +373,7 @@ public abstract class LegacyLayout
         };
     }
 
-    public static Row extractStaticColumns(CFMetaData metadata, DataInput in, Columns statics) throws IOException
+    public static Row extractStaticColumns(CFMetaData metadata, DataInputPlus in, Columns statics) throws IOException
     {
         assert !statics.isEmpty();
         assert metadata.isCompactTable();
@@ -705,7 +706,7 @@ public abstract class LegacyLayout
         };
     }
 
-    public static LegacyAtom readLegacyAtom(CFMetaData metadata, DataInput in, boolean readAllAsDynamic) throws IOException
+    public static LegacyAtom readLegacyAtom(CFMetaData metadata, DataInputPlus in, boolean readAllAsDynamic) throws IOException
     {
         while (true)
         {
@@ -773,14 +774,14 @@ public abstract class LegacyLayout
         }
     }
 
-    public static LegacyRangeTombstone readLegacyRangeTombstone(CFMetaData metadata, DataInput in) throws IOException
+    public static LegacyRangeTombstone readLegacyRangeTombstone(CFMetaData metadata, DataInputPlus in) throws IOException
     {
         ByteBuffer boundname = ByteBufferUtil.readWithShortLength(in);
         in.readUnsignedByte();
         return readLegacyRangeTombstoneBody(metadata, in, boundname);
     }
 
-    public static LegacyRangeTombstone readLegacyRangeTombstoneBody(CFMetaData metadata, DataInput in, ByteBuffer boundname) throws IOException
+    public static LegacyRangeTombstone readLegacyRangeTombstoneBody(CFMetaData metadata, DataInputPlus in, ByteBuffer boundname) throws IOException
     {
         LegacyBound min = decodeBound(metadata, boundname, true);
         LegacyBound max = decodeBound(metadata, ByteBufferUtil.readWithShortLength(in), false);
@@ -1325,7 +1326,7 @@ public abstract class LegacyLayout
                     throw new UnsupportedOperationException("Range tombstones aren't supported yet");
             }
 
-            public LegacyDeletionInfo deserialize(CFMetaData metadata, DataInput in, int version) throws IOException
+            public LegacyDeletionInfo deserialize(CFMetaData metadata, DataInputPlus in, int version) throws IOException
             {
                 DeletionTime topLevel = DeletionTime.serializer.deserialize(in);
 
@@ -1351,12 +1352,10 @@ public abstract class LegacyLayout
                 return new LegacyDeletionInfo(new DeletionInfo(topLevel, ranges), inRowTombsones);
             }
 
-            public long serializedSize(CFMetaData metadata, LegacyDeletionInfo info, TypeSizes typeSizes, int version)
+            public long serializedSize(CFMetaData metadata, LegacyDeletionInfo info, int version)
             {
-                TypeSizes sizes = TypeSizes.NATIVE;
-
-                long size = DeletionTime.serializer.serializedSize(info.deletionInfo.getPartitionDeletion(), sizes);
-                size += sizes.sizeof(info.inRowTombstones.size());
+                long size = DeletionTime.serializer.serializedSize(info.deletionInfo.getPartitionDeletion());
+                size += TypeSizes.sizeof(info.inRowTombstones.size());
 
                 if (!info.inRowTombstones.isEmpty())
                     throw new UnsupportedOperationException("Range tombstones aren't supported yet");
@@ -1821,10 +1820,10 @@ public abstract class LegacyLayout
             }
         }
 
-        public long serializedSize(TypeSizes sizes, CFMetaData metadata)
+        public long serializedSize(CFMetaData metadata)
         {
             long size = 0;
-            size += sizes.sizeof(this.size);
+            size += TypeSizes.sizeof(this.size);
 
             if (this.size == 0)
                 return size;
@@ -1853,11 +1852,11 @@ public abstract class LegacyLayout
                     endBuilder.add(end.collectionName.name.bytes);
 
                 // TODO double check inclusive ends
-                size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build(), sizes);
-                size += ByteBufferUtil.serializedSizeWithShortLength(endBuilder.buildAsEndOfRange(), sizes);
+                size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build());
+                size += ByteBufferUtil.serializedSizeWithShortLength(endBuilder.buildAsEndOfRange());
 
-                size += sizes.sizeof(delTimes[i]);
-                size += sizes.sizeof(markedAts[i]);
+                size += TypeSizes.sizeof(delTimes[i]);
+                size += TypeSizes.sizeof(markedAts[i]);
             }
             return size;
         }

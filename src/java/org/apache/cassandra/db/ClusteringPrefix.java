@@ -56,26 +56,27 @@ public interface ClusteringPrefix extends Aliasable<ClusteringPrefix>, IMeasurab
     {
         // WARNING: the ordering of that enum matters because we use ordinal() in the serialization
 
-        EXCL_END_BOUND(0, -1),
-        INCL_START_BOUND(1, -1),
-        EXCL_END_INCL_START_BOUNDARY(1, -1),
-        STATIC_CLUSTERING(2, -1),
-        CLUSTERING(3, 0),
-        INCL_END_EXCL_START_BOUNDARY(4, -1),
-        INCL_END_BOUND(4, 1),
-        EXCL_START_BOUND(5, 1);
+        EXCL_END_BOUND              (0, -1),
+        INCL_START_BOUND            (0, -1),
+        EXCL_END_INCL_START_BOUNDARY(0, -1),
+        STATIC_CLUSTERING           (1, -1),
+        CLUSTERING                  (2,  0),
+        INCL_END_EXCL_START_BOUNDARY(3,  1),
+        INCL_END_BOUND              (3,  1),
+        EXCL_START_BOUND            (3,  1);
 
         private final int comparison;
 
-        // If clusterable c1 has this Kind and is a strict prefix of clusterable c2, then this
-        // is the result of compare(c1, c2). Basically, this is the same as comparing the kind of c1 to
-        // CLUSTERING.
-        public final int prefixComparisonResult;
+        /**
+         * Return the comparison of this kind to CLUSTERING.
+         * For bounds/boundaries, this basically tells us if we sort before or after our clustering values.
+         */
+        public final int comparedToClustering;
 
-        private Kind(int comparison, int prefixComparisonResult)
+        private Kind(int comparison, int comparedToClustering)
         {
             this.comparison = comparison;
-            this.prefixComparisonResult = prefixComparisonResult;
+            this.comparedToClustering = comparedToClustering;
         }
 
         /**
@@ -273,14 +274,14 @@ public interface ClusteringPrefix extends Aliasable<ClusteringPrefix>, IMeasurab
                 return Slice.Bound.serializer.deserializeValues(in, kind, version, types);
         }
 
-        public long serializedSize(ClusteringPrefix clustering, int version, List<AbstractType<?>> types, TypeSizes sizes)
+        public long serializedSize(ClusteringPrefix clustering, int version, List<AbstractType<?>> types)
         {
             // We shouldn't serialize static clusterings
             assert clustering.kind() != Kind.STATIC_CLUSTERING;
             if (clustering.kind() == Kind.CLUSTERING)
-                return 1 + Clustering.serializer.serializedSize((Clustering)clustering, version, types, sizes);
+                return 1 + Clustering.serializer.serializedSize((Clustering)clustering, version, types);
             else
-                return Slice.Bound.serializer.serializedSize((Slice.Bound)clustering, version, types, sizes);
+                return Slice.Bound.serializer.serializedSize((Slice.Bound)clustering, version, types);
         }
 
         void serializeValuesWithoutSize(ClusteringPrefix clustering, DataOutputPlus out, int version, List<AbstractType<?>> types) throws IOException
@@ -299,7 +300,7 @@ public interface ClusteringPrefix extends Aliasable<ClusteringPrefix>, IMeasurab
             }
         }
 
-        long valuesWithoutSizeSerializedSize(ClusteringPrefix clustering, int version, List<AbstractType<?>> types, TypeSizes sizes)
+        long valuesWithoutSizeSerializedSize(ClusteringPrefix clustering, int version, List<AbstractType<?>> types)
         {
             if (clustering.size() == 0)
                 return 0;
@@ -311,7 +312,7 @@ public interface ClusteringPrefix extends Aliasable<ClusteringPrefix>, IMeasurab
                 if (v == null || !v.hasRemaining())
                     continue; // handled in the header
 
-                size += types.get(i).writtenLength(v, sizes);
+                size += types.get(i).writtenLength(v);
             }
             return size;
         }
@@ -441,7 +442,7 @@ public interface ClusteringPrefix extends Aliasable<ClusteringPrefix>, IMeasurab
             for (int i = 0; i < bound.size(); i++)
             {
                 if (!hasComponent(i))
-                    return nextKind.prefixComparisonResult;
+                    return nextKind.comparedToClustering;
 
                 int cmp = comparator.compareComponent(i, nextValues[i], bound.get(i));
                 if (cmp != 0)
@@ -452,7 +453,7 @@ public interface ClusteringPrefix extends Aliasable<ClusteringPrefix>, IMeasurab
                 return nextKind.compareTo(bound.kind());
 
             // We know that we'll have exited already if nextSize < bound.size
-            return -bound.kind().prefixComparisonResult;
+            return -bound.kind().comparedToClustering;
         }
 
         private boolean hasComponent(int i) throws IOException

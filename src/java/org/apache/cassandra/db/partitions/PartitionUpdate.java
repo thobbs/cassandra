@@ -17,31 +17,32 @@
  */
 package org.apache.cassandra.db.partitions;
 
-import java.io.DataInput;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import org.apache.cassandra.db.context.CounterContext;
-import org.apache.cassandra.utils.Pair;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.index.SecondaryIndexManager;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.NIODataInputStream;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Sorting;
+import org.apache.cassandra.utils.Pair;
 
 /**
  * Stores updates made on a partition.
@@ -58,7 +59,7 @@ import org.apache.cassandra.utils.Sorting;
  * multiple times. Further, for a given row, the writer actually supports intermingling
  * the writing of cells for different complex cells (note that this is usually not supported
  * by {@code Row.Writer} implementations, but is supported here because
- * {@code ModificationStatement} requires that (because we could have multiple {@link Operation}
+ * {@code ModificationStatement} requires that (because we could have multiple {@link org.apache.cassandra.cql3.Operation}
  * on the same column in a given statement)).
  */
 public class PartitionUpdate extends AbstractPartitionData implements Sorting.Sortable
@@ -145,7 +146,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
 
         try
         {
-            return serializer.deserialize(new DataInputStream(ByteBufferUtil.inputStream(bytes)),
+            return serializer.deserialize(new NIODataInputStream(bytes, true),
                                           version,
                                           SerializationHelper.Flag.LOCAL,
                                           version < MessagingService.VERSION_30 ? key : null);
@@ -358,7 +359,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
     /**
      * Validates the data contained in this update.
      *
-     * @throws MarshalException if some of the data contained in this update is corrupted.
+     * @throws org.apache.cassandra.serializers.MarshalException if some of the data contained in this update is corrupted.
      */
     public void validate()
     {
@@ -436,7 +437,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
      * partition update.
      * <p>
      * Note that if more convenient, range tombstones can also be added using
-     * {@link addRangeTombstone}.
+     * {@link PartitionUpdate#addRangeTombstone(RangeTombstone)}}.
      *
      * @param isReverseOrder whether the range tombstone marker will be provided to the returned writer
      * in clustering order or in reverse clustering order.
@@ -490,14 +491,14 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
             {
                 // current and previous are the same row. Merge current into previous
                 // (and so previous + 1 will be "free").
-                data.merge(current, previous, nowInSec);
+                merge(current, previous, nowInSec);
             }
             else
             {
                 // data[current] != [previous], so move current just after previous if needs be
                 ++previous;
                 if (previous != current)
-                    data.move(current, previous);
+                    move(current, previous);
             }
         }
 
@@ -669,7 +670,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                         CounterContext.ContextState state = CounterContext.ContextState.wrap(cell.value);
                         if (state.isLocal())
                         {
-                            out.writeInt(TypeSizes.NATIVE.sizeof(state.getCount()));
+                            out.writeInt(TypeSizes.sizeof(state.getCount()));
                             out.writeLong(state.getCount());
                         }
                         else
@@ -683,7 +684,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                     {
                         out.writeByte(LegacyLayout.DELETION_MASK);
                         out.writeLong(cell.timestamp);
-                        out.writeInt(TypeSizes.NATIVE.sizeof(cell.localDeletionTime));
+                        out.writeInt(TypeSizes.sizeof(cell.localDeletionTime));
                         out.writeInt(cell.localDeletionTime);
                         continue;
                     }
@@ -711,7 +712,7 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
             }
         }
 
-        public PartitionUpdate deserialize(DataInput in, int version, SerializationHelper.Flag flag, DecoratedKey key) throws IOException
+        public PartitionUpdate deserialize(DataInputPlus in, int version, SerializationHelper.Flag flag, DecoratedKey key) throws IOException
         {
             if (version < MessagingService.VERSION_30)
             {
@@ -758,17 +759,17 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
             return upd;
         }
 
-        public long serializedSize(PartitionUpdate update, int version, TypeSizes sizes)
+        public long serializedSize(PartitionUpdate update, int version)
         {
             if (version < MessagingService.VERSION_30)
             {
                 if (update.isEmpty())
-                    return sizes.sizeof(false);
+                    return TypeSizes.sizeof(false);
 
-                long size = sizes.sizeof(true);
-                size += CFMetaData.serializer.serializedSize(update.metadata, version, sizes);
+                long size = TypeSizes.sizeof(true);
+                size += CFMetaData.serializer.serializedSize(update.metadata, version);
 
-                size += DeletionTime.serializer.serializedSize(update.deletionInfo.getPartitionDeletion(), sizes);
+                size += DeletionTime.serializer.serializedSize(update.deletionInfo.getPartitionDeletion());
 
                 Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>> results = LegacyLayout.fromRowIterator(update.metadata, update.iterator(), update.staticRow);
                 LegacyLayout.LegacyRangeTombstoneList rtl = results.left;
@@ -802,53 +803,53 @@ public class PartitionUpdate extends AbstractPartitionData implements Sorting.So
                     }
                 }
 
-                size += rtl.serializedSize(sizes, update.metadata);
+                size += rtl.serializedSize(update.metadata);
 
-                size += sizes.sizeof(cells.size());
+                size += TypeSizes.sizeof(cells.size());
                 for (LegacyLayout.LegacyCell cell : cells)
                 {
-                    size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(update.metadata), sizes);
+                    size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(update.metadata));
 
                     size += 1; // serialization flags
                     if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                     {
-                        size += sizes.sizeof(cell.timestamp);
+                        size += TypeSizes.sizeof(cell.timestamp);
                         CounterContext.ContextState state = CounterContext.ContextState.wrap(cell.value);
                         if (state.isLocal())
                         {
                             // counter count (extracted from cell value)
-                            size += sizes.sizeof(8);
-                            size += sizes.sizeof(state.getCount());
+                            size += TypeSizes.sizeof(8);
+                            size += TypeSizes.sizeof(state.getCount());
                         }
                         else
                         {
                             assert state.isGlobal();
-                            size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+                            size += ByteBufferUtil.serializedSizeWithLength(cell.value);
                         }
                         continue;
                     }
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
                     {
-                        size += sizes.sizeof(cell.timestamp);
-                        size += sizes.sizeof(4);
-                        size += sizes.sizeof(cell.localDeletionTime);
+                        size += TypeSizes.sizeof(cell.timestamp);
+                        size += TypeSizes.sizeof(4);
+                        size += TypeSizes.sizeof(cell.localDeletionTime);
                         continue;
                     }
                     else if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
                     {
-                        size += sizes.sizeof(cell.ttl);
-                        size += sizes.sizeof(cell.localDeletionTime);
+                        size += TypeSizes.sizeof(cell.ttl);
+                        size += TypeSizes.sizeof(cell.localDeletionTime);
                     }
 
-                    size += sizes.sizeof(cell.timestamp);
-                    size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+                    size += TypeSizes.sizeof(cell.timestamp);
+                    size += ByteBufferUtil.serializedSizeWithLength(cell.value);
                 }
                 return size;
             }
 
             try (UnfilteredRowIterator iter = update.sliceableUnfilteredIterator())
             {
-                return UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, version, update.rows, sizes);
+                return UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, version, update.rows);
             }
         }
     }

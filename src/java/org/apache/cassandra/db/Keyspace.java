@@ -39,6 +39,7 @@ import org.apache.cassandra.db.index.SecondaryIndexManager;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -65,7 +66,7 @@ public class Keyspace
             DatabaseDescriptor.createAllDirectories();
     }
 
-    public final KSMetaData metadata;
+    private volatile KeyspaceMetadata metadata;
     public final OpOrder writeOrder = new OpOrder();
 
     /* ColumnFamilyStore per column family */
@@ -81,6 +82,7 @@ public class Keyspace
     };
 
     private static volatile boolean initialized = false;
+
     public static void setInitialized()
     {
         initialized = true;
@@ -163,6 +165,17 @@ public class Keyspace
                     cfs.maybeRemoveUnreadableSSTables(directory);
             }
         }
+    }
+
+    public void setMetadata(KeyspaceMetadata metadata)
+    {
+        this.metadata = metadata;
+        createReplicationStrategy(metadata);
+    }
+
+    public KeyspaceMetadata getMetadata()
+    {
+        return metadata;
     }
 
     public Collection<ColumnFamilyStore> getColumnFamilyStores()
@@ -279,25 +292,25 @@ public class Keyspace
         }
     }
 
-    private Keyspace(KSMetaData metadata)
+    private Keyspace(KeyspaceMetadata metadata)
     {
         this.metadata = metadata;
         createReplicationStrategy(metadata);
         this.metric = new KeyspaceMetrics(this);
     }
 
-    public static Keyspace mockKS(KSMetaData metadata)
+    public static Keyspace mockKS(KeyspaceMetadata metadata)
     {
         return new Keyspace(metadata);
     }
 
-    public void createReplicationStrategy(KSMetaData ksm)
+    private void createReplicationStrategy(KeyspaceMetadata ksm)
     {
         replicationStrategy = AbstractReplicationStrategy.createReplicationStrategy(ksm.name,
-                                                                                    ksm.strategyClass,
+                                                                                    ksm.params.replication.klass,
                                                                                     StorageService.instance.getTokenMetadata(),
                                                                                     DatabaseDescriptor.getEndpointSnitch(),
-                                                                                    ksm.strategyOptions);
+                                                                                    ksm.params.replication.options);
     }
 
     // best invoked on the compaction mananger.

@@ -42,10 +42,13 @@ num_tokens: 256
 # initial_token:
 
 # See http://wiki.apache.org/cassandra/HintedHandoff
-# May either be "true" or "false" to enable globally, or contain a list
-# of data centers to enable per-datacenter.
-# hinted_handoff_enabled: DC1,DC2
+# May either be "true" or "false" to enable globally
 hinted_handoff_enabled: true
+# When hinted_handoff_enabled is true, a black list of data centers that will not
+# perform hinted handoff
+#hinted_handoff_disabled_datacenters:
+#    - DC1
+#    - DC2
 # this defines the maximum amount of time a dead host will have hints
 # generated.  After it has been dead this long, new hints for it will not be
 # created until it has been seen alive and gone down again.
@@ -639,6 +642,9 @@ batch_size_fail_threshold_in_kb: 50
 # Setting this to 0 disables throttling. Note that this account for all types
 # of compaction, including validation compaction.
 compaction_throughput_mb_per_sec: 16
+
+# Log a warning when compacting partitions larger than this value
+compaction_large_partition_warning_threshold_mb: 100
 
 # When compacting, the replacement sstable(s) can be opened before they
 # are completely written, and used in place of the prior sstables for

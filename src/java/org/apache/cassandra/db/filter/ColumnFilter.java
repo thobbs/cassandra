@@ -52,13 +52,6 @@ public class ColumnFilter
 {
     public static final Serializer serializer = new Serializer();
 
-    private static final Comparator<ColumnIdentifier> keyComparator = new Comparator<ColumnIdentifier>()
-    {
-        public int compare(ColumnIdentifier id1, ColumnIdentifier id2)
-        {
-            return ByteBufferUtil.compareUnsigned(id1.bytes, id2.bytes);
-        }
-    };
     private static final Comparator<ColumnSubselection> valueComparator = new Comparator<ColumnSubselection>()
     {
         public int compare(ColumnSubselection s1, ColumnSubselection s2)
@@ -309,7 +302,7 @@ public class ColumnFilter
             SortedSetMultimap<ColumnIdentifier, ColumnSubselection> s = null;
             if (subSelections != null)
             {
-                s = TreeMultimap.create(keyComparator, valueComparator);
+                s = TreeMultimap.create(Comparator.<ColumnIdentifier>naturalOrder(), valueComparator);
                 for (ColumnSubselection subSelection : subSelections)
                     s.put(subSelection.column().name, subSelection);
             }
@@ -401,7 +394,7 @@ public class ColumnFilter
             SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections = null;
             if (hasSubSelections)
             {
-                subSelections = TreeMultimap.create(keyComparator, valueComparator);
+                subSelections = TreeMultimap.create(Comparator.<ColumnIdentifier>naturalOrder(), valueComparator);
                 int size = in.readUnsignedShort();
                 for (int i = 0; i < size; i++)
                 {
@@ -413,22 +406,22 @@ public class ColumnFilter
             return new ColumnFilter(isFetchAll, isFetchAll ? metadata : null, selection, subSelections);
         }
 
-        public long serializedSize(ColumnFilter selection, int version, TypeSizes sizes)
+        public long serializedSize(ColumnFilter selection, int version)
         {
             long size = 1; // header byte
 
             if (selection.selection != null)
             {
-                size += Columns.serializer.serializedSize(selection.selection.statics, sizes);
-                size += Columns.serializer.serializedSize(selection.selection.regulars, sizes);
+                size += Columns.serializer.serializedSize(selection.selection.statics);
+                size += Columns.serializer.serializedSize(selection.selection.regulars);
             }
 
             if (selection.subSelections != null)
             {
 
-                size += sizes.sizeof((short)selection.subSelections.size());
+                size += TypeSizes.sizeof((short)selection.subSelections.size());
                 for (ColumnSubselection subSel : selection.subSelections.values())
-                    size += ColumnSubselection.serializer.serializedSize(subSel, version, sizes);
+                    size += ColumnSubselection.serializer.serializedSize(subSel, version);
             }
 
             return size;

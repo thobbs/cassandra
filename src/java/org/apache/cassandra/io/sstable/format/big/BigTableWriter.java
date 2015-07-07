@@ -151,13 +151,24 @@ public class BigTableWriter extends SSTableWriter
             RowIndexEntry entry = RowIndexEntry.create(startPosition, iterator.partitionLevelDeletion(), index);
 
             long endPosition = dataFile.getFilePointer();
-            metadataCollector.addPartitionSizeInBytes(endPosition - startPosition);
+            long rowSize = endPosition - startPosition;
+            maybeLogLargePartitionWarning(key, rowSize);
+            metadataCollector.addPartitionSizeInBytes(rowSize);
             afterAppend(key, endPosition, entry);
             return entry;
         }
         catch (IOException e)
         {
             throw new FSWriteError(e, dataFile.getPath());
+        }
+    }
+
+    private void maybeLogLargePartitionWarning(DecoratedKey key, long rowSize)
+    {
+        if (rowSize > DatabaseDescriptor.getCompactionLargePartitionWarningThreshold())
+        {
+            String keyString = metadata.getKeyValidator().getString(key.getKey());
+            logger.warn("Compacting large partition {}/{}:{} ({} bytes)", metadata.ksName, metadata.cfName, keyString, rowSize);
         }
     }
 
@@ -417,7 +428,7 @@ public class BigTableWriter extends SSTableWriter
             indexFile = SequentialWriter.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX)));
             builder = SegmentedFile.getBuilder(DatabaseDescriptor.getIndexAccessMode(), false);
             summary = new IndexSummaryBuilder(keyCount, metadata.getMinIndexInterval(), Downsampling.BASE_SAMPLING_LEVEL);
-            bf = FilterFactory.getFilter(keyCount, metadata.getBloomFilterFpChance(), true);
+            bf = FilterFactory.getFilter(keyCount, metadata.getBloomFilterFpChance(), true, descriptor.version.hasOldBfHashOrder());
             // register listeners to be alerted when the data files are flushed
             indexFile.setPostFlushListener(new Runnable()
             {

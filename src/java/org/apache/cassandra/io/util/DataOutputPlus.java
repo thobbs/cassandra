@@ -22,6 +22,8 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
 
+import org.apache.cassandra.utils.vint.VIntCoding;
+
 import com.google.common.base.Function;
 
 /**
@@ -40,4 +42,130 @@ public interface DataOutputPlus extends DataOutput
      * and forget to flush
      */
     <R> R applyToChannel(Function<WritableByteChannel, R> c) throws IOException;
+
+    default void writeVInt(long i) throws IOException
+    {
+        VIntCoding.writeVInt(i, this);
+    }
+
+    /**
+     * Think hard before opting for an unsigned encoding. Is this going to bite someone because some day
+     * they might need to pass in a sentinel value using negative numbers? Is the risk worth it
+     * to save a few bytes?
+     *
+     * Signed, not a fan of unsigned values in protocols and formats
+     */
+    default void writeUnsignedVInt(long i) throws IOException
+    {
+        VIntCoding.writeUnsignedVInt(i, this);
+    }
+
+
+    public static class ForwardingDataOutput implements DataOutput
+    {
+        protected final DataOutput out;
+
+        public ForwardingDataOutput(DataOutput out)
+        {
+            this.out = out;
+        }
+
+        public void write(byte[] b) throws IOException
+        {
+            out.write(b);
+        }
+
+        public void write(byte[] b, int off, int len) throws IOException
+        {
+            out.write(b, off, len);
+        }
+
+        public void write(int b) throws IOException
+        {
+            out.write(b);
+        }
+
+        public void writeBoolean(boolean v) throws IOException
+        {
+            out.writeBoolean(v);
+        }
+
+        public void writeByte(int v) throws IOException
+        {
+            out.writeByte(v);
+        }
+
+        public void writeBytes(String s) throws IOException
+        {
+            out.writeBytes(s);
+        }
+
+        public void writeChar(int v) throws IOException
+        {
+            out.writeChar(v);
+        }
+
+        public void writeChars(String s) throws IOException
+        {
+            out.writeChars(s);
+        }
+
+        public void writeDouble(double v) throws IOException
+        {
+            out.writeDouble(v);
+        }
+
+        public void writeFloat(float v) throws IOException
+        {
+            out.writeFloat(v);
+        }
+
+        public void writeInt(int v) throws IOException
+        {
+            out.writeInt(v);
+        }
+
+        public void writeLong(long v) throws IOException
+        {
+            out.writeLong(v);
+        }
+
+        public void writeShort(int v) throws IOException
+        {
+            out.writeShort(v);
+        }
+
+        public void writeUTF(String s) throws IOException
+        {
+            out.writeUTF(s);
+        }
+
+    }
+
+    public static class DataOutputPlusAdapter extends ForwardingDataOutput implements DataOutputPlus
+    {
+
+        public DataOutputPlusAdapter(DataOutput out)
+        {
+            super(out);
+        }
+
+        public void write(ByteBuffer buffer) throws IOException
+        {
+            if (buffer.hasArray())
+                out.write(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining());
+            else
+                throw new UnsupportedOperationException("IMPLEMENT ME");
+        }
+
+        public void write(Memory memory, long offset, long length) throws IOException
+        {
+            throw new UnsupportedOperationException("IMPLEMENT ME");
+        }
+
+        public <R> R applyToChannel(Function<WritableByteChannel, R> c) throws IOException
+        {
+            throw new UnsupportedOperationException("IMPLEMENT ME");
+        }
+    }
 }

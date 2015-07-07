@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
@@ -35,7 +36,8 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.UpdateBuilder;
-import org.apache.cassandra.config.KSMetaData;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
@@ -53,16 +55,12 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.locator.SimpleStrategy;
-import org.apache.cassandra.db.compaction.SSTableSplitter;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
-import org.apache.cassandra.dht.Range;
-import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -75,14 +73,32 @@ public class SSTableRewriterTest extends SchemaLoader
     private static final String KEYSPACE = "SSTableRewriterTest";
     private static final String CF = "Standard1";
 
+    private static Config.DiskAccessMode standardMode;
+    private static Config.DiskAccessMode indexMode;
+
     @BeforeClass
     public static void defineSchema() throws ConfigurationException
     {
+        if (FBUtilities.isWindows())
+        {
+            standardMode = DatabaseDescriptor.getDiskAccessMode();
+            indexMode = DatabaseDescriptor.getIndexAccessMode();
+
+            DatabaseDescriptor.setDiskAccessMode(Config.DiskAccessMode.standard);
+            DatabaseDescriptor.setIndexAccessMode(Config.DiskAccessMode.standard);
+        }
+
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
+                                    KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE, CF));
+    }
+
+    @AfterClass
+    public static void revertDiskAccess()
+    {
+        DatabaseDescriptor.setDiskAccessMode(standardMode);
+        DatabaseDescriptor.setIndexAccessMode(indexMode);
     }
 
     @After
@@ -100,7 +116,6 @@ public class SSTableRewriterTest extends SchemaLoader
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
         truncate(cfs);
-        assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());
 
         for (int j = 0; j < 100; j ++)
         {
@@ -172,8 +187,6 @@ public class SSTableRewriterTest extends SchemaLoader
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
         truncate(cfs);
-        assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());
-        assertEquals(0, cfs.metric.totalDiskSpaceUsed.getCount());
 
         SSTableReader s = writeFile(cfs, 1000);
         cfs.addSSTable(s);
@@ -222,8 +235,6 @@ public class SSTableRewriterTest extends SchemaLoader
         int filecounts = assertFileCounts(sstables.iterator().next().descriptor.directory.list(), 0, 0);
         assertEquals(1, filecounts);
         truncate(cfs);
-        SSTableDeletingTask.waitForDeletions();
-        validateCFS(cfs);
     }
 
     @Test
@@ -232,7 +243,6 @@ public class SSTableRewriterTest extends SchemaLoader
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
         truncate(cfs);
-        assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());
 
         File dir = cfs.directories.getDirectoryForNewSSTables();
         try (SSTableWriter writer = getWriter(cfs, dir))
@@ -272,7 +282,7 @@ public class SSTableRewriterTest extends SchemaLoader
             SSTableReader s2 = writer.setMaxDataAge(1000).openEarly();
             assertTrue(s.last.compareTo(s2.last) < 0);
             assertFileCounts(dir.list(), 2, 2);
-            s.markObsolete();
+            s.markObsolete(cfs.getTracker());
             s.selfRef().release();
             s2.selfRef().release();
             // These checks don't work on Windows because the writer has the channel still
@@ -590,8 +600,6 @@ public class SSTableRewriterTest extends SchemaLoader
 
         SSTableDeletingTask.waitForDeletions();
         assertFileCounts(s.descriptor.directory.list(), 0, 0);
-        cfs.truncateBlocking();
-        SSTableDeletingTask.waitForDeletions();
         validateCFS(cfs);
     }
 
@@ -661,6 +669,7 @@ public class SSTableRewriterTest extends SchemaLoader
                 FileUtils.deleteRecursive(f);
             }
         }
+        truncate(cfs);
     }
 
     @Test
@@ -736,9 +745,13 @@ public class SSTableRewriterTest extends SchemaLoader
         {
             assertEquals(1, cfs.getSSTables().size());
             validateCFS(cfs);
+            truncate(cfs);
         }
-        truncate(cfs);
-        SSTableDeletingTask.waitForDeletions();
+        else
+        {
+            assertEquals(0, cfs.getSSTables().size());
+            cfs.truncateBlocking();
+        }
         filecount = assertFileCounts(s.descriptor.directory.list(), 0, 0);
         if (offline)
         {
@@ -752,6 +765,7 @@ public class SSTableRewriterTest extends SchemaLoader
         }
 
         assertEquals(0, filecount);
+        truncate(cfs);
     }
 
     @Test
@@ -804,6 +818,7 @@ public class SSTableRewriterTest extends SchemaLoader
         validateKeys(keyspace);
         SSTableDeletingTask.waitForDeletions();
         validateCFS(cfs);
+        truncate(cfs);
     }
 
     @Test
@@ -811,7 +826,7 @@ public class SSTableRewriterTest extends SchemaLoader
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
-        cfs.truncateBlocking();
+        truncate(cfs);
 
         SSTableReader s = writeFile(cfs, 1000);
         cfs.addSSTable(s);
@@ -855,7 +870,7 @@ public class SSTableRewriterTest extends SchemaLoader
     {
         Keyspace keyspace = Keyspace.open(KEYSPACE);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
-        cfs.truncateBlocking();
+        truncate(cfs);
 
         SSTableReader s = writeFile(cfs, 1000);
         cfs.addSSTable(s);
@@ -900,9 +915,11 @@ public class SSTableRewriterTest extends SchemaLoader
     public static void truncate(ColumnFamilyStore cfs)
     {
         cfs.truncateBlocking();
+        SSTableDeletingTask.waitForDeletions();
         Uninterruptibles.sleepUninterruptibly(10L,TimeUnit.MILLISECONDS);
         assertEquals(0, cfs.metric.liveDiskSpaceUsed.getCount());
         assertEquals(0, cfs.metric.totalDiskSpaceUsed.getCount());
+        validateCFS(cfs);
     }
 
     public static SSTableReader writeFile(ColumnFamilyStore cfs, int count)
@@ -962,7 +979,6 @@ public class SSTableRewriterTest extends SchemaLoader
         assertEquals(spaceUsed, cfs.metric.totalDiskSpaceUsed.getCount());
         assertTrue(cfs.getTracker().getCompacting().isEmpty());
     }
-
 
     public static int assertFileCounts(String [] files, int expectedtmplinkCount, int expectedtmpCount)
     {

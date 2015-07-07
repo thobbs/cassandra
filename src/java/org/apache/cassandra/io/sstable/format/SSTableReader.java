@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Ordering;
 import com.google.common.primitives.Longs;
@@ -34,6 +35,7 @@ import com.google.common.util.concurrent.RateLimiter;
 import com.clearspring.analytics.stream.cardinality.CardinalityMergeException;
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
+import com.codahale.metrics.Counter;
 import org.apache.cassandra.cache.CachingOptions;
 import org.apache.cassandra.cache.InstrumentingCache;
 import org.apache.cassandra.cache.KeyCacheKey;
@@ -428,7 +430,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
     {
         // Minimum components without which we can't do anything
         assert components.contains(Component.DATA) : "Data component is missing for sstable " + descriptor;
-        assert components.contains(Component.PRIMARY_INDEX) : "Primary index component is missing for sstable " + descriptor;
+        assert !validate || components.contains(Component.PRIMARY_INDEX) : "Primary index component is missing for sstable " + descriptor;
 
         // For the 3.0+ sstable format, the (misnomed) stats component hold the serialization header which we need to deserialize the sstable content
         assert !descriptor.version.storeRows() || components.contains(Component.STATS) : "Stats component is missing for sstable " + descriptor;
@@ -620,25 +622,6 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return dfile.path();
     }
 
-    public String getIndexFilename()
-    {
-        return ifile.path();
-    }
-
-    // this is only used for restoring tracker state at delete (and wiring up the keycache) and so
-    // should only be called once it is actually added to the tracker
-    public void setupDeleteNotification(Tracker tracker)
-    {
-        tidy.type.deletingTask.setTracker(tracker);
-        setupKeyCache();
-    }
-
-    @VisibleForTesting
-    public boolean isDeleteNotificationSetup()
-    {
-        return tidy.type.deletingTask.getTracker() != null;
-    }
-
     public void setupKeyCache()
     {
         // under normal operation we can do this at any time, but SSTR is also used outside C* proper,
@@ -655,6 +638,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             load(false, true);
             bf = FilterFactory.AlwaysPresent;
         }
+        else if (!components.contains(Component.PRIMARY_INDEX))
+        {
+            // avoid any reading of the missing primary index component.
+            // this should only happen during StandaloneScrubber
+            load(false, false);
+        }
         else if (!components.contains(Component.FILTER) || validation == null)
         {
             // bf is enabled, but filter component is missing.
@@ -669,7 +658,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             // bf is enabled and fp chance matches the currently configured value.
             load(false, true);
-            loadBloomFilter();
+            loadBloomFilter(descriptor.version.hasOldBfHashOrder());
         }
     }
 
@@ -678,11 +667,11 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      *
      * @throws IOException
      */
-    private void loadBloomFilter() throws IOException
+    private void loadBloomFilter(boolean oldBfHashOrder) throws IOException
     {
         try (DataInputStream stream = new DataInputStream(new BufferedInputStream(new FileInputStream(descriptor.filenameFor(Component.FILTER)))))
         {
-            bf = FilterFactory.deserialize(stream, true);
+            bf = FilterFactory.deserialize(stream, true, oldBfHashOrder);
         }
     }
 
@@ -704,12 +693,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 builtSummary = true;
             }
 
-            ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
+            if (components.contains(Component.PRIMARY_INDEX))
+                ifile = ibuilder.complete(descriptor.filenameFor(Component.PRIMARY_INDEX));
+
             dfile = dbuilder.complete(descriptor.filenameFor(Component.DATA));
 
             // Check for an index summary that was downsampled even though the serialization format doesn't support
             // that.  If it was downsampled, rebuild it.  See CASSANDRA-8993 for details.
-            if (!descriptor.version.hasSamplingLevel() && !builtSummary && !validateSummarySamplingLevel())
+        if (!descriptor.version.hasSamplingLevel() && !builtSummary && !validateSummarySamplingLevel() && ifile != null)
             {
                 indexSummary.close();
                 ifile.close();
@@ -745,6 +736,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      */
     private void buildSummary(boolean recreateBloomFilter, SegmentedFile.Builder ibuilder, SegmentedFile.Builder dbuilder, boolean summaryLoaded, int samplingLevel) throws IOException
     {
+         if (!components.contains(Component.PRIMARY_INDEX))
+             return;
+
         // we read the positions in a BRAF so we don't have to worry about an entry spanning a mmap boundary.
         try (RandomAccessReader primaryIndex = RandomAccessReader.open(new File(descriptor.filenameFor(Component.PRIMARY_INDEX))))
         {
@@ -755,7 +749,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                     : estimateRowsFromIndex(primaryIndex); // statistics is supposed to be optional
 
             if (recreateBloomFilter)
-                bf = FilterFactory.getFilter(estimatedKeys, metadata.getBloomFilterFpChance(), true);
+                bf = FilterFactory.getFilter(estimatedKeys, metadata.getBloomFilterFpChance(), true, descriptor.version.hasOldBfHashOrder());
 
             try (IndexSummaryBuilder summaryBuilder = summaryLoaded ? null : new IndexSummaryBuilder(estimatedKeys, metadata.getMinIndexInterval(), samplingLevel))
             {
@@ -851,6 +845,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         // downsampling.  Downsampling can drop any of the first BASE_SAMPLING_LEVEL entries (repeating that drop pattern
         // for the remainder of the summary).  Unfortunately, the first entry to be dropped is the entry at
         // index (BASE_SAMPLING_LEVEL - 1), so we need to check a full set of BASE_SAMPLING_LEVEL entries.
+        if (ifile == null)
+            return false;
+
         Iterator<FileDataInput> segments = ifile.iterator(0);
         int i = 0;
         int summaryEntriesChecked = 0;
@@ -949,21 +946,38 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         }
     }
 
+    // runOnClose must NOT be an anonymous or non-static inner class, nor must it retain a reference chain to this reader
     public void runOnClose(final Runnable runOnClose)
     {
         synchronized (tidy.global)
         {
             final Runnable existing = tidy.runOnClose;
-            tidy.runOnClose = existing == null
-                              ? runOnClose
-                              : new Runnable()
-                                {
-                                    public void run()
-                                    {
-                                        existing.run();
-                                        runOnClose.run();
-                                    }
-                                };
+            tidy.runOnClose = AndThen.get(existing, runOnClose);
+        }
+    }
+
+    private static class AndThen implements Runnable
+    {
+        final Runnable runFirst;
+        final Runnable runSecond;
+
+        private AndThen(Runnable runFirst, Runnable runSecond)
+        {
+            this.runFirst = runFirst;
+            this.runSecond = runSecond;
+        }
+
+        public void run()
+        {
+            runFirst.run();
+            runSecond.run();
+        }
+
+        static Runnable get(Runnable runFirst, Runnable runSecond)
+        {
+            if (runFirst == null)
+                return runSecond;
+            return new AndThen(runFirst, runSecond);
         }
     }
 
@@ -997,7 +1011,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                                                  components,
                                                  metadata,
                                                  partitioner,
-                                                 ifile.sharedCopy(),
+                                                 ifile != null ? ifile.sharedCopy() : null,
                                                  dfile.sharedCopy(),
                                                  newSummary,
                                                  bf.sharedCopy(),
@@ -1011,30 +1025,48 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return replacement;
     }
 
+    // runOnClose must NOT be an anonymous or non-static inner class, nor must it retain a reference chain to this reader
     public SSTableReader cloneWithNewStart(DecoratedKey newStart, final Runnable runOnClose)
     {
         synchronized (tidy.global)
         {
             assert openReason != OpenReason.EARLY;
-            // TODO: make data/index start accurate for compressed files
             // TODO: merge with caller's firstKeyBeyond() work,to save time
             if (newStart.compareTo(first) > 0)
             {
                 final long dataStart = getPosition(newStart, Operator.EQ).position;
                 final long indexStart = getIndexScanPosition(newStart);
-                this.tidy.runOnClose = new Runnable()
-                {
-                    public void run()
-                    {
-                        dfile.dropPageCache(dataStart);
-                        ifile.dropPageCache(indexStart);
-                        if (runOnClose != null)
-                            runOnClose.run();
-                    }
-                };
+                this.tidy.runOnClose = new DropPageCache(dfile, dataStart, ifile, indexStart, runOnClose);
             }
 
             return cloneAndReplace(newStart, OpenReason.MOVED_START);
+        }
+    }
+
+    private static class DropPageCache implements Runnable
+    {
+        final SegmentedFile dfile;
+        final long dfilePosition;
+        final SegmentedFile ifile;
+        final long ifilePosition;
+        final Runnable andThen;
+
+        private DropPageCache(SegmentedFile dfile, long dfilePosition, SegmentedFile ifile, long ifilePosition, Runnable andThen)
+        {
+            this.dfile = dfile;
+            this.dfilePosition = dfilePosition;
+            this.ifile = ifile;
+            this.ifilePosition = ifilePosition;
+            this.andThen = andThen;
+        }
+
+        public void run()
+        {
+            dfile.dropPageCache(dfilePosition);
+
+            if (ifile != null)
+                ifile.dropPageCache(ifilePosition);
+            andThen.run();
         }
     }
 
@@ -1429,10 +1461,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return positions;
     }
 
-    public void invalidateCacheKey(DecoratedKey key)
+    public KeyCacheKey getCacheKey(DecoratedKey key)
     {
-        KeyCacheKey cacheKey = new KeyCacheKey(metadata.cfId, descriptor, key.getKey());
-        keyCache.remove(cacheKey);
+        return new KeyCacheKey(metadata.cfId, descriptor, key.getKey());
     }
 
     public void cacheKey(DecoratedKey key, RowIndexEntry info)
@@ -1513,6 +1544,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         long sampledPosition = getIndexScanPosition(token);
 
+        if (ifile == null)
+            return null;
+
         Iterator<FileDataInput> segments = ifile.iterator(sampledPosition);
         while (segments.hasNext())
         {
@@ -1569,7 +1603,7 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
      * @return true if the this is the first time the file was marked obsolete.  Calling this
      * multiple times is usually buggy (see exceptions in Tracker.unmarkCompacting and removeOldSSTablesSize).
      */
-    public boolean markObsolete()
+    public boolean markObsolete(Tracker tracker)
     {
         if (logger.isDebugEnabled())
             logger.debug("Marking {} compacted", getFilename());
@@ -1578,7 +1612,12 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         {
             assert !tidy.isReplaced;
         }
-        return !tidy.global.isCompacted.getAndSet(true);
+        if (!tidy.global.isCompacted.getAndSet(true))
+        {
+            tidy.type.markObsolete(this, tracker);
+            return true;
+        }
+        return false;
     }
 
     public boolean isMarkedCompacted()
@@ -1825,7 +1864,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         try
         {
             CompactionMetadata compactionMetadata = (CompactionMetadata) descriptor.getMetadataSerializer().deserialize(descriptor, MetadataType.COMPACTION);
-            return compactionMetadata.ancestors;
+            if (compactionMetadata != null)
+                return compactionMetadata.ancestors;
+            return Collections.emptySet();
         }
         catch (IOException e)
         {
@@ -1871,7 +1912,9 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
     public RandomAccessReader openIndexReader()
     {
-        return ifile.createReader();
+        if (ifile != null)
+            return ifile.createReader();
+        return null;
     }
 
     /**
@@ -2052,13 +2095,15 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
                 {
                     if (barrier != null)
                         barrier.await();
-                    bf.close();
+                    if (bf != null)
+                        bf.close();
                     if (summary != null)
                         summary.close();
                     if (runOnClose != null)
                         runOnClose.run();
                     dfile.close();
-                    ifile.close();
+                    if (ifile != null)
+                        ifile.close();
                     typeRef.release();
                 }
             });
@@ -2093,14 +2138,29 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
 
         private final Descriptor desc;
         private final Ref<GlobalTidy> globalRef;
-        private final SSTableDeletingTask deletingTask;
+        private final Set<Component> components;
+        private long sizeOnDelete;
+        private Counter totalDiskSpaceUsed;
 
         DescriptorTypeTidy(Descriptor desc, SSTableReader sstable)
         {
             this.desc = desc;
-            this.deletingTask = new SSTableDeletingTask(desc, sstable);
             // get a new reference to the shared global tidy
             this.globalRef = GlobalTidy.get(sstable);
+            this.components = sstable.components;
+        }
+
+        void markObsolete(SSTableReader instance, Tracker tracker)
+        {
+            // the tracker is used only to notify listeners of deletion of the sstable;
+            // since deletion of a non-final file is not really deletion of the sstable,
+            // we don't want to notify the listeners in this event
+            if (tracker != null && tracker.cfstore != null && desc.type == Descriptor.Type.FINAL)
+            {
+                sizeOnDelete = instance.bytesOnDisk();
+                totalDiskSpaceUsed = tracker.cfstore.metric.totalDiskSpaceUsed;
+                tracker.notifyDeleting(instance);
+            }
         }
 
         public void tidy()
@@ -2112,10 +2172,10 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
             {
                 case FINAL:
                     if (isCompacted)
-                        deletingTask.run();
+                        new SSTableDeletingTask(desc, components, totalDiskSpaceUsed, sizeOnDelete).run();
                     break;
                 case TEMPLINK:
-                    deletingTask.run();
+                    new SSTableDeletingTask(desc, components, null, 0).run();
                     break;
                 default:
                     throw new IllegalStateException();

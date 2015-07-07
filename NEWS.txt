@@ -18,6 +18,9 @@ using the provided 'sstableupgrade' tool.
 
 Upgrading
 ---------
+   _ New SSTable version 'la' with improved bloom-filter false-positive handling
+     compared to previous version 'ka' used in 2.2 and 2.1. Running sstableupgrade
+     is not necessary but recommended.
    - Pig's CassandraStorage has been removed. Use CqlNativeStorage instead.
    - Hadoop BulkOutputFormat and BulkRecordWriter have been removed; use
      CqlBulkOutputFormat and CqlBulkRecordWriter instead.
@@ -25,7 +28,9 @@ Upgrading
      use CqlInputFormat and CqlOutputFormat instead.
    - Hadoop ColumnFamilyRecordReader and ColumnFamilyRecordWriter have been removed;
      use CqlRecordReader and CqlRecordWriter instead.
-
+   - hinted_handoff_enabled in cassandra.yaml no longer supports a list of data centers.
+     To specify a list of excluded data centers when hinted_handoff_enabled is set to true,
+     use hinted_handoff_disabled_datacenters, see CASSANDRA-9035 for details.
 
 2.2
 ===
@@ -152,6 +157,13 @@ Upgrading
    - The sstable2json and json2sstable tools have been deprecated and will be
      removed in the next major Cassandra release. See CASSANDRA-9618
      (https://issues.apache.org/jira/browse/CASSANDRA-9618) for details.
+   - nodetool enablehandoff will no longer support a list of data centers starting
+     with the next major release. Two new commands will be added, enablehintsfordc and disablehintsfordc,
+     to exclude data centers from using hinted handoff when the global status is enabled.
+     In cassandra.yaml, hinted_handoff_enabled will no longer support a list of data centers starting
+     with the next major release. A new setting will be added, hinted_handoff_disabled_datacenters,
+     to exclude data centers when the global status is enabled, see CASSANDRA-9035 for details.
+
 
 2.1.6
 =====

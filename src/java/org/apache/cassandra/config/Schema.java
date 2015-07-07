@@ -37,8 +37,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.schema.LegacySchemaTables;
-import org.apache.cassandra.schema.Tables;
+import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.utils.ConcurrentBiMap;
 import org.apache.cassandra.utils.Pair;
@@ -59,7 +58,7 @@ public class Schema
     public static final int NAME_LENGTH = 48;
 
     /* metadata map for faster keyspace lookup */
-    private final Map<String, KSMetaData> keyspaces = new NonBlockingHashMap<>();
+    private final Map<String, KeyspaceMetadata> keyspaces = new NonBlockingHashMap<>();
 
     /* Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace. */
     private final Map<String, Keyspace> keyspaceInstances = new NonBlockingHashMap<>();
@@ -89,7 +88,7 @@ public class Schema
      */
     public Schema()
     {
-        load(SystemKeyspace.definition());
+        load(SystemKeyspace.metadata());
     }
 
     /**
@@ -121,7 +120,7 @@ public class Schema
      *
      * @return self to support chaining calls
      */
-    public Schema load(Collection<KSMetaData> keyspaceDefs)
+    public Schema load(Collection<KeyspaceMetadata> keyspaceDefs)
     {
         keyspaceDefs.forEach(this::load);
         return this;
@@ -134,10 +133,10 @@ public class Schema
      *
      * @return self to support chaining calls
      */
-    public Schema load(KSMetaData keyspaceDef)
+    public Schema load(KeyspaceMetadata keyspaceDef)
     {
         keyspaceDef.tables.forEach(this::load);
-        setKeyspaceDefinition(keyspaceDef);
+        setKeyspaceMetadata(keyspaceDef);
         return this;
     }
 
@@ -196,7 +195,7 @@ public class Schema
      *
      * @param ksm The keyspace definition to remove
      */
-    public void clearKeyspaceDefinition(KSMetaData ksm)
+    public void clearKeyspaceMetadata(KeyspaceMetadata ksm)
     {
         keyspaces.remove(ksm.name);
     }
@@ -214,7 +213,7 @@ public class Schema
     public CFMetaData getCFMetaData(String keyspaceName, String cfName)
     {
         assert keyspaceName != null;
-        KSMetaData ksm = keyspaces.get(keyspaceName);
+        KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
         return (ksm == null) ? null : ksm.tables.getNullable(cfName);
     }
 
@@ -243,7 +242,7 @@ public class Schema
      *
      * @return The keyspace metadata or null if it wasn't found
      */
-    public KSMetaData getKSMetaData(String keyspaceName)
+    public KeyspaceMetadata getKSMetaData(String keyspaceName)
     {
         assert keyspaceName != null;
         return keyspaces.get(keyspaceName);
@@ -267,7 +266,7 @@ public class Schema
     public Tables getTables(String keyspaceName)
     {
         assert keyspaceName != null;
-        KSMetaData ksm = keyspaces.get(keyspaceName);
+        KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
         assert ksm != null;
         return ksm.tables;
     }
@@ -285,10 +284,14 @@ public class Schema
      *
      * @param ksm The metadata about keyspace
      */
-    public void setKeyspaceDefinition(KSMetaData ksm)
+    public void setKeyspaceMetadata(KeyspaceMetadata ksm)
     {
         assert ksm != null;
+
         keyspaces.put(ksm.name, ksm);
+        Keyspace keyspace = getKeyspaceInstance(ksm.name);
+        if (keyspace != null)
+            keyspace.setMetadata(ksm);
     }
 
     /* ColumnFamily query/control methods */
@@ -366,7 +369,7 @@ public class Schema
         if (!name.hasKeyspace())
             throw new IllegalArgumentException(String.format("Function name must be fully quallified: got %s", name));
 
-        KSMetaData ksm = getKSMetaData(name.keyspace);
+        KeyspaceMetadata ksm = getKSMetaData(name.keyspace);
         return ksm == null
              ? Collections.emptyList()
              : ksm.functions.get(name);
@@ -385,7 +388,7 @@ public class Schema
         if (!name.hasKeyspace())
             throw new IllegalArgumentException(String.format("Function name must be fully quallified: got %s", name));
 
-        KSMetaData ksm = getKSMetaData(name.keyspace);
+        KeyspaceMetadata ksm = getKSMetaData(name.keyspace);
         return ksm == null
              ? Optional.empty()
              : ksm.functions.find(name, argTypes);
@@ -427,15 +430,15 @@ public class Schema
     {
         for (String keyspaceName : getNonSystemKeyspaces())
         {
-            KSMetaData ksm = getKSMetaData(keyspaceName);
+            KeyspaceMetadata ksm = getKSMetaData(keyspaceName);
             ksm.tables.forEach(this::purge);
-            clearKeyspaceDefinition(ksm);
+            clearKeyspaceMetadata(ksm);
         }
 
         updateVersionAndAnnounce();
     }
 
-    public void addKeyspace(KSMetaData ksm)
+    public void addKeyspace(KeyspaceMetadata ksm)
     {
         assert getKSMetaData(ksm.name) == null;
         load(ksm);
@@ -444,20 +447,15 @@ public class Schema
         MigrationManager.instance.notifyCreateKeyspace(ksm);
     }
 
-    public void updateKeyspace(String ksName)
+    public void updateKeyspace(String ksName, KeyspaceParams newParams)
     {
-        KSMetaData oldKsm = getKSMetaData(ksName);
-        assert oldKsm != null;
-        KSMetaData newKsm = LegacySchemaTables.createKeyspaceFromName(ksName)
-                                              .cloneWith(oldKsm.tables, oldKsm.types, oldKsm.functions);
-        setKeyspaceDefinition(newKsm);
-        Keyspace.open(ksName).createReplicationStrategy(newKsm);
-        MigrationManager.instance.notifyUpdateKeyspace(newKsm);
+        KeyspaceMetadata ksm = update(ksName, ks -> ks.withSwapped(newParams));
+        MigrationManager.instance.notifyUpdateKeyspace(ksm);
     }
 
     public void dropKeyspace(String ksName)
     {
-        KSMetaData ksm = Schema.instance.getKSMetaData(ksName);
+        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
         String snapshotName = Keyspace.getTimestampedSnapshotName(ksName);
 
         CompactionManager.instance.interruptCompactionFor(ksm.tables, true);
@@ -481,7 +479,7 @@ public class Schema
 
         // remove the keyspace from the static instances.
         Keyspace.clear(ksm.name);
-        clearKeyspaceDefinition(ksm);
+        clearKeyspaceMetadata(ksm);
 
         keyspace.writeOrder.awaitNewBarrier();
 
@@ -494,18 +492,18 @@ public class Schema
     public void addTable(CFMetaData cfm)
     {
         assert getCFMetaData(cfm.ksName, cfm.cfName) == null;
-        KSMetaData oldKsm = getKSMetaData(cfm.ksName);
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.tables.with(cfm));
 
-        logger.info("Loading {}", cfm);
+        update(cfm.ksName, ks ->
+        {
+            load(cfm);
 
-        load(cfm);
+            // make sure it's init-ed w/ the old definitions first,
+            // since we're going to call initCf on the new one manually
+            Keyspace.open(cfm.ksName);
 
-        // make sure it's init-ed w/ the old definitions first,
-        // since we're going to call initCf on the new one manually
-        Keyspace.open(cfm.ksName);
+            return ks.withSwapped(ks.tables.with(cfm));
+        });
 
-        setKeyspaceDefinition(newKsm);
         Keyspace.open(cfm.ksName).initCf(cfm.cfId, cfm.cfName, true);
         MigrationManager.instance.notifyCreateColumnFamily(cfm);
     }
@@ -523,17 +521,17 @@ public class Schema
 
     public void dropTable(String ksName, String tableName)
     {
-        KSMetaData oldKsm = getKSMetaData(ksName);
+        KeyspaceMetadata oldKsm = getKSMetaData(ksName);
         assert oldKsm != null;
         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(tableName);
         assert cfs != null;
 
         // reinitialize the keyspace.
         CFMetaData cfm = oldKsm.tables.get(tableName).get();
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.tables.without(tableName));
+        KeyspaceMetadata newKsm = oldKsm.withSwapped(oldKsm.tables.without(tableName));
 
         purge(cfm);
-        setKeyspaceDefinition(newKsm);
+        setKeyspaceMetadata(newKsm);
 
         CompactionManager.instance.interruptCompactionFor(Collections.singleton(cfm), true);
 
@@ -547,94 +545,67 @@ public class Schema
 
     public void addType(UserType ut)
     {
-        KSMetaData oldKsm = getKSMetaData(ut.keyspace);
-        assert oldKsm != null;
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.types.with(ut));
-        setKeyspaceDefinition(newKsm);
+        update(ut.keyspace, ks -> ks.withSwapped(ks.types.with(ut)));
         MigrationManager.instance.notifyCreateUserType(ut);
     }
 
     public void updateType(UserType ut)
     {
-        KSMetaData oldKsm = getKSMetaData(ut.keyspace);
-        assert oldKsm != null;
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.types.without(ut.name).with(ut));
-        setKeyspaceDefinition(newKsm);
+        update(ut.keyspace, ks -> ks.withSwapped(ks.types.without(ut.name).with(ut)));
         MigrationManager.instance.notifyUpdateUserType(ut);
     }
 
     public void dropType(UserType ut)
     {
-        KSMetaData oldKsm = getKSMetaData(ut.keyspace);
-        assert oldKsm != null;
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.types.without(ut.name));
-        setKeyspaceDefinition(newKsm);
+        update(ut.keyspace, ks -> ks.withSwapped(ks.types.without(ut.name)));
         MigrationManager.instance.notifyDropUserType(ut);
     }
 
     public void addFunction(UDFunction udf)
     {
-        addFunctionInternal(udf);
+        update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.with(udf)));
         MigrationManager.instance.notifyCreateFunction(udf);
     }
 
     public void updateFunction(UDFunction udf)
     {
-        updateFunctionInternal(udf);
+        update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.without(udf.name(), udf.argTypes()).with(udf)));
         MigrationManager.instance.notifyUpdateFunction(udf);
     }
 
     public void dropFunction(UDFunction udf)
     {
-        dropFunctionInternal(udf);
+        update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.without(udf.name(), udf.argTypes())));
         MigrationManager.instance.notifyDropFunction(udf);
     }
 
     public void addAggregate(UDAggregate uda)
     {
-        addFunctionInternal(uda);
+        update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.with(uda)));
         MigrationManager.instance.notifyCreateAggregate(uda);
     }
 
     public void updateAggregate(UDAggregate uda)
     {
-        updateFunctionInternal(uda);
+        update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.without(uda.name(), uda.argTypes()).with(uda)));
         MigrationManager.instance.notifyUpdateAggregate(uda);
     }
 
     public void dropAggregate(UDAggregate uda)
     {
-        dropFunctionInternal(uda);
+        update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.without(uda.name(), uda.argTypes())));
         MigrationManager.instance.notifyDropAggregate(uda);
     }
 
-    private void addFunctionInternal(Function fun)
+    private KeyspaceMetadata update(String keyspaceName, java.util.function.Function<KeyspaceMetadata, KeyspaceMetadata> transformation)
     {
-        assert fun instanceof UDFunction || fun instanceof UDAggregate;
+        KeyspaceMetadata current = getKSMetaData(keyspaceName);
+        if (current == null)
+            throw new IllegalStateException(String.format("Keyspace %s doesn't exist", keyspaceName));
 
-        KSMetaData oldKsm = getKSMetaData(fun.name().keyspace);
-        assert oldKsm != null;
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.functions.with(fun));
-        setKeyspaceDefinition(newKsm);
-    }
+        KeyspaceMetadata transformed = transformation.apply(current);
+        setKeyspaceMetadata(transformed);
 
-    private void updateFunctionInternal(Function fun)
-    {
-        assert fun instanceof UDFunction || fun instanceof UDAggregate;
-
-        KSMetaData oldKsm = getKSMetaData(fun.name().keyspace);
-        assert oldKsm != null;
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.functions.without(fun.name(), fun.argTypes()).with(fun));
-        setKeyspaceDefinition(newKsm);
-    }
-
-    private void dropFunctionInternal(Function fun)
-    {
-        assert fun instanceof UDFunction || fun instanceof UDAggregate;
-
-        KSMetaData oldKsm = getKSMetaData(fun.name().keyspace);
-        assert oldKsm != null;
-        KSMetaData newKsm = oldKsm.cloneWith(oldKsm.functions.without(fun.name(), fun.argTypes()));
-        setKeyspaceDefinition(newKsm);
+        return transformed;
     }
 }

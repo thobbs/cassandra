@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db;
 
-import java.io.DataInput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
@@ -25,15 +24,17 @@ import java.util.Iterator;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.cache.IMeasurableMemory;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.memory.AbstractAllocator;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Data structure holding the range tombstones of a ColumnFamily.
@@ -163,7 +164,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
         int c = comparator.compare(ends[size-1], start);
 
         // Fast path if we add in sorted order
-        if (c < 0)
+        if (c <= 0)
         {
             addInternal(size, start, end, markedAt, delTime);
         }
@@ -171,7 +172,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
         {
             // Note: insertFrom expect i to be the insertion point in term of interval ends
             int pos = Arrays.binarySearch(ends, 0, size, start, comparator);
-            insertFrom((pos >= 0 ? pos : -pos-1), start, end, markedAt, delTime);
+            insertFrom((pos >= 0 ? pos+1 : -pos-1), start, end, markedAt, delTime);
         }
         boundaryHeapSize += start.unsharedHeapSize() + end.unsharedHeapSize();
     }
@@ -289,12 +290,12 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
 
     public int dataSize()
     {
-        int dataSize = TypeSizes.NATIVE.sizeof(size);
+        int dataSize = TypeSizes.sizeof(size);
         for (int i = 0; i < size; i++)
         {
             dataSize += starts[i].dataSize() + ends[i].dataSize();
-            dataSize += TypeSizes.NATIVE.sizeof(markedAts[i]);
-            dataSize += TypeSizes.NATIVE.sizeof(delTimes[i]);
+            dataSize += TypeSizes.sizeof(markedAts[i]);
+            dataSize += TypeSizes.sizeof(delTimes[i]);
         }
         return dataSize;
     }
@@ -463,7 +464,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
         RangeTombstoneList that = (RangeTombstoneList)o;
         if (size != that.size)
             return false;
-        
+
         for (int i = 0; i < size; i++)
         {
             if (!starts[i].equals(that.starts[i]))
@@ -504,12 +505,14 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
 
     /*
      * Inserts a new element starting at index i. This method assumes that:
-     *    ends[i-1] < start < ends[i]
-     * (note that we cannot have start == end since both will at least have a different bound "kind")
+     *    ends[i-1] <= start < ends[i]
+     * (note that start can be equal to ends[i-1] in the case where we have a boundary, i.e. for instance
+     * ends[i-1] is the exclusive end of X and start is the inclusive start of X).
      *
      * A RangeTombstoneList is a list of range [s_0, e_0]...[s_n, e_n] such that:
-     *   - s_i <= e_i
-     *   - e_i < s_i+1
+     *   - s_i is a start bound and e_i is a end bound
+     *   - s_i < e_i
+     *   - e_i <= s_i+1
      * Basically, range are non overlapping and in order.
      */
     private void insertFrom(int i, Slice.Bound start, Slice.Bound end, long markedAt, int delTime)
@@ -517,7 +520,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
         while (i < size)
         {
             assert start.isStart() && end.isEnd();
-            assert i == 0 || comparator.compare(ends[i-1], start) < 0;
+            assert i == 0 || comparator.compare(ends[i-1], start) <= 0;
             assert comparator.compare(start, ends[i]) < 0;
 
             if (Slice.isEmpty(comparator, start, end))
@@ -796,7 +799,7 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
             //}
         }
 
-        public RangeTombstoneList deserialize(DataInput in, int version) throws IOException
+        public RangeTombstoneList deserialize(DataInputPlus in, int version) throws IOException
         {
             // TODO
             throw new UnsupportedOperationException();
@@ -834,27 +837,22 @@ public class RangeTombstoneList implements Iterable<RangeTombstone>, IMeasurable
             //return tombstones;
         }
 
-        public long serializedSize(RangeTombstoneList tombstones, TypeSizes typeSizes, int version)
+        public long serializedSize(RangeTombstoneList tombstones, int version)
         {
             // TODO
             throw new UnsupportedOperationException();
             //if (tombstones == null)
-            //    return typeSizes.sizeof(0);
+            //    return TypeSizes.sizeof(0);
 
-            //long size = typeSizes.sizeof(tombstones.size);
+            //long size = TypeSizes.sizeof(tombstones.size);
             //for (int i = 0; i < tombstones.size; i++)
             //{
             //    size += type.serializer().serializedSize(tombstones.starts[i], typeSizes);
             //    size += type.serializer().serializedSize(tombstones.ends[i], typeSizes);
-            //    size += typeSizes.sizeof(tombstones.delTimes[i]);
-            //    size += typeSizes.sizeof(tombstones.markedAts[i]);
+            //    size += TypeSizes.sizeof(tombstones.delTimes[i]);
+            //    size += TypeSizes.sizeof(tombstones.markedAts[i]);
             //}
             //return size;
-        }
-
-        public long serializedSize(RangeTombstoneList tombstones, int version)
-        {
-            return serializedSize(tombstones, TypeSizes.NATIVE, version);
         }
     }
 }

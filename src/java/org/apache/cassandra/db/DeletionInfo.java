@@ -197,7 +197,7 @@ public class DeletionInfo implements IMeasurableMemory
 
     public int dataSize()
     {
-        int size = TypeSizes.NATIVE.sizeof(partitionDeletion.markedForDeleteAt());
+        int size = TypeSizes.sizeof(partitionDeletion.markedForDeleteAt());
         return size + (ranges == null ? 0 : ranges.dataSize());
     }
 

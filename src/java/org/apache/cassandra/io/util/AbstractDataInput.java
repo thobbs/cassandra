@@ -19,7 +19,7 @@ package org.apache.cassandra.io.util;
 
 import java.io.*;
 
-public abstract class AbstractDataInput extends InputStream implements DataInput
+public abstract class AbstractDataInput extends InputStream implements DataInputPlus
 {
     public abstract void seek(long position) throws IOException;
     public abstract long getPosition();

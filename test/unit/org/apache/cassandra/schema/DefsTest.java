@@ -20,6 +20,8 @@ package org.apache.cassandra.schema;
 
 import java.io.File;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Supplier;
 
 import org.junit.BeforeClass;
@@ -32,22 +34,18 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.IndexType;
-import org.apache.cassandra.config.KSMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.marshal.BytesType;
-import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableDeletingTask;
 import org.apache.cassandra.locator.OldNetworkTopologyStrategy;
-import org.apache.cassandra.locator.SimpleStrategy;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -78,18 +76,15 @@ public class DefsTest
         SchemaLoader.prepareServer();
         SchemaLoader.startGossiper();
         SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
+                                    KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, TABLE1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, TABLE2));
-        SchemaLoader.createKeyspace(KEYSPACE3, true, false,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(5),
+        SchemaLoader.createKeyspace(KEYSPACE3,
+                                    KeyspaceParams.simple(5),
                                     SchemaLoader.standardCFMD(KEYSPACE1, TABLE1),
                                     SchemaLoader.compositeIndexCFMD(KEYSPACE3, TABLE1i, true));
         SchemaLoader.createKeyspace(KEYSPACE6,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
+                                    KeyspaceParams.simple(1),
                                     SchemaLoader.compositeIndexCFMD(KEYSPACE6, TABLE1i, true));
     }
 
@@ -167,7 +162,7 @@ public class DefsTest
     {
         final String ks = KEYSPACE1;
         final String cf = "BrandNewCfWithNull";
-        KSMetaData original = Schema.instance.getKSMetaData(ks);
+        KeyspaceMetadata original = Schema.instance.getKSMetaData(ks);
 
         CFMetaData newCf = addTestTable(original.name, cf, null);
 
@@ -183,7 +178,7 @@ public class DefsTest
     {
         final String ksName = KEYSPACE1;
         final String tableName = "anewtable";
-        KSMetaData original = Schema.instance.getKSMetaData(ksName);
+        KeyspaceMetadata original = Schema.instance.getKSMetaData(ksName);
 
         CFMetaData cfm = addTestTable(original.name, tableName, "A New Table");
 
@@ -212,7 +207,7 @@ public class DefsTest
     public void dropCf() throws ConfigurationException
     {
         // sanity
-        final KSMetaData ks = Schema.instance.getKSMetaData(KEYSPACE1);
+        final KeyspaceMetadata ks = Schema.instance.getKSMetaData(KEYSPACE1);
         assertNotNull(ks);
         final CFMetaData cfm = ks.tables.getNullable(TABLE1);
         assertNotNull(cfm);
@@ -262,7 +257,7 @@ public class DefsTest
     public void addNewKS() throws ConfigurationException
     {
         CFMetaData cfm = addTestTable("newkeyspace1", "newstandard1", "A new cf for a new ks");
-        KSMetaData newKs = KSMetaData.testMetadata(cfm.ksName, SimpleStrategy.class, KSMetaData.optsWithRF(5), cfm);
+        KeyspaceMetadata newKs = KeyspaceMetadata.create(cfm.ksName, KeyspaceParams.simple(5), Tables.of(cfm));
         MigrationManager.announceNewKeyspace(newKs);
 
         assertNotNull(Schema.instance.getKSMetaData(cfm.ksName));
@@ -283,7 +278,7 @@ public class DefsTest
     public void dropKS() throws ConfigurationException
     {
         // sanity
-        final KSMetaData ks = Schema.instance.getKSMetaData(KEYSPACE1);
+        final KeyspaceMetadata ks = Schema.instance.getKSMetaData(KEYSPACE1);
         assertNotNull(ks);
         final CFMetaData cfm = ks.tables.getNullable(TABLE2);
         assertNotNull(cfm);
@@ -333,7 +328,7 @@ public class DefsTest
     public void dropKSUnflushed() throws ConfigurationException
     {
         // sanity
-        final KSMetaData ks = Schema.instance.getKSMetaData(KEYSPACE3);
+        final KeyspaceMetadata ks = Schema.instance.getKSMetaData(KEYSPACE3);
         assertNotNull(ks);
         final CFMetaData cfm = ks.tables.getNullable(TABLE1);
         assertNotNull(cfm);
@@ -353,7 +348,7 @@ public class DefsTest
     public void createEmptyKsAddNewCf() throws ConfigurationException
     {
         assertNull(Schema.instance.getKSMetaData(EMPTY_KEYSPACE));
-        KSMetaData newKs = KSMetaData.testMetadata(EMPTY_KEYSPACE, SimpleStrategy.class, KSMetaData.optsWithRF(5));
+        KeyspaceMetadata newKs = KeyspaceMetadata.create(EMPTY_KEYSPACE, KeyspaceParams.simple(5));
         MigrationManager.announceNewKeyspace(newKs);
         assertNotNull(Schema.instance.getKSMetaData(EMPTY_KEYSPACE));
 
@@ -387,7 +382,7 @@ public class DefsTest
     {
         // create a keyspace to serve as existing.
         CFMetaData cf = addTestTable("UpdatedKeyspace", "AddedStandard1", "A new cf for a new ks");
-        KSMetaData oldKs = KSMetaData.testMetadata(cf.ksName, SimpleStrategy.class, KSMetaData.optsWithRF(5), cf);
+        KeyspaceMetadata oldKs = KeyspaceMetadata.create(cf.ksName, KeyspaceParams.simple(5), Tables.of(cf));
 
         MigrationManager.announceNewKeyspace(oldKs);
 
@@ -395,7 +390,7 @@ public class DefsTest
         assertEquals(Schema.instance.getKSMetaData(cf.ksName), oldKs);
 
         // names should match.
-        KSMetaData newBadKs2 = KSMetaData.testMetadata(cf.ksName + "trash", SimpleStrategy.class, KSMetaData.optsWithRF(4));
+        KeyspaceMetadata newBadKs2 = KeyspaceMetadata.create(cf.ksName + "trash", KeyspaceParams.simple(4));
         try
         {
             MigrationManager.announceKeyspaceUpdate(newBadKs2);
@@ -406,12 +401,16 @@ public class DefsTest
             // expected.
         }
 
-        KSMetaData newKs = KSMetaData.testMetadata(cf.ksName, OldNetworkTopologyStrategy.class, KSMetaData.optsWithRF(1));
+        Map<String, String> replicationMap = new HashMap<>();
+        replicationMap.put(KeyspaceParams.Replication.CLASS, OldNetworkTopologyStrategy.class.getName());
+        replicationMap.put("replication_factor", "1");
+
+        KeyspaceMetadata newKs = KeyspaceMetadata.create(cf.ksName, KeyspaceParams.create(true, replicationMap));
         MigrationManager.announceKeyspaceUpdate(newKs);
 
-        KSMetaData newFetchedKs = Schema.instance.getKSMetaData(newKs.name);
-        assertEquals(newFetchedKs.strategyClass, newKs.strategyClass);
-        assertFalse(newFetchedKs.strategyClass.equals(oldKs.strategyClass));
+        KeyspaceMetadata newFetchedKs = Schema.instance.getKSMetaData(newKs.name);
+        assertEquals(newFetchedKs.params.replication.klass, newKs.params.replication.klass);
+        assertFalse(newFetchedKs.params.replication.klass.equals(oldKs.params.replication.klass));
     }
 
     /*

@@ -28,7 +28,7 @@ import java.util.TreeMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 
-import org.apache.commons.math.stat.descriptive.SummaryStatistics;
+import org.apache.commons.math3.stat.descriptive.SummaryStatistics;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -252,8 +252,8 @@ public class TokenAllocation
         }
         else
             throw new ConfigurationException(
-                                            String.format("Token allocation failed: the number of racks %d in datacentre %s is lower than its replication factor %d.",
-                                                          replicas, dc, racks));
+                    String.format("Token allocation failed: the number of racks %d in datacenter %s is lower than its replication factor %d.",
+                                  racks, dc, replicas));
     }
 }
 

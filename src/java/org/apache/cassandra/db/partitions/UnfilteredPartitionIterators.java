@@ -32,6 +32,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
@@ -483,7 +484,7 @@ public abstract class UnfilteredPartitionIterators
             out.writeBoolean(false);
         }
 
-        public UnfilteredPartitionIterator deserialize(final DataInput in, final int version, final SerializationHelper.Flag flag) throws IOException
+        public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final SerializationHelper.Flag flag) throws IOException
         {
             if (version < MessagingService.VERSION_30)
             {
@@ -635,7 +636,7 @@ public abstract class UnfilteredPartitionIterators
                 {
                     out.writeByte(LegacyLayout.DELETION_MASK);  // serialization flags
                     out.writeLong(cell.timestamp);
-                    out.writeInt(TypeSizes.NATIVE.sizeof(cell.localDeletionTime));
+                    out.writeInt(TypeSizes.sizeof(cell.localDeletionTime));
                     out.writeInt(cell.localDeletionTime);
                     continue;
                 }
@@ -654,7 +655,7 @@ public abstract class UnfilteredPartitionIterators
             }
         }
 
-        public UnfilteredRowIterator deserializePartition(DataInput in, DecoratedKey key, int version) throws IOException
+        public UnfilteredRowIterator deserializePartition(DataInputPlus in, DecoratedKey key, int version) throws IOException
         {
             assert version < MessagingService.VERSION_30;
 
@@ -670,12 +671,11 @@ public abstract class UnfilteredPartitionIterators
         public long serializedSize(UnfilteredPartitionIterator iter, int version)
         {
             assert version < MessagingService.VERSION_30;
-            TypeSizes sizes = TypeSizes.NATIVE;
 
             if (!iter.hasNext())
-                return sizes.sizeof(false);
+                return TypeSizes.sizeof(false);
 
-            long size = sizes.sizeof(true);
+            long size = TypeSizes.sizeof(true);
             while (iter.hasNext())
             {
                 try (UnfilteredRowIterator partition = iter.next())
@@ -689,9 +689,7 @@ public abstract class UnfilteredPartitionIterators
         long serializedPartitionSize(UnfilteredRowIterator partition, int version)
         {
             assert version < MessagingService.VERSION_30;
-            TypeSizes sizes = TypeSizes.NATIVE;
-
-            long size = ByteBufferUtil.serializedSizeWithShortLength(partition.partitionKey().getKey(), sizes);
+            long size = ByteBufferUtil.serializedSizeWithShortLength(partition.partitionKey().getKey());
             Pair<DeletionInfo, Pair<LegacyLayout.LegacyRangeTombstoneList, Iterator<LegacyLayout.LegacyCell>>> pair = LegacyLayout.fromUnfilteredRowIterator(partition);
             DeletionInfo deletionInfo = pair.left;
             LegacyLayout.LegacyRangeTombstoneList rtl = pair.right.left;
@@ -700,9 +698,9 @@ public abstract class UnfilteredPartitionIterators
             // before we use the LegacyRangeTombstoneList at all
             List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right.right);
 
-            size += sizes.sizeof(true);
+            size += TypeSizes.sizeof(true);
             size += UUIDSerializer.serializer.serializedSize(partition.metadata().cfId, version);
-            size += DeletionTime.serializer.serializedSize(pair.left.getPartitionDeletion(), sizes);
+            size += DeletionTime.serializer.serializedSize(pair.left.getPartitionDeletion());
 
             if (deletionInfo.hasRanges())
             {
@@ -717,25 +715,25 @@ public abstract class UnfilteredPartitionIterators
                 }
             }
 
-            size += rtl.serializedSize(sizes, partition.metadata());
+            size += rtl.serializedSize(partition.metadata());
 
             // begin cell serialization
-            size += sizes.sizeof(cells.size());
+            size += TypeSizes.sizeof(cells.size());
             for (LegacyLayout.LegacyCell cell : cells)
             {
-                size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(partition.metadata()), sizes);
+                size += ByteBufferUtil.serializedSizeWithShortLength(cell.name.encode(partition.metadata()));
                 size += 1;  // serialization flags
                 if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
                 {
-                    size += sizes.sizeof(cell.ttl);
-                    size += sizes.sizeof(cell.localDeletionTime);
+                    size += TypeSizes.sizeof(cell.ttl);
+                    size += TypeSizes.sizeof(cell.localDeletionTime);
                 }
                 else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                 {
-                    size += sizes.sizeof(Long.MAX_VALUE);
+                    size += TypeSizes.sizeof(Long.MAX_VALUE);
                 }
-                size += sizes.sizeof(cell.timestamp);
-                size += ByteBufferUtil.serializedSizeWithLength(cell.value, sizes);
+                size += TypeSizes.sizeof(cell.timestamp);
+                size += ByteBufferUtil.serializedSizeWithLength(cell.value);
             }
 
             return size;
