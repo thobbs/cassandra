@@ -214,10 +214,13 @@ class RangeSliceCommandSerializer implements IVersionedSerializer<RangeSliceComm
 
         List<IndexExpression> rowFilter;
         int filterCount = in.readInt();
+        logger.warn ("####     filter count: {}", filterCount);
         rowFilter = new ArrayList<>(filterCount);
         for (int i = 0; i < filterCount; i++)
         {
-            rowFilter.add(IndexExpression.readFrom(in));
+            IndexExpression expression = IndexExpression.readFrom(in);
+            logger.warn("####         index expression: {}", expression);
+            rowFilter.add(expression);
         }
         AbstractBounds<RowPosition> range = AbstractBounds.serializer.deserialize(in, version).toRowBounds();
         logger.warn("####     range: {}", range);

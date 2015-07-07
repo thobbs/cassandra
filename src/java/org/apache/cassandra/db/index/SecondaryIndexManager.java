@@ -221,12 +221,16 @@ public class SecondaryIndexManager
      */
     public boolean hasIndexFor(List<IndexExpression> clause)
     {
+        logger.warn("#### Checking if we have an index for {}", clause);
         if (clause == null || clause.isEmpty())
             return false;
 
         for (SecondaryIndexSearcher searcher : getIndexSearchersForQuery(clause))
+        {
+            logger.warn("#### Checking searcher {}", searcher);
             if (searcher.canHandleIndexClause(clause))
                 return true;
+        }
 
         return false;
     }
@@ -530,18 +534,26 @@ public class SecondaryIndexManager
         for (IndexExpression ix : clause)
         {
             SecondaryIndex index = getIndexForColumn(ix.column);
+            logger.warn("#### found index for column {}: {}", ByteBufferUtil.bytesToHex(ix.column), index);
 
             if (index == null || !index.supportsOperator(ix.operator))
+            {
+                logger.warn("#### index does not support operator");
                 continue;
+            }
+
+            logger.warn("#### index supports operator");
 
             Set<ByteBuffer> columns = groupByIndexType.get(index.indexTypeForGrouping());
 
             if (columns == null)
             {
+                logger.warn("#### columns is null, adding to groupByIndexType for {}", index.indexTypeForGrouping());
                 columns = new HashSet<>();
                 groupByIndexType.put(index.indexTypeForGrouping(), columns);
             }
 
+            logger.warn("#### adding column {}", ByteBufferUtil.bytesToHex(ix.column));
             columns.add(ix.column);
         }
 
@@ -549,7 +561,10 @@ public class SecondaryIndexManager
 
         //create searcher per type
         for (Set<ByteBuffer> column : groupByIndexType.values())
+        {
+            logger.warn("#### adding index searcher");
             indexSearchers.add(getIndexForColumn(column.iterator().next()).createSecondaryIndexSearcher(column));
+        }
 
         return indexSearchers;
     }

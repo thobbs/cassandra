@@ -228,7 +228,10 @@ public class CQL3CasRequest implements CASRequest
         {
             logger.warn("#### checking IF EXISTS applies to {}", current);
             if (current == null)
+            {
+                logger.warn("#### current is null, does not apply");
                 return false;
+            }
 
             Iterator<Cell> iter = current.iterator(new ColumnSlice[]{ rowPrefix.slice() });
             while (iter.hasNext())
