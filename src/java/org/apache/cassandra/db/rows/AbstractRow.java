@@ -160,7 +160,7 @@ public abstract class AbstractRow implements Row
             else
             {
                 sb.append(cell.column().name);
-                if (cell.column().type instanceof CollectionType)
+                if (cell.column().type.isMultiCell())
                 {
                     CollectionType ct = (CollectionType)cell.column().type;
                     sb.append("[").append(ct.nameComparator().getString(cell.path().get(0))).append("]");
