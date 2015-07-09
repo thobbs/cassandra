@@ -603,7 +603,7 @@ public class Slice
 
             public Slice.Bound build()
             {
-                assert idx == values.length;
+                assert idx == values.length : "Expected " + values.length + ", got " + idx;
                 return Slice.Bound.create(kind, values);
             }
         }
