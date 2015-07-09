@@ -421,12 +421,10 @@ public abstract class ReadCommand implements ReadQuery
         if (version >= MessagingService.VERSION_30)
             return new MessageOut<>(MessagingService.Verb.READ, this, serializer);
 
-        if (this.kind == Kind.SINGLE_PARTITION)
-            return new MessageOut<>(MessagingService.Verb.READ, this, legacyReadCommandSerializer);
-        else
-            // TODO separate serializer needed for paged commands
-            return new MessageOut<>(MessagingService.Verb.RANGE_SLICE, this, legacyRangeSliceCommandSerializer);
+        return createLegacyMessage();
     }
+
+    protected abstract MessageOut<ReadCommand> createLegacyMessage();
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 
@@ -580,6 +578,8 @@ public abstract class ReadCommand implements ReadQuery
     {
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
+            assert version < MessagingService.VERSION_30;
+
             PartitionRangeReadCommand rangeCommand = (PartitionRangeReadCommand) command;
             rangeCommand = LegacyReadCommandSerializer.maybeConvertNamesToSlice(rangeCommand);
 
@@ -659,11 +659,19 @@ public abstract class ReadCommand implements ReadQuery
 
         public ReadCommand deserialize(DataInputPlus in, int version) throws IOException
         {
+            assert version < MessagingService.VERSION_30;
+
             String keyspace = in.readUTF();
             String columnFamily = in.readUTF();
-            int nowInSec = (int) (in.readLong() / 1000);  // convert from millis to seconds
 
             CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
+            if (metadata == null)
+            {
+                String message = String.format("Got legacy range command for nonexistent table %s.%s.", keyspace, columnFamily);
+                throw new UnknownColumnFamilyException(message, null);
+            }
+
+            int nowInSec = (int) (in.readLong() / 1000);  // convert from millis to seconds
 
             try
             {
@@ -711,24 +719,7 @@ public abstract class ReadCommand implements ReadQuery
                     }
                 }
 
-                int numRowFilters = in.readInt();
-                RowFilter rowFilter;
-                if (numRowFilters == 0)
-                {
-                    rowFilter = RowFilter.NONE;
-                }
-                else
-                {
-                    rowFilter = RowFilter.create(numRowFilters);
-                    for (int i = 0; i < numRowFilters; i++)
-                    {
-                        ByteBuffer columnName = ByteBufferUtil.readWithShortLength(in);
-                        ColumnDefinition column = metadata.getColumnDefinition(columnName);
-                        Operator op = Operator.readFrom(in);
-                        ByteBuffer indexValue = ByteBufferUtil.readWithShortLength(in);
-                        rowFilter.add(column, op, indexValue);
-                    }
-                }
+                RowFilter rowFilter = deserializeRowFilter(in, metadata);
 
                 AbstractBounds<PartitionPosition> keyRange = AbstractBounds.rowPositionSerializer.deserialize(in, StorageService.getPartitioner(), version);
                 int maxResults = in.readInt();
@@ -756,9 +747,29 @@ public abstract class ReadCommand implements ReadQuery
             }
         }
 
+        static RowFilter deserializeRowFilter(DataInputPlus in, CFMetaData metadata) throws IOException
+        {
+            int numRowFilters = in.readInt();
+            if (numRowFilters == 0)
+                return RowFilter.NONE;
+
+            RowFilter rowFilter = RowFilter.create(numRowFilters);
+            for (int i = 0; i < numRowFilters; i++)
+            {
+                ByteBuffer columnName = ByteBufferUtil.readWithShortLength(in);
+                ColumnDefinition column = metadata.getColumnDefinition(columnName);
+                Operator op = Operator.readFrom(in);
+                ByteBuffer indexValue = ByteBufferUtil.readWithShortLength(in);
+                rowFilter.add(column, op, indexValue);
+            }
+            return rowFilter;
+        }
+
         public long serializedSize(ReadCommand command, int version)
         {
+            assert version < MessagingService.VERSION_30;
             assert command.kind == Kind.PARTITION_RANGE;
+
             PartitionRangeReadCommand rangeCommand = (PartitionRangeReadCommand) command;
             rangeCommand = LegacyReadCommandSerializer.maybeConvertNamesToSlice(rangeCommand);
             CFMetaData metadata = rangeCommand.metadata();
@@ -848,36 +859,70 @@ public abstract class ReadCommand implements ReadQuery
 
         public ReadCommand deserialize(DataInputPlus in, int version) throws IOException
         {
-            // TODO
-            throw new UnsupportedOperationException();
-            //        String keyspace = in.readUTF();
-            //        String columnFamily = in.readUTF();
-            //        long timestamp = in.readLong();
+            assert version < MessagingService.VERSION_30;
 
-            //        AbstractBounds<PartitionPosition> keyRange = AbstractBounds.serializer.deserialize(in, version).toRowBounds();
+            String keyspace = in.readUTF();
+            String columnFamily = in.readUTF();
 
-            //        CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
+            CFMetaData metadata = Schema.instance.getCFMetaData(keyspace, columnFamily);
+            if (metadata == null)
+            {
+                String message = String.format("Got legacy paged range command for nonexistent table %s.%s.", keyspace, columnFamily);
+                throw new UnknownColumnFamilyException(message, null);
+            }
 
-            //        SliceQueryFilter predicate = metadata.comparator.sliceQueryFilterSerializer().deserialize(in, version);
+            int nowInSec = (int) (in.readLong() / 1000);  // convert from millis to seconds
+            AbstractBounds<PartitionPosition> keyRange = AbstractBounds.rowPositionSerializer.deserialize(in, StorageService.getPartitioner(), version);
 
-            //        Composite start = metadata.comparator.serializer().deserialize(in);
-            //        Composite stop =  metadata.comparator.serializer().deserialize(in);
+            ClusteringIndexSliceFilter filter = LegacyReadCommandSerializer.deserializeSlicePartitionFilter(in, metadata);
+            int perPartitionLimit = in.readInt();
+            int compositesToGroup = in.readInt();
 
-            //        int filterCount = in.readInt();
-            //        List<IndexExpression> rowFilter = new ArrayList<IndexExpression>(filterCount);
-            //        for (int i = 0; i < filterCount; i++)
-            //        {
-            //            IndexExpression expr = new IndexExpression(ByteBufferUtil.readWithShortLength(in),
-            //                                                       IndexExpression.Operator.findByOrdinal(in.readInt()),
-            //                                                       ByteBufferUtil.readWithShortLength(in));
-            //            rowFilter.add(expr);
-            //        }
+            // TODO what to do with the stop?
+            LegacyLayout.LegacyBound startBound = LegacyLayout.decodeBound(metadata, ByteBufferUtil.readWithShortLength(in), true);
+            LegacyLayout.LegacyBound stopBound = LegacyLayout.decodeBound(metadata, ByteBufferUtil.readWithShortLength(in), false);
+            Clustering startClustering = startBound == LegacyLayout.LegacyBound.BOTTOM
+                                       ? Clustering.EMPTY
+                                       : startBound.getAsClustering(metadata);
+            Clustering stopClustering = stopBound == LegacyLayout.LegacyBound.TOP
+                                      ? Clustering.EMPTY
+                                      : stopBound.getAsClustering(metadata);
 
-            //        int limit = in.readInt();
-            //        boolean countCQL3Rows = version >= MessagingService.VERSION_21
-            //                              ? in.readBoolean()
-            //                              : predicate.compositesToGroup >= 0 || predicate.count != 1; // See #6857
-            //        return new PagedRangeCommand(keyspace, columnFamily, timestamp, keyRange, predicate, start, stop, rowFilter, limit, countCQL3Rows);
+            ColumnFilter selection;
+            if (compositesToGroup == -2)
+            {
+                selection = ColumnFilter.selection(PartitionColumns.NONE);
+            }
+            else
+            {
+                // if a slice query from a pre-3.0 node doesn't cover statics, we shouldn't select them at all
+                PartitionColumns columns = filter.selects(Clustering.STATIC_CLUSTERING)
+                                         ? metadata.partitionColumns()
+                                         : metadata.partitionColumns().withoutStatics();
+                selection = ColumnFilter.selection(columns);
+            }
+
+            RowFilter rowFilter = LegacyRangeSliceCommandSerializer.deserializeRowFilter(in, metadata);
+            int maxResults = in.readInt();
+            boolean countCQL3Rows = in.readBoolean(); // countCQL3Rows
+
+
+            boolean selectsStatics = (!selection.fetchedColumns().statics.isEmpty() || filter.selects(Clustering.STATIC_CLUSTERING));
+            boolean isDistinct = compositesToGroup == -2 || (perPartitionLimit == 1 && selectsStatics);
+            DataLimits limits;
+            if (isDistinct)
+                limits = DataLimits.distinctLimits(maxResults);
+            else if (compositesToGroup == -1)
+                limits = DataLimits.thriftLimits(1, perPartitionLimit); // we only use paging w/ thrift for get_count(), so partition limit must be 1
+            else
+                limits = DataLimits.cqlLimits(maxResults);
+
+            limits = limits.forPaging(maxResults);
+
+            // TODO should "inclusive" always be false?
+            DataRange dataRange = new DataRange(keyRange, filter).forPaging(keyRange, metadata.comparator, startClustering, false);
+            ReadCommand command = new PartitionRangeReadCommand(false, true, metadata, nowInSec, selection, rowFilter, limits, dataRange);
+            return command;
         }
 
         public long serializedSize(ReadCommand command, int version)
