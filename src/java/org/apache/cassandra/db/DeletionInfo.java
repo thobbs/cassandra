@@ -238,8 +238,9 @@ public class DeletionInfo implements IMeasurableMemory
         {
             RangeTombstone i = iter.next();
             sb.append(i.deletedSlice().toString(cc));
-            sb.append("@");
+            sb.append("@(");
             sb.append(i.deletionTime());
+            sb.append(")");
         }
         return sb.toString();
     }
