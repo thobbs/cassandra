@@ -318,6 +318,9 @@ public class ColumnFilter
             return "*";
 
         Iterator<ColumnDefinition> defs = selection.selectOrderIterator();
+        if (!defs.hasNext())
+            return "<none>";
+
         StringBuilder sb = new StringBuilder();
         appendColumnDef(sb, defs.next());
         while (defs.hasNext())
