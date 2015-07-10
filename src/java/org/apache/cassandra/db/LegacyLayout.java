@@ -282,8 +282,11 @@ public abstract class LegacyLayout
         return new SimpleClustering(components.subList(0, Math.min(csize, components.size())).toArray(new ByteBuffer[csize]));
     }
 
-    public static ByteBuffer encodeClustering(CFMetaData metadata, Clustering clustering)
+    public static ByteBuffer encodeClustering(CFMetaData metadata, ClusteringPrefix clustering)
     {
+        if (clustering.size() == 0)
+            return ByteBufferUtil.EMPTY_BYTE_BUFFER;
+
         if (!metadata.isCompound())
         {
             assert clustering.size() == 1;
@@ -1279,7 +1282,7 @@ public abstract class LegacyLayout
         public static final Serializer serializer = new Serializer();
 
         public final DeletionInfo deletionInfo;
-        private final List<LegacyRangeTombstone> inRowTombstones;
+        public final List<LegacyRangeTombstone> inRowTombstones;
 
         private LegacyDeletionInfo(DeletionInfo deletionInfo, List<LegacyRangeTombstone> inRowTombstones)
         {

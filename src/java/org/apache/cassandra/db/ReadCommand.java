@@ -609,7 +609,6 @@ public abstract class ReadCommand implements ReadQuery
                 out.writeBoolean(filter.isReversed());
 
                 // limit
-                boolean selectsStatics = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() || filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
                 DataLimits.Kind kind = rangeCommand.limits().kind();
                 boolean isDistinct = (kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && rangeCommand.limits().perPartitionCount() == 1;
                 if (isDistinct)
@@ -618,6 +617,7 @@ public abstract class ReadCommand implements ReadQuery
                     out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(rangeCommand.limits().count(), filter.requestedSlices()));
 
                 int compositesToGroup;
+                boolean selectsStatics = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() || filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
                 if (kind == DataLimits.Kind.THRIFT_LIMIT)
                     compositesToGroup = -1;
                 else if (isDistinct && !selectsStatics)
@@ -628,22 +628,7 @@ public abstract class ReadCommand implements ReadQuery
                 out.writeInt(compositesToGroup);
             }
 
-            // rowFilter serialization
-            if (rangeCommand.columnFilter().equals(RowFilter.NONE))
-            {
-                out.writeInt(0);
-            }
-            else
-            {
-                ArrayList<RowFilter.Expression> indexExpressions = Lists.newArrayList(rangeCommand.rowFilter().iterator());
-                out.writeInt(indexExpressions.size());
-                for (RowFilter.Expression expression : indexExpressions)
-                {
-                    ByteBufferUtil.writeWithShortLength(expression.column().name.bytes, out);
-                    expression.operator().writeTo(out);
-                    ByteBufferUtil.writeWithShortLength(expression.getIndexValue(), out);
-                }
-            }
+            serializeRowFilter(out, rangeCommand.rowFilter());
 
             // key range serialization
             AbstractBounds.rowPositionSerializer.serialize(rangeCommand.dataRange().keyRange(), out, version);
@@ -654,7 +639,9 @@ public abstract class ReadCommand implements ReadQuery
             else if (rangeCommand.limits().perPartitionCount() == 1)
                 countCQL3Rows = false;  // for DISTINCT queries
             out.writeBoolean(countCQL3Rows);
-            out.writeBoolean(rangeCommand.dataRange().isPaging());  // isPaging
+
+            assert !rangeCommand.dataRange().isPaging();
+            out.writeBoolean(false);  // isPaging
         }
 
         public ReadCommand deserialize(DataInputPlus in, int version) throws IOException
@@ -747,6 +734,30 @@ public abstract class ReadCommand implements ReadQuery
             }
         }
 
+        static void serializeRowFilter(DataOutputPlus out, RowFilter rowFilter) throws IOException
+        {
+            ArrayList<RowFilter.Expression> indexExpressions = Lists.newArrayList(rowFilter.iterator());
+            out.writeInt(indexExpressions.size());
+            for (RowFilter.Expression expression : indexExpressions)
+            {
+                ByteBufferUtil.writeWithShortLength(expression.column().name.bytes, out);
+                expression.operator().writeTo(out);
+                ByteBufferUtil.writeWithShortLength(expression.getIndexValue(), out);
+            }
+        }
+
+        static long serializedRowFilterSize(RowFilter rowFilter)
+        {
+            long size = TypeSizes.sizeof(0);  // rowFilterCount
+            for (RowFilter.Expression expression : rowFilter)
+            {
+                size += ByteBufferUtil.serializedSizeWithShortLength(expression.column().name.bytes);
+                size += TypeSizes.sizeof(0);  // operator int value
+                size += ByteBufferUtil.serializedSizeWithShortLength(expression.getIndexValue());
+            }
+            return size;
+        }
+
         static RowFilter deserializeRowFilter(DataInputPlus in, CFMetaData metadata) throws IOException
         {
             int numRowFilters = in.readInt();
@@ -825,36 +836,76 @@ public abstract class ReadCommand implements ReadQuery
     {
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
+            assert version < MessagingService.VERSION_30;
 
-            // TODO
-            throw new UnsupportedOperationException();
-            //        out.writeUTF(cmd.keyspace);
-            //        out.writeUTF(cmd.columnFamily);
-            //        out.writeLong(cmd.timestamp);
+            PartitionRangeReadCommand rangeCommand = (PartitionRangeReadCommand) command;
+            assert rangeCommand.dataRange().isPaging();
+            CFMetaData metadata = rangeCommand.metadata();
 
-            //        AbstractBounds.serializer.serialize(cmd.keyRange, out, version);
+            out.writeUTF(metadata.ksName);
+            out.writeUTF(metadata.cfName);
+            out.writeLong(rangeCommand.nowInSec() * 1000L);  // convert from seconds to millis
 
-            //        CFMetaData metadata = Schema.instance.getCFMetaData(cmd.keyspace, cmd.columnFamily);
+            AbstractBounds.rowPositionSerializer.serialize(rangeCommand.dataRange().keyRange(), out, version);
 
-            //        // SliceQueryFilter (the count is not used)
-            //        SliceQueryFilter filter = (SliceQueryFilter)cmd.predicate;
-            //        metadata.comparator.sliceQueryFilterSerializer().serialize(filter, out, version);
+            // pre-3.0 nodes only accept slice filters for paged range commands
+            ClusteringIndexSliceFilter filter;
+            if (rangeCommand.dataRange().clusteringIndexFilter.kind() == ClusteringIndexFilter.Kind.NAMES)
+                filter = LegacyReadCommandSerializer.convertNamesFilterToSliceFilter((ClusteringIndexNamesFilter) rangeCommand.dataRange().clusteringIndexFilter, metadata);
+            else
+                filter = (ClusteringIndexSliceFilter) rangeCommand.dataRange().clusteringIndexFilter;
 
-            //        // The start and stop of the page
-            //        metadata.comparator.serializer().serialize(cmd.start, out);
-            //        metadata.comparator.serializer().serialize(cmd.stop, out);
+            // slice filter
+            boolean makeStaticSlice = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+            LegacyReadCommandSerializer.serializeSlices(out, filter.requestedSlices(), filter.isReversed(), makeStaticSlice, metadata);
+            out.writeBoolean(filter.isReversed());
 
-            //        out.writeInt(cmd.rowFilter.size());
-            //        for (IndexExpression expr : cmd.rowFilter)
-            //        {
-            //            ByteBufferUtil.writeWithShortLength(expr.column, out);
-            //            out.writeInt(expr.operator.ordinal());
-            //            ByteBufferUtil.writeWithShortLength(expr.value, out);
-            //        }
+            // slice filter count
+            DataLimits.Kind kind = rangeCommand.limits().kind();
+            boolean isDistinct = (kind == DataLimits.Kind.CQL_LIMIT || kind == DataLimits.Kind.CQL_PAGING_LIMIT) && rangeCommand.limits().perPartitionCount() == 1;
+            if (isDistinct)
+                out.writeInt(1);
+            else
+                out.writeInt(LegacyReadCommandSerializer.updateLimitForQuery(rangeCommand.limits().perPartitionCount(), filter.requestedSlices()));
 
-            //        out.writeInt(cmd.limit);
-            //        if (version >= MessagingService.VERSION_21)
-            //            out.writeBoolean(cmd.countCQL3Rows);
+            // compositesToGroup
+            boolean selectsStatics = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() || filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+            int compositesToGroup;
+            if (kind == DataLimits.Kind.THRIFT_LIMIT)
+                compositesToGroup = -1;
+            else if (isDistinct && !selectsStatics)
+                compositesToGroup = -2;  // for DISTINCT queries (CASSANDRA-8490)
+            else
+                compositesToGroup = metadata.isDense() ? -1 : metadata.clusteringColumns().size();
+
+            out.writeInt(compositesToGroup);
+
+            // command-level "start" and "stop" composites.  The start is the last-returned cell name if there is one,
+            // otherwise it's the same as the slice filter's start.  The stop appears to always be the same as the
+            // slice filter's stop.
+            DataRange.Paging pagingRange = (DataRange.Paging) rangeCommand.dataRange();
+            Clustering lastReturned = pagingRange.getLastReturned();
+            Slice.Bound newStart = Slice.Bound.exclusiveStartOf(lastReturned);
+            Slice lastSlice = filter.requestedSlices().get(filter.requestedSlices().size() - 1);
+            ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeBound(metadata, newStart, true), out);
+            ByteBufferUtil.writeWithShortLength(LegacyLayout.encodeClustering(metadata, lastSlice.end().clustering()), out);
+
+            LegacyRangeSliceCommandSerializer.serializeRowFilter(out, rangeCommand.rowFilter());
+
+            // command-level limit
+            // TODO: pre-3.0 we would always request one more row than we actually needed, but the command-level "start" would
+            // be the last-returned cell name, so the response would always include it.  Instead, here we are using the
+            // exact count we need along with an exclusive "start" to avoid re-fetching the last-returned cell.  I'm
+            // not confident that this will not cause problems.
+            out.writeInt(rangeCommand.limits().count());
+
+            // countCQL3Rows
+            boolean countCQL3Rows = true;
+            if (rangeCommand.isForThrift())
+                countCQL3Rows = false;
+            else if (rangeCommand.limits().perPartitionCount() == 1)
+                countCQL3Rows = false;  // for DISTINCT queries
+            out.writeBoolean(countCQL3Rows);
         }
 
         public ReadCommand deserialize(DataInputPlus in, int version) throws IOException
@@ -922,39 +973,56 @@ public abstract class ReadCommand implements ReadQuery
             // TODO should "inclusive" always be false?
             DataRange dataRange = new DataRange(keyRange, filter).forPaging(keyRange, metadata.comparator, startClustering, false);
             ReadCommand command = new PartitionRangeReadCommand(false, true, metadata, nowInSec, selection, rowFilter, limits, dataRange);
+            logger.warn("#### deserializing legacy partition range read command: {}", command);
             return command;
         }
 
         public long serializedSize(ReadCommand command, int version)
         {
-            throw new UnsupportedOperationException();
-            //        long size = 0;
+            assert version < MessagingService.VERSION_30;
+            assert command.kind == Kind.PARTITION_RANGE;
 
-            //        size += TypeSizes.NATIVE.sizeof(cmd.keyspace);
-            //        size += TypeSizes.NATIVE.sizeof(cmd.columnFamily);
-            //        size += TypeSizes.NATIVE.sizeof(cmd.timestamp);
+            PartitionRangeReadCommand rangeCommand = (PartitionRangeReadCommand) command;
+            CFMetaData metadata = rangeCommand.metadata();
+            assert rangeCommand.dataRange().isPaging();
 
-            //        size += AbstractBounds.serializer.serializedSize(cmd.keyRange, version);
+            long size = TypeSizes.sizeof(metadata.ksName);
+            size += TypeSizes.sizeof(metadata.cfName);
+            size += TypeSizes.sizeof((long) rangeCommand.nowInSec());
 
-            //        CFMetaData metadata = Schema.instance.getCFMetaData(cmd.keyspace, cmd.columnFamily);
+            size += AbstractBounds.rowPositionSerializer.serializedSize(rangeCommand.dataRange().keyRange(), version);
 
-            //        size += metadata.comparator.sliceQueryFilterSerializer().serializedSize((SliceQueryFilter)cmd.predicate, version);
+            // pre-3.0 nodes only accept slice filters for paged range commands
+            ClusteringIndexSliceFilter filter;
+            if (rangeCommand.dataRange().clusteringIndexFilter.kind() == ClusteringIndexFilter.Kind.NAMES)
+                filter = LegacyReadCommandSerializer.convertNamesFilterToSliceFilter((ClusteringIndexNamesFilter) rangeCommand.dataRange().clusteringIndexFilter, metadata);
+            else
+                filter = (ClusteringIndexSliceFilter) rangeCommand.dataRange().clusteringIndexFilter;
 
-            //        size += metadata.comparator.serializer().serializedSize(cmd.start, TypeSizes.NATIVE);
-            //        size += metadata.comparator.serializer().serializedSize(cmd.stop, TypeSizes.NATIVE);
+            // slice filter
+            boolean makeStaticSlice = !rangeCommand.columnFilter().fetchedColumns().statics.isEmpty() && !filter.requestedSlices().selects(Clustering.STATIC_CLUSTERING);
+            size += LegacyReadCommandSerializer.serializedSlicesSize(filter.requestedSlices(), makeStaticSlice, metadata);
+            size += TypeSizes.sizeof(filter.isReversed());
 
-            //        size += TypeSizes.NATIVE.sizeof(cmd.rowFilter.size());
-            //        for (IndexExpression expr : cmd.rowFilter)
-            //        {
-            //            size += TypeSizes.NATIVE.sizeofWithShortLength(expr.column);
-            //            size += TypeSizes.NATIVE.sizeof(expr.operator.ordinal());
-            //            size += TypeSizes.NATIVE.sizeofWithShortLength(expr.value);
-            //        }
+            // slice filter's count
+            size += TypeSizes.sizeof(rangeCommand.limits().perPartitionCount());
 
-            //        size += TypeSizes.NATIVE.sizeof(cmd.limit);
-            //        if (version >= MessagingService.VERSION_21)
-            //            size += TypeSizes.NATIVE.sizeof(cmd.countCQL3Rows);
-            //        return size;
+            // compositesToGroup
+            size += TypeSizes.sizeof(0);
+
+            DataRange.Paging pagingRange = (DataRange.Paging) rangeCommand.dataRange();
+            Clustering lastReturned = pagingRange.getLastReturned();
+            Slice lastSlice = filter.requestedSlices().get(filter.requestedSlices().size() - 1);
+            ByteBufferUtil.serializedSizeWithShortLength(LegacyLayout.encodeClustering(metadata, lastReturned));
+            ByteBufferUtil.serializedSizeWithShortLength(LegacyLayout.encodeClustering(metadata, lastSlice.end().clustering()));
+
+            size += LegacyRangeSliceCommandSerializer.serializedRowFilterSize(rangeCommand.rowFilter());
+
+            // command-level limit
+            size += TypeSizes.sizeof(rangeCommand.limits().count());
+
+            // countCQL3Rows
+            return size + TypeSizes.sizeof(true);
         }
     }
 
@@ -1071,7 +1139,7 @@ public abstract class ReadCommand implements ReadQuery
             if (!shouldConvert)
                 return command;
 
-            ClusteringIndexSliceFilter sliceFilter = convertNameFilterToSliceFilter(filter, metadata);
+            ClusteringIndexSliceFilter sliceFilter = convertNamesFilterToSliceFilter(filter, metadata);
             return new SinglePartitionSliceCommand(
                     command.isDigestQuery(), command.isForThrift(), metadata, command.nowInSec(),
                     ColumnFilter.selection(columns), command.rowFilter(), command.limits(), command.partitionKey(), sliceFilter);
@@ -1105,14 +1173,14 @@ public abstract class ReadCommand implements ReadQuery
             if (!shouldConvert)
                 return command;
 
-            ClusteringIndexSliceFilter sliceFilter = convertNameFilterToSliceFilter(filter, metadata);
+            ClusteringIndexSliceFilter sliceFilter = convertNamesFilterToSliceFilter(filter, metadata);
             DataRange newRange = new DataRange(command.dataRange().keyRange(), sliceFilter);
             return new PartitionRangeReadCommand(
                     command.isDigestQuery(), command.isForThrift(), metadata, command.nowInSec(),
                     ColumnFilter.selection(columns), command.rowFilter(), command.limits(), newRange);
         }
 
-        private static ClusteringIndexSliceFilter convertNameFilterToSliceFilter(ClusteringIndexNamesFilter filter, CFMetaData metadata)
+        static ClusteringIndexSliceFilter convertNamesFilterToSliceFilter(ClusteringIndexNamesFilter filter, CFMetaData metadata)
         {
             SortedSet<Clustering> requestedRows = filter.requestedRows();
             Slices slices;
