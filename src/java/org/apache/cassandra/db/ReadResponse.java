@@ -71,7 +71,7 @@ public abstract class ReadResponse
     {
     }
 
-    public void applySliceRestriction(ReadCommand command)
+    public void trimResults(ReadCommand command)
     {
     }
 
@@ -205,10 +205,10 @@ public abstract class ReadResponse
         }
 
         // TODO unify with reversal
-        // Pre-3.0, we didn't have a way to express exclusivity for non-composite comparators, so all slices were
-        // inclusive on both ends.  If we have exclusive slice ends, we need to filter the results here.
-        public void applySliceRestriction(ReadCommand command)
+        public void trimResults(ReadCommand command)
         {
+            // Pre-3.0, we didn't have a way to express exclusivity for non-composite comparators, so all slices were
+            // inclusive on both ends.  If we have exclusive slice ends, we need to filter the results here.
             if (command.metadata().isCompound())
                 return;
 
