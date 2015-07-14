@@ -143,7 +143,7 @@ public class SchemaLoader
                 //CFMetaData.Builder.create(ks1, "Counter1", false, false, true).build(),
                 //CFMetaData.Builder.create(ks1, "SuperCounter1", false, false, true, true).build(),
                 superCFMD(ks1, "SuperDirectGC", BytesType.instance).gcGraceSeconds(0),
-                jdbcCFMD(ks1, "JdbcInteger", IntegerType.instance).addColumnDefinition(integerColumn(ks1, "JdbcInteger")),
+//                jdbcCFMD(ks1, "JdbcInteger", IntegerType.instance).addColumnDefinition(integerColumn(ks1, "JdbcInteger")),
                 jdbcCFMD(ks1, "JdbcUtf8", UTF8Type.instance).addColumnDefinition(utf8Column(ks1, "JdbcUtf8")),
                 jdbcCFMD(ks1, "JdbcLong", LongType.instance),
                 jdbcCFMD(ks1, "JdbcBytes", bytes),
@@ -296,7 +296,7 @@ public class SchemaLoader
                                     ColumnDefinition.Kind.REGULAR);
     }
 
-    private static ColumnDefinition utf8Column(String ksName, String cfName)
+    public static ColumnDefinition utf8Column(String ksName, String cfName)
     {
         return new ColumnDefinition(ksName,
                                     cfName,
@@ -327,7 +327,7 @@ public class SchemaLoader
     {
         for (KeyspaceMetadata ksm : schema)
             for (CFMetaData cfm : ksm.tables)
-                cfm.compressionParameters(new CompressionParameters(SnappyCompressor.instance));
+                cfm.compressionParameters(CompressionParameters.snappy());
     }
 
     public static CFMetaData counterCFMD(String ksName, String cfName)
@@ -462,9 +462,9 @@ public class SchemaLoader
     public static CompressionParameters getCompressionParameters(Integer chunkSize)
     {
         if (Boolean.parseBoolean(System.getProperty("cassandra.test.compression", "false")))
-            return new CompressionParameters(SnappyCompressor.instance, chunkSize, Collections.<String, String>emptyMap());
-        else
-            return new CompressionParameters(null);
+            return CompressionParameters.snappy(chunkSize);
+
+        return CompressionParameters.noCompression();
     }
 
     public static void cleanupAndLeaveDirs() throws IOException

@@ -21,6 +21,10 @@ Upgrading
    _ New SSTable version 'la' with improved bloom-filter false-positive handling
      compared to previous version 'ka' used in 2.2 and 2.1. Running sstableupgrade
      is not necessary but recommended.
+   - Before upgrading to 3.0, make sure that your cluster is in complete agreement
+     (schema versions outputted by `nodetool describecluster` are all the same).
+   - Schema metadata is now stored in the new `system_schema` keyspace, and
+     legacy `system.schema_*` tables are now gone; see CASSANDRA-6717 for details.
    - Pig's CassandraStorage has been removed. Use CqlNativeStorage instead.
    - Hadoop BulkOutputFormat and BulkRecordWriter have been removed; use
      CqlBulkOutputFormat and CqlBulkRecordWriter instead.
@@ -31,6 +35,10 @@ Upgrading
    - hinted_handoff_enabled in cassandra.yaml no longer supports a list of data centers.
      To specify a list of excluded data centers when hinted_handoff_enabled is set to true,
      use hinted_handoff_disabled_datacenters, see CASSANDRA-9035 for details.
+   - The `sstable_compression` and `chunk_length_kb` compression options have been deprecated.
+     The new options are `class` and `chunk_length_in_kb`. Disabling compression should now
+     be done by setting the new option `enabled` to `false`.
+
 
 2.2
 ===

@@ -34,7 +34,6 @@ import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.github.jamm.Unmetered;
 
 import org.apache.cassandra.cache.CachingOptions;
 import org.apache.cassandra.cql3.ColumnIdentifier;
@@ -49,11 +48,13 @@ import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.io.compress.CompressionParameters;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.schema.LegacySchemaTables;
+import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.schema.Triggers;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.Pair;
+import org.github.jamm.Unmetered;
 
 /**
  * This class can be tricky to modify. Please read http://wiki.apache.org/cassandra/ConfigurationNotes for how to do so safely.
@@ -190,9 +191,9 @@ public final class CFMetaData
     private volatile int memtableFlushPeriod = 0;
     private volatile int defaultTimeToLive = DEFAULT_DEFAULT_TIME_TO_LIVE;
     private volatile SpeculativeRetry speculativeRetry = DEFAULT_SPECULATIVE_RETRY;
-    private volatile Map<ColumnIdentifier, DroppedColumn> droppedColumns = new HashMap();
-    private volatile Map<String, TriggerDefinition> triggers = new HashMap<>();
-    private volatile boolean isPurged = false;
+    private volatile Map<ByteBuffer, DroppedColumn> droppedColumns = new HashMap<>();
+    private volatile Triggers triggers = Triggers.none();
+
     /*
      * All CQL3 columns definition are stored in the columnMetadata map.
      * On top of that, we keep separated collection of each kind of definition, to
@@ -200,7 +201,6 @@ public final class CFMetaData
      * clustering key ones, those list are ordered by the "component index" of the
      * elements.
      */
-
     private volatile Map<ByteBuffer, ColumnDefinition> columnMetadata = new HashMap<>();
     private volatile List<ColumnDefinition> partitionKeyColumns;  // Always of size keyValidator.componentsCount, null padded if necessary
     private volatile List<ColumnDefinition> clusteringColumns;    // Of size comparator.componentsCount or comparator.componentsCount -1, null padded if necessary
@@ -217,7 +217,7 @@ public final class CFMetaData
     public volatile Class<? extends AbstractCompactionStrategy> compactionStrategyClass = DEFAULT_COMPACTION_STRATEGY_CLASS;
     public volatile Map<String, String> compactionStrategyOptions = new HashMap<>();
 
-    public volatile CompressionParameters compressionParameters = new CompressionParameters(null);
+    public volatile CompressionParameters compressionParameters = CompressionParameters.noCompression();
 
     // attribute setters that return the modified CFMetaData instance
     public CFMetaData comment(String prop) {comment = Strings.nullToEmpty(prop); return this;}
@@ -236,8 +236,8 @@ public final class CFMetaData
     public CFMetaData memtableFlushPeriod(int prop) {memtableFlushPeriod = prop; return this;}
     public CFMetaData defaultTimeToLive(int prop) {defaultTimeToLive = prop; return this;}
     public CFMetaData speculativeRetry(SpeculativeRetry prop) {speculativeRetry = prop; return this;}
-    public CFMetaData droppedColumns(Map<ColumnIdentifier, DroppedColumn> cols) {droppedColumns = cols; return this;}
-    public CFMetaData triggers(Map<String, TriggerDefinition> prop) {triggers = prop; return this;}
+    public CFMetaData droppedColumns(Map<ByteBuffer, DroppedColumn> cols) {droppedColumns = cols; return this;}
+    public CFMetaData triggers(Triggers prop) {triggers = prop; return this;}
 
     private CFMetaData(String keyspace,
                        String name,
@@ -352,7 +352,7 @@ public final class CFMetaData
         return CFMetaData.Builder.create(keyspace, name).addPartitionKey("key", BytesType.instance).build();
     }
 
-    public Map<String, TriggerDefinition> getTriggers()
+    public Triggers getTriggers()
     {
         return triggers;
     }
@@ -467,7 +467,7 @@ public final class CFMetaData
                       .speculativeRetry(oldCFMD.speculativeRetry)
                       .memtableFlushPeriod(oldCFMD.memtableFlushPeriod)
                       .droppedColumns(new HashMap<>(oldCFMD.droppedColumns))
-                      .triggers(new HashMap<>(oldCFMD.triggers));
+                      .triggers(oldCFMD.triggers);
     }
 
     /**
@@ -687,7 +687,7 @@ public final class CFMetaData
         return defaultTimeToLive;
     }
 
-    public Map<ColumnIdentifier, DroppedColumn> getDroppedColumns()
+    public Map<ByteBuffer, DroppedColumn> getDroppedColumns()
     {
         return droppedColumns;
     }
@@ -791,7 +791,7 @@ public final class CFMetaData
      */
     public boolean reload()
     {
-        return apply(LegacySchemaTables.createTableFromName(ksName, cfName));
+        return apply(SchemaKeyspace.createTableFromName(ksName, cfName));
     }
 
     /**
@@ -1117,16 +1117,6 @@ public final class CFMetaData
                                                            "interval (%d).", maxIndexInterval, minIndexInterval));
     }
 
-    public boolean isPurged()
-    {
-        return isPurged;
-    }
-
-    void markPurged()
-    {
-        isPurged = true;
-    }
-
     // The comparator to validate the definition name.
     public AbstractType<?> thriftColumnNameType()
     {
@@ -1198,27 +1188,9 @@ public final class CFMetaData
         return removed;
     }
 
-    public void addTriggerDefinition(TriggerDefinition def) throws InvalidRequestException
-    {
-        if (containsTriggerDefinition(def))
-            throw new InvalidRequestException(
-                String.format("Cannot create trigger %s, a trigger with the same name already exists", def.name));
-        triggers.put(def.name, def);
-    }
-
-    public boolean containsTriggerDefinition(TriggerDefinition def)
-    {
-        return triggers.containsKey(def.name);
-    }
-
-    public boolean removeTrigger(String name)
-    {
-        return triggers.remove(name) != null;
-    }
-
     public void recordColumnDrop(ColumnDefinition def)
     {
-        droppedColumns.put(def.name, new DroppedColumn(def.type, FBUtilities.timestampMicros()));
+        droppedColumns.put(def.name.bytes, new DroppedColumn(def.type, FBUtilities.timestampMicros()));
     }
 
     public void renameColumn(ColumnIdentifier from, ColumnIdentifier to) throws InvalidRequestException
@@ -1357,7 +1329,7 @@ public final class CFMetaData
             .append("columnMetadata", columnMetadata.values())
             .append("compactionStrategyClass", compactionStrategyClass)
             .append("compactionStrategyOptions", compactionStrategyOptions)
-            .append("compressionParameters", compressionParameters.asThriftOptions())
+            .append("compressionParameters", compressionParameters.asMap())
             .append("bloomFilterFpChance", getBloomFilterFpChance())
             .append("memtableFlushPeriod", memtableFlushPeriod)
             .append("caching", caching)
@@ -1366,7 +1338,7 @@ public final class CFMetaData
             .append("maxIndexInterval", maxIndexInterval)
             .append("speculativeRetry", speculativeRetry)
             .append("droppedColumns", droppedColumns)
-            .append("triggers", triggers.values())
+            .append("triggers", triggers)
             .toString();
     }
 
