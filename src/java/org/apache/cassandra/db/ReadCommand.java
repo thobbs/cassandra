@@ -893,11 +893,12 @@ public abstract class ReadCommand implements ReadQuery
             LegacyRangeSliceCommandSerializer.serializeRowFilter(out, rangeCommand.rowFilter());
 
             // command-level limit
-            // TODO: pre-3.0 we would always request one more row than we actually needed, but the command-level "start" would
-            // be the last-returned cell name, so the response would always include it.  Instead, here we are using the
-            // exact count we need along with an exclusive "start" to avoid re-fetching the last-returned cell.  I'm
-            // not confident that this will not cause problems.
-            out.writeInt(rangeCommand.limits().count());
+            // Pre-3.0 we would always request one more row than we actually needed and the command-level "start" would
+            // be the last-returned cell name, so the response would always include it.  When dealing with compound comparators,
+            // we can pass an exclusive start and use the normal limit.  However, when dealing with non-compound comparators,
+            // pre-3.0 nodes cannot perform exclusive slices, so we need to request one extra row.
+            int maxResults = rangeCommand.limits().count() + (metadata.isCompound() ? 0 : 1);
+            out.writeInt(maxResults);
 
             // countCQL3Rows
             boolean countCQL3Rows = true;
