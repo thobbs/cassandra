@@ -128,6 +128,7 @@ public class PagedRangeCommand extends AbstractRangeCommand
         private static final Logger logger = LoggerFactory.getLogger(PagedRangeCommand.Serializer.class);
         public void serialize(PagedRangeCommand cmd, DataOutputPlus out, int version) throws IOException
         {
+            logger.warn("#### serializing PagedRangeCommand: {}", cmd);
             out.writeUTF(cmd.keyspace);
             out.writeUTF(cmd.columnFamily);
             out.writeLong(cmd.timestamp);
@@ -174,9 +175,11 @@ public class PagedRangeCommand extends AbstractRangeCommand
             }
 
             SliceQueryFilter predicate = metadata.comparator.sliceQueryFilterSerializer().deserialize(in, version);
+            logger.warn("#### deserialized PagedRangeCommand filter: {}", predicate);
 
             Composite start = metadata.comparator.serializer().deserialize(in);
             Composite stop =  metadata.comparator.serializer().deserialize(in);
+            logger.warn("#### deserialized PagedRangeCommand start: {}, stop: {}", metadata.comparator.getString(start), metadata.comparator.getString(stop));
 
             int filterCount = in.readInt();
             List<IndexExpression> rowFilter = new ArrayList<IndexExpression>(filterCount);
@@ -186,6 +189,7 @@ public class PagedRangeCommand extends AbstractRangeCommand
             }
 
             int limit = in.readInt();
+            logger.warn("#### deserialized PagedRangeCommand limit: {}", limit);
             boolean countCQL3Rows = version >= MessagingService.VERSION_21
                                   ? in.readBoolean()
                                   : predicate.compositesToGroup >= 0 || predicate.count != 1; // See #6857
