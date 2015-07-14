@@ -318,7 +318,7 @@ public class DataRange
      * first queried partition (the one for that last result) so it only fetch results that follow that
      * last result. In other words, this makes sure this resume paging where we left off.
      */
-    private static class Paging extends DataRange
+    public static class Paging extends DataRange
     {
         private final ClusteringComparator comparator;
         private final Clustering lastReturned;
@@ -360,6 +360,14 @@ public class DataRange
                  : new DataRange(range, clusteringIndexFilter);
         }
 
+        /**
+         * @return the last Clustering that was returned (in the previous page)
+         */
+        public Clustering getLastReturned()
+        {
+            return lastReturned;
+        }
+
         @Override
         public boolean isPaging()
         {
@@ -370,6 +378,11 @@ public class DataRange
         public boolean isUnrestricted()
         {
             return false;
+        }
+
+        public String toString(CFMetaData metadata)
+        {
+            return String.format("%s lastReturned=%s inclusive=%s (paging)", super.toString(metadata), lastReturned.toString(metadata), inclusive);
         }
     }
 
