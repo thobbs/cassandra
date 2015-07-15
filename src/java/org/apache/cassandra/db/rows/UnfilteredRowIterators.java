@@ -366,13 +366,14 @@ public abstract class UnfilteredRowIterators
         if (iterator.staticRow() != Rows.EMPTY_STATIC_ROW)
             iterator.staticRow().copyTo(update.staticWriter());
 
+        RangeTombstoneMarker.Writer tombstoneWriter = update.markerWriter(iterator.isReverseOrder());
         while (iterator.hasNext())
         {
             Unfiltered unfiltered = iterator.next();
             if (unfiltered.kind() == Unfiltered.Kind.ROW)
                 ((Row) unfiltered).copyTo(update.writer());
             else
-                ((RangeTombstoneMarker) unfiltered).copyTo(update.markerWriter(iterator.isReverseOrder()));
+                ((RangeTombstoneMarker) unfiltered).copyTo(tombstoneWriter);
         }
 
         return update;

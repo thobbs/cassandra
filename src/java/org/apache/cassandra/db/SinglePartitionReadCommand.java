@@ -31,6 +31,8 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.ColumnFamilyMetrics;
+import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
@@ -363,6 +365,11 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
 
     protected abstract UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs, boolean copyOnHeap);
 
+    public boolean rowsInPartitionAreReversed()
+    {
+        return clusteringIndexFilter.isReversed();
+    }
+
     @Override
     public String toString()
     {
@@ -375,6 +382,11 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
                              metadata().getKeyValidator().getString(partitionKey().getKey()),
                              clusteringIndexFilter.toString(metadata()),
                              nowInSec());
+    }
+
+    protected MessageOut<ReadCommand> createLegacyMessage()
+    {
+        return new MessageOut<>(MessagingService.Verb.READ, this, legacyReadCommandSerializer);
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)
