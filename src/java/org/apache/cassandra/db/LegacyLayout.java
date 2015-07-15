@@ -159,14 +159,16 @@ public abstract class LegacyLayout
             return isStart ? LegacyBound.BOTTOM : LegacyBound.TOP;
 
         List<CompositeType.CompositeComponent> components = metadata.isCompound()
-                ? CompositeType.deconstruct(bound)
-                : Collections.singletonList(new CompositeType.CompositeComponent(bound, (byte) 0));
+                                                          ? CompositeType.deconstruct(bound)
+                                                          : Collections.singletonList(new CompositeType.CompositeComponent(bound, (byte) 0));
 
         // Either it's a prefix of the clustering, or it's the bound of a collection range tombstone (and thus has
         // the collection column name)
         assert components.size() <= metadata.comparator.size() || (!metadata.isCompactTable() && components.size() == metadata.comparator.size() + 1);
 
-        List<CompositeType.CompositeComponent> prefix = components.size() <= metadata.comparator.size() ? components : components.subList(0, metadata.comparator.size());
+        List<CompositeType.CompositeComponent> prefix = components.size() <= metadata.comparator.size()
+                                                      ? components
+                                                      : components.subList(0, metadata.comparator.size());
         Slice.Bound.Kind boundKind;
         if (isStart)
         {
@@ -182,6 +184,7 @@ public abstract class LegacyLayout
             else
                 boundKind = Slice.Bound.Kind.INCL_END_BOUND;
         }
+
         ByteBuffer[] prefixValues = new ByteBuffer[prefix.size()];
         for (int i = 0; i < prefix.size(); i++)
             prefixValues[i] = prefix.get(i).value;
@@ -243,7 +246,7 @@ public abstract class LegacyLayout
             }
 
             ByteBuffer v = clustering.get(i);
-            // we can have null (only for dense compound tables for backward compatibility: reasons) but that
+            // we can have null (only for dense compound tables for backward compatibility reasons) but that
             // means we're done and should stop there as far as building the composite is concerned.
             if (v == null)
                 return CompositeType.build(Arrays.copyOfRange(values, 0, i));
@@ -1293,7 +1296,6 @@ public abstract class LegacyLayout
             {
                 RangeTombstone rt = iterator.next();
                 Slice slice = rt.deletedSlice();
-                // TODO need to handle collection element somehow?
                 rangeTombstones.add(new LegacyRangeTombstone(new LegacyBound(slice.start(), false, null),
                                                              new LegacyBound(slice.end(), false, null),
                                                              rt.deletionTime()));
@@ -1313,17 +1315,6 @@ public abstract class LegacyLayout
 
         public static class Serializer
         {
-            public void serialize(CFMetaData metadata, LegacyDeletionInfo info, DataOutputPlus out, int version) throws IOException
-            {
-                DeletionTime.serializer.serialize(info.deletionInfo.getPartitionDeletion(), out);
-
-                out.writeInt(info.inRowTombstones.size());
-                if (info.inRowTombstones.isEmpty())
-                    return;
-                else
-                    throw new UnsupportedOperationException("Range tombstones aren't supported yet");
-            }
-
             public LegacyDeletionInfo deserialize(CFMetaData metadata, DataInputPlus in, int version) throws IOException
             {
                 DeletionTime topLevel = DeletionTime.serializer.deserialize(in);
@@ -1348,17 +1339,6 @@ public abstract class LegacyLayout
                         ranges.add(start.bound, end.bound, markedAt, delTime);
                 }
                 return new LegacyDeletionInfo(new DeletionInfo(topLevel, ranges), inRowTombsones);
-            }
-
-            public long serializedSize(CFMetaData metadata, LegacyDeletionInfo info, int version)
-            {
-                long size = DeletionTime.serializer.serializedSize(info.deletionInfo.getPartitionDeletion());
-                size += TypeSizes.sizeof(info.inRowTombstones.size());
-
-                if (!info.inRowTombstones.isEmpty())
-                    throw new UnsupportedOperationException("Range tombstones aren't supported yet");
-
-                return size;
             }
         }
     }

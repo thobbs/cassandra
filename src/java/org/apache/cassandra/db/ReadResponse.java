@@ -148,9 +148,10 @@ public abstract class ReadResponse
     }
 
     /**
-     * A remote response from a pre-3.0 node.  This needs a separate class in order to cleanly handle reversal of
-     * results when the read command calls for it.  (Pre-3.0 nodes always return results in the normal sorted order,
-     * even if the query asks for reversed results.)
+     * A remote response from a pre-3.0 node.  This needs a separate class in order to cleanly handle trimming and
+     * reversal of results when the read command calls for it.  Pre-3.0 nodes always return results in the normal
+     * sorted order, even if the query asks for reversed results.  Additionally,  pre-3.0 nodes do not have a notion of
+     * exclusive slices on non-composite tables, so extra rows may need to be trimmed.
      */
     private static class LegacyRemoteDataResponse extends ReadResponse
     {

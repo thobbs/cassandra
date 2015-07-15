@@ -28,21 +28,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 
 public abstract class AbstractClusteringIndexFilter implements ClusteringIndexFilter
 {
-    /*
-    protected enum Kind
-    {
-        SLICE (ClusteringIndexSliceFilter.deserializer),
-        NAMES (ClusteringIndexNamesFilter.deserializer);
-
-        private final InternalDeserializer deserializer;
-
-        private Kind(InternalDeserializer deserializer)
-        {
-            this.deserializer = deserializer;
-        }
-    }
-    */
-
     static final Serializer serializer = new FilterSerializer();
 
     protected final boolean reversed;

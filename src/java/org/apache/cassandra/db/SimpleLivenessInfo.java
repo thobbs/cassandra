@@ -47,6 +47,9 @@ public class SimpleLivenessInfo extends AbstractLivenessInfo
         return new SimpleLivenessInfo(timestamp, ttl, ttl == NO_TTL ? NO_DELETION_TIME : nowInSec + ttl);
     }
 
+    /**
+     * Creates a SimpleLivenessInfo with attributes from a legacy cell.
+     */
     public static SimpleLivenessInfo forLegacyUpdate(long timestamp, int ttl, int localDeletionTime, CFMetaData metadata)
     {
         if (ttl == NO_TTL)

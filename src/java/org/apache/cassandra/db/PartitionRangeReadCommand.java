@@ -226,6 +226,7 @@ public class PartitionRangeReadCommand extends ReadCommand
         };
     }
 
+    @SuppressWarnings("deprecation")
     protected MessageOut<ReadCommand> createLegacyMessage()
     {
         if (this.dataRange.isPaging())

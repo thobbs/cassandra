@@ -382,7 +382,8 @@ public class DataRange
 
         public String toString(CFMetaData metadata)
         {
-            return String.format("%s lastReturned=%s inclusive=%s (paging)", super.toString(metadata), lastReturned.toString(metadata), inclusive);
+            return String.format("%s lastReturned=%s inclusive=%s (paging)",
+                    super.toString(metadata), lastReturned.toString(metadata), inclusive);
         }
     }
 
