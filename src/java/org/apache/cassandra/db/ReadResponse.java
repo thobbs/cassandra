@@ -21,7 +21,6 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.rows.*;
@@ -34,13 +33,9 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 public abstract class ReadResponse
 {
-    private static final Logger logger = LoggerFactory.getLogger(ReadResponse.class);
-
     public static final IVersionedSerializer<ReadResponse> serializer = new Serializer();
     public static final IVersionedSerializer<ReadResponse> legacyRangeSliceReplySerializer = new LegacyRangeSliceReplySerializer();
 
@@ -67,11 +62,7 @@ public abstract class ReadResponse
         return ByteBuffer.wrap(digest.digest());
     }
 
-    public void maybeReverse()
-    {
-    }
-
-    public void trimResults(ReadCommand command)
+    public void preprocessLegacyResults(ReadCommand command)
     {
     }
 
@@ -204,15 +195,22 @@ public abstract class ReadResponse
             }
         }
 
-        // TODO unify with reversal
-        public void trimResults(ReadCommand command)
+        @Override
+        public void preprocessLegacyResults(ReadCommand command)
         {
+            assert data == null : "Legacy results should have been processed before the data was used";
+
+            boolean needsReversal = command.rowsInPartitionAreReversed();
+
             // Pre-3.0, we didn't have a way to express exclusivity for non-composite comparators, so all slices were
             // inclusive on both ends.  If we have exclusive slice ends, we need to filter the results here.
-            if (command.metadata().isCompound())
+            boolean needsTrimming = !command.metadata().isCompound();
+
+            if (!needsReversal && !needsTrimming)
                 return;
 
-            final UnfilteredPartitionIterator unreversedPartitionIterator = iterator;
+            final UnfilteredPartitionIterator originalIterator = iterator;
+
             iterator = new UnfilteredPartitionIterator()
             {
                 UnfilteredRowIterator next;
@@ -220,13 +218,13 @@ public abstract class ReadResponse
                 @Override
                 public boolean isForThrift()
                 {
-                    return unreversedPartitionIterator.isForThrift();
+                    return originalIterator.isForThrift();
                 }
 
                 @Override
                 public boolean hasNext()
                 {
-                    return unreversedPartitionIterator.hasNext();
+                    return originalIterator.hasNext();
                 }
 
                 @Override
@@ -235,19 +233,26 @@ public abstract class ReadResponse
                     if (next != null && next.hasNext())
                         throw new IllegalStateException("Cannot call hasNext() until the previous iterator has been fully consumed");
 
-                    UnfilteredRowIterator unreversedNext = unreversedPartitionIterator.next();
-                    ClusteringIndexFilter filter = command.clusteringIndexFilter(unreversedNext.partitionKey());
-                    if (filter.kind() == ClusteringIndexFilter.Kind.SLICE && !filter.selectsAllPartition())
+                    next = originalIterator.next();
+
+                    boolean stillNeedToReverse = needsReversal;
+                    if (needsTrimming)
                     {
-                        ArrayBackedPartition partition = ArrayBackedPartition.create(unreversedNext);
-                        next = partition.unfilteredIterator(
-                                command.columnFilter(), ((ClusteringIndexSliceFilter) filter).requestedSlices(),
-                                filter.isReversed());
+                        ClusteringIndexFilter filter = command.clusteringIndexFilter(next.partitionKey());
+                        if (filter.kind() == ClusteringIndexFilter.Kind.SLICE && !filter.selectsAllPartition())
+                        {
+                            // handle reversal here if we need to do it anyway
+                            boolean reversed = filter.isReversed() || needsReversal;
+                            stillNeedToReverse = false;
+
+                            ArrayBackedPartition partition = ArrayBackedPartition.create(next);
+                            next = partition.unfilteredIterator(
+                                    command.columnFilter(), ((ClusteringIndexSliceFilter) filter).requestedSlices(), reversed);
+                        }
                     }
-                    else
-                    {
-                        next = unreversedNext;
-                    }
+
+                    if (stillNeedToReverse)
+                        next = ArrayBackedPartition.create(next).unfilteredIterator(command.columnFilter(), Slices.ALL, true);
 
                     return next;
                 }
@@ -257,54 +262,7 @@ public abstract class ReadResponse
                 {
                     try
                     {
-                        iterator.close();
-                    }
-                    finally
-                    {
-                        if (next != null)
-                            next.close();
-                    }
-                }
-            };
-        }
-
-        @Override
-        public void maybeReverse()
-        {
-            assert data == null : "reversal should have happened before data was accessed";
-
-            final UnfilteredPartitionIterator unreversedPartitionIterator = iterator;
-            iterator = new UnfilteredPartitionIterator()
-            {
-                UnfilteredRowIterator next;
-
-                @Override
-                public boolean isForThrift()
-                {
-                    return unreversedPartitionIterator.isForThrift();
-                }
-
-                @Override
-                public boolean hasNext()
-                {
-                    return unreversedPartitionIterator.hasNext();
-                }
-
-                @Override
-                public UnfilteredRowIterator next()
-                {
-                    final UnfilteredRowIterator unreversedNext = unreversedPartitionIterator.next();
-                    next = ArrayBackedPartition.create(unreversedNext).unfilteredIterator(
-                            ColumnFilter.selection(unreversedNext.columns()), Slices.ALL, true);
-                    return next;
-                }
-
-                @Override
-                public void close()
-                {
-                    try
-                    {
-                        unreversedPartitionIterator.close();
+                        originalIterator.close();
                     }
                     finally
                     {
@@ -333,9 +291,9 @@ public abstract class ReadResponse
     {
         public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
         {
+            boolean isDigest = response.isDigestQuery();
             if (version < MessagingService.VERSION_30)
             {
-                boolean isDigest = response.isDigestQuery();
                 out.writeInt(isDigest ? response.digest().remaining() : 0);
                 ByteBuffer buffer = isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER;
                 out.write(buffer);
@@ -345,7 +303,6 @@ public abstract class ReadResponse
                 return;
             }
 
-            boolean isDigest = response.isDigestQuery();
             ByteBufferUtil.writeWithShortLength(isDigest ? response.digest() : ByteBufferUtil.EMPTY_BYTE_BUFFER, out);
             if (!isDigest)
             {
@@ -382,11 +339,9 @@ public abstract class ReadResponse
                 UnfilteredRowIterator rowIterator;
                 boolean present = in.readBoolean();
                 if (!present)
-                {
                     return new LegacyRemoteDataResponse(UnfilteredPartitionIterators.EMPTY);
-                }
 
-                rowIterator = UnfilteredPartitionIterators.serializerForIntraNode().deserializePartition(in, key, version);
+                rowIterator = UnfilteredPartitionIterators.serializerForIntraNode().deserializeLegacyPartition(in, key, version);
                 UnfilteredPartitionIterator iterator = new UnfilteredPartitionIterators.SingletonPartitionIterator(rowIterator, true);
                 return new LegacyRemoteDataResponse(iterator);
             }
@@ -408,7 +363,6 @@ public abstract class ReadResponse
             if (version < MessagingService.VERSION_30)
             {
                 size += TypeSizes.sizeof(isDigest);
-                // TODO is the partition iterator reusable?
                 if (!isDigest)
                     size += UnfilteredPartitionIterators.serializerForIntraNode().serializedSize(response.makeIterator(), version);
                 return size;
@@ -430,7 +384,7 @@ public abstract class ReadResponse
     {
         public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
         {
-            // TODO this is currently really inefficient because we have to iterate over all of the results twice
+            // determine the number of partitions upfront for serialization
             int numPartitions = 0;
             try (UnfilteredPartitionIterator iterator = response.makeIterator())
             {
@@ -455,7 +409,9 @@ public abstract class ReadResponse
 
         public ReadResponse deserialize(DataInputPlus in, int version) throws IOException
         {
-            return new LegacyRemoteDataResponse(UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in, version, SerializationHelper.Flag.FROM_REMOTE));
+            UnfilteredPartitionIterator iterator = UnfilteredPartitionIterators.serializerForIntraNode().deserialize(
+                    in, version, SerializationHelper.Flag.FROM_REMOTE);
+            return new LegacyRemoteDataResponse(iterator);
         }
 
         public long serializedSize(ReadResponse response, int version)

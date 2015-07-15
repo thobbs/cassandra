@@ -25,11 +25,8 @@ import java.util.*;
 
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Iterators;
-import com.google.common.collect.Lists;
 import com.google.common.collect.PeekingIterator;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.db.rows.*;
@@ -38,17 +35,13 @@ import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.thrift.ColumnDef;
 import org.apache.cassandra.utils.*;
-import org.apache.hadoop.io.serializer.Serialization;
 
 /**
  * Functions to deal with the old format.
  */
 public abstract class LegacyLayout
 {
-    private static final Logger logger = LoggerFactory.getLogger(LegacyLayout.class);
-
     public final static int MAX_CELL_NAME_LENGTH = FBUtilities.MAX_UNSIGNED_SHORT;
 
     public final static int STATIC_PREFIX = 0xFFFF;
@@ -518,6 +511,8 @@ public abstract class LegacyLayout
 
     private static Pair<LegacyRangeTombstoneList, Iterator<LegacyCell>> fromRow(final CFMetaData metadata, final Row row)
     {
+        // convert any complex deletions into normal range tombstones so that we can build and send a proper RangeTombstoneList
+        // to legacy nodes
         LegacyRangeTombstoneList complexDeletions = new LegacyRangeTombstoneList(new LegacyBoundComparator(metadata.comparator), 10);
         if (row.hasComplexDeletion())
         {
@@ -1368,7 +1363,10 @@ public abstract class LegacyLayout
         }
     }
 
-    public static class LegacyBoundComparator implements Comparator<LegacyBound>
+    /**
+     * A helper class for LegacyRangeTombstoneList.  This replaces the Comparator<Composite> that RTL used before 3.0.
+     */
+    private static class LegacyBoundComparator implements Comparator<LegacyBound>
     {
         ClusteringComparator clusteringComparator;
 
@@ -1387,6 +1385,13 @@ public abstract class LegacyLayout
         }
     }
 
+    /**
+     * Almost an entire copy of RangeTombstoneList from C* 2.1.  The main difference is that LegacyBoundComparator
+     * is used in place of Comparator<Composite> (because Composite doesn't exist any more).
+     *
+     * This class is needed to allow us to convert single-row deletions and complex deletions into range tombstones
+     * and properly merge them into the normal set of range tombstones.
+     */
     public static class LegacyRangeTombstoneList
     {
         private final LegacyBoundComparator comparator;
@@ -1854,7 +1859,6 @@ public abstract class LegacyLayout
                 if (end.collectionName != null)
                     endBuilder.add(end.collectionName.name.bytes);
 
-                // TODO double check inclusive ends
                 size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build());
                 size += ByteBufferUtil.serializedSizeWithShortLength(endBuilder.buildAsEndOfRange());
 

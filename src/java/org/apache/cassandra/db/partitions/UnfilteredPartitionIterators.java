@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.db.partitions;
 
-import java.io.DataInput;
 import java.io.IOError;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -28,10 +27,8 @@ import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Lists;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -39,16 +36,11 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.*;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /**
  * Static methods to work with partition iterators.
  */
 public abstract class UnfilteredPartitionIterators
 {
-    private static final Logger logger = LoggerFactory.getLogger(UnfilteredPartitionIterators.class);
-
     private static final Serializer serializer = new Serializer();
 
     private static final Comparator<UnfilteredRowIterator> partitionComparator = new Comparator<UnfilteredRowIterator>()
@@ -460,17 +452,14 @@ public abstract class UnfilteredPartitionIterators
         {
             if (version < MessagingService.VERSION_30)
             {
+                while (iter.hasNext())
                 {
-                    while (iter.hasNext())
+                    try (UnfilteredRowIterator partition = iter.next())
                     {
-                        try (UnfilteredRowIterator partition = iter.next())
-                        {
-                            serializePartition(partition, out, version);
-                        }
+                        serializeLegacyPartition(partition, out, version);
                     }
-                    return;
                 }
-
+                return;
             }
 
             out.writeBoolean(iter.isForThrift());
@@ -496,7 +485,7 @@ public abstract class UnfilteredPartitionIterators
                     DecoratedKey key = StorageService.getPartitioner().decorateKey(ByteBufferUtil.readWithShortLength(in));
                     boolean present = in.readBoolean();
                     assert present;
-                    partitions.add(deserializePartition(in, key, version));
+                    partitions.add(deserializeLegacyPartition(in, key, version));
                 }
                 final Iterator<UnfilteredRowIterator> iterator = partitions.iterator();
 
@@ -590,7 +579,7 @@ public abstract class UnfilteredPartitionIterators
             };
         }
 
-        void serializePartition(UnfilteredRowIterator partition, DataOutputPlus out, int version) throws IOException
+        void serializeLegacyPartition(UnfilteredRowIterator partition, DataOutputPlus out, int version) throws IOException
         {
             assert version < MessagingService.VERSION_30;
 
@@ -603,10 +592,13 @@ public abstract class UnfilteredPartitionIterators
             // before we use the LegacyRangeTombstoneList at all
             List<LegacyLayout.LegacyCell> cells = Lists.newArrayList(pair.right.right);
 
-            out.writeBoolean(true);
+            out.writeBoolean(true);  // isPresent
             UUIDSerializer.serializer.serialize(partition.metadata().cfId, out, version);
             DeletionTime.serializer.serialize(deletionInfo.getPartitionDeletion(), out);
 
+            // The LegacyRangeTombstoneList already has range tombstones for the single-row deletions and complex
+            // deletions.  Go through our normal range tombstones and add then to the LegacyRTL so that the range
+            // tombstones all get merged and sorted properly.
             if (deletionInfo.hasRanges())
             {
                 Iterator<RangeTombstone> rangeTombstoneIterator = deletionInfo.rangeIterator(false);
@@ -644,10 +636,11 @@ public abstract class UnfilteredPartitionIterators
                 else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                 {
                     out.writeByte(LegacyLayout.COUNTER_MASK);  // serialization flags
-                    out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete
+                    out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete (not used, and MIN_VALUE is the default)
                 }
                 else
                 {
+                    // normal cell
                     out.writeByte(0);  // serialization flags
                 }
 
@@ -656,14 +649,13 @@ public abstract class UnfilteredPartitionIterators
             }
         }
 
-        public UnfilteredRowIterator deserializePartition(DataInputPlus in, DecoratedKey key, int version) throws IOException
+        public UnfilteredRowIterator deserializeLegacyPartition(DataInputPlus in, DecoratedKey key, int version) throws IOException
         {
             assert version < MessagingService.VERSION_30;
 
             CFMetaData metadata = CFMetaData.serializer.deserialize(in, version);
             LegacyLayout.LegacyDeletionInfo info = LegacyLayout.LegacyDeletionInfo.serializer.deserialize(metadata, in, version);
             int size = in.readInt();
-            // TODO double-check that this is the correct flag to use
             SerializationHelper helper = new SerializationHelper(version, SerializationHelper.Flag.FROM_REMOTE, ColumnFilter.all(metadata));
             Iterator<LegacyLayout.LegacyCell> cells = LegacyLayout.deserializeCells(metadata, in, SerializationHelper.Flag.FROM_REMOTE, size);
             return LegacyLayout.onWireCellstoUnfilteredRowIterator(metadata, key, info, cells, false, helper);
@@ -729,10 +721,19 @@ public abstract class UnfilteredPartitionIterators
                     size += TypeSizes.sizeof(cell.ttl);
                     size += TypeSizes.sizeof(cell.localDeletionTime);
                 }
+                else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+                {
+                    size += TypeSizes.sizeof(cell.timestamp);
+                    // localDeletionTime replaces cell.value as the body
+                    size += TypeSizes.sizeof(TypeSizes.sizeof(cell.localDeletionTime));
+                    size += TypeSizes.sizeof(cell.localDeletionTime);
+                    continue;
+                }
                 else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
                 {
-                    size += TypeSizes.sizeof(Long.MAX_VALUE);
+                    size += TypeSizes.sizeof(Long.MIN_VALUE);  // timestampOfLastDelete
                 }
+
                 size += TypeSizes.sizeof(cell.timestamp);
                 size += ByteBufferUtil.serializedSizeWithLength(cell.value);
             }
