@@ -58,6 +58,7 @@ import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.pager.QueryPagers;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.*;
+import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.thrift.TException;
 
 public class CassandraServer implements Cassandra.Iface
@@ -679,7 +680,7 @@ public class CassandraServer implements Cassandra.Iface
             // request by page if this is a large row
             if (cfs.getMeanColumns() > 0)
             {
-                int averageColumnSize = (int) (cfs.metric.meanRowSize.getValue() / cfs.getMeanColumns());
+                int averageColumnSize = (int) (cfs.metric.meanPartitionSize.getValue() / cfs.getMeanColumns());
                 pageSize = Math.min(COUNT_PAGE_SIZE, 4 * 1024 * 1024 / averageColumnSize);
                 pageSize = Math.max(2, pageSize);
                 logger.debug("average row column size is {}; using pageSize of {}", averageColumnSize, pageSize);
@@ -2486,13 +2487,13 @@ public class CassandraServer implements Cassandra.Iface
             }
 
             // Gather the clustering for the expected values and query those.
-            NavigableSet<Clustering> clusterings = new TreeSet<>(metadata.comparator);
+            BTreeSet.Builder<Clustering> clusterings = BTreeSet.builder(metadata.comparator);
             for (Row row : expected)
                 clusterings.add(row.clustering().takeAlias());
             PartitionColumns columns = expected.staticRow().isEmpty()
                                      ? metadata.partitionColumns().withoutStatics()
                                      : metadata.partitionColumns();
-            ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(clusterings, false);
+            ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(clusterings.build(), false);
             return SinglePartitionReadCommand.create(true, metadata, nowInSec, ColumnFilter.selection(columns), RowFilter.NONE, DataLimits.NONE, key, filter);
         }
 

@@ -29,6 +29,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.base.Strings;
 import com.google.common.collect.*;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -1117,7 +1118,7 @@ public final class CFMetaData
                                                            "interval (%d).", maxIndexInterval, minIndexInterval));
     }
 
-    // The comparator to validate the definition name.
+    // The comparator to validate the definition name with thrift.
     public AbstractType<?> thriftColumnNameType()
     {
         if (isSuper())
@@ -1127,7 +1128,8 @@ public final class CFMetaData
             return ((MapType)def.type).nameComparator();
         }
 
-        return UTF8Type.instance;
+        assert isStaticCompactTable();
+        return clusteringColumns.get(0).type;
     }
 
     public CFMetaData addAllColumnDefinitions(Collection<ColumnDefinition> defs)
@@ -1532,13 +1534,27 @@ public final class CFMetaData
 
         public void serialize(CFMetaData metadata, DataOutputPlus out, int version) throws IOException
         {
-            writeLongAsSeparateBytes(metadata.cfId.getMostSignificantBits(), out);
-            writeLongAsSeparateBytes(metadata.cfId.getLeastSignificantBits(), out);
+            if (version < MessagingService.VERSION_30)
+            {
+                writeLongAsSeparateBytes(metadata.cfId.getMostSignificantBits(), out);
+                writeLongAsSeparateBytes(metadata.cfId.getLeastSignificantBits(), out);
+            }
+            else
+            {
+                // for some reason these are stored is LITTLE_ENDIAN; so just reverse them
+                out.writeLong(Long.reverseBytes(metadata.cfId.getMostSignificantBits()));
+                out.writeLong(Long.reverseBytes(metadata.cfId.getLeastSignificantBits()));
+            }
         }
 
         public CFMetaData deserialize(DataInput in, int version) throws IOException
         {
-            UUID cfId = new UUID(readLongAsSeparateBytes(in), readLongAsSeparateBytes(in));
+            UUID cfId;
+            if (version < MessagingService.VERSION_30)
+                cfId = new UUID(readLongAsSeparateBytes(in), readLongAsSeparateBytes(in));
+            else
+                cfId = new UUID(Long.reverseBytes(in.readLong()), Long.reverseBytes(in.readLong()));
+
             CFMetaData metadata = Schema.instance.getCFMetaData(cfId);
             if (metadata == null)
             {

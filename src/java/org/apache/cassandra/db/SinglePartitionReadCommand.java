@@ -30,9 +30,9 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.metrics.ColumnFamilyMetrics;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
@@ -217,7 +217,7 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
         return new SinglePartitionPager(command, pagingState);
     }
 
-    protected void recordLatency(ColumnFamilyMetrics metric, long latencyNanos)
+    protected void recordLatency(TableMetrics metric, long latencyNanos)
     {
         metric.readLatency.addNano(latencyNanos);
     }
@@ -258,24 +258,24 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
             {
                 // Some other read is trying to cache the value, just do a normal non-caching read
                 Tracing.trace("Row cache miss (race)");
-                cfs.metric.rowCacheMiss.inc();
+                cfs.metric.partitionCacheMiss.inc();
                 return queryMemtableAndDisk(cfs, readOp);
             }
 
             CachedPartition cachedPartition = (CachedPartition)cached;
             if (cfs.isFilterFullyCoveredBy(clusteringIndexFilter(), limits(), cachedPartition, nowInSec()))
             {
-                cfs.metric.rowCacheHit.inc();
+                cfs.metric.partitionCacheHit.inc();
                 Tracing.trace("Row cache hit");
                 return clusteringIndexFilter().getUnfilteredRowIterator(columnFilter(), cachedPartition);
             }
 
-            cfs.metric.rowCacheHitOutOfRange.inc();
+            cfs.metric.partitionCacheHitOutOfRange.inc();
             Tracing.trace("Ignoring row cache as cached value could not satisfy query");
             return queryMemtableAndDisk(cfs, readOp);
         }
 
-        cfs.metric.rowCacheMiss.inc();
+        cfs.metric.partitionCacheMiss.inc();
         Tracing.trace("Row cache miss");
 
         boolean cacheFullPartitions = metadata().getCaching().rowCache.cacheFullPartitions();
