@@ -914,9 +914,14 @@ public abstract class ReadCommand implements ReadQuery
             // command-level Composite "start" and "stop"
             LegacyLayout.LegacyBound startBound = LegacyLayout.decodeBound(metadata, ByteBufferUtil.readWithShortLength(in), true);
             ByteBufferUtil.readWithShortLength(in);  // the composite "stop", which isn't actually needed
-            Clustering startClustering = startBound == LegacyLayout.LegacyBound.BOTTOM
-                                       ? Clustering.EMPTY
-                                       : startBound.getAsClustering(metadata);
+
+            // pre-3.0 nodes will sometimes use a clustering prefix for the Command-level start and stop, but in all
+            // cases this should also be represented by the ClusteringIndexFilter, so we can ignore them
+            Clustering startClustering;
+            if (startBound == LegacyLayout.LegacyBound.BOTTOM || startBound.bound.size() < metadata.comparator.size())
+                startClustering = Clustering.EMPTY;
+            else
+                startClustering = startBound.getAsClustering(metadata);
 
             ColumnFilter selection = LegacyRangeSliceCommandSerializer.getColumnSelectionForSlice(filter, compositesToGroup, metadata);
 
