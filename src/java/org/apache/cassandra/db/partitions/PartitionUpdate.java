@@ -705,16 +705,19 @@ public class PartitionUpdate extends AbstractThreadUnsafePartition
     {
         public void serialize(PartitionUpdate update, DataOutputPlus out, int version) throws IOException
         {
-            CFMetaData.serializer.serialize(update.metadata(), out, version);
             try (UnfilteredRowIterator iter = update.sliceableUnfilteredIterator())
             {
                 assert !iter.isReverseOrder();
 
                 if (version < MessagingService.VERSION_30)
+                {
                     LegacyLayout.serializeAsLegacyPartition(iter, out, version);
+                }
                 else
+                {
+                    CFMetaData.serializer.serialize(update.metadata(), out, version);
                     UnfilteredRowIteratorSerializer.serializer.serialize(iter, out, version, update.rows.size());
-
+                }
             }
         }
 
@@ -795,9 +798,11 @@ public class PartitionUpdate extends AbstractThreadUnsafePartition
         {
             try (UnfilteredRowIterator iter = update.sliceableUnfilteredIterator())
             {
-                return version < MessagingService.VERSION_30
-                     ? LegacyLayout.serializedSizeAsLegacyPartition(iter, version)
-                     : UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, version, update.rows.size());
+                if (version < MessagingService.VERSION_30)
+                    return LegacyLayout.serializedSizeAsLegacyPartition(iter, version);
+
+                return CFMetaData.serializer.serializedSize(update.metadata(), version)
+                     + UnfilteredRowIteratorSerializer.serializer.serializedSize(iter, version, update.rows.size());
             }
         }
     }
