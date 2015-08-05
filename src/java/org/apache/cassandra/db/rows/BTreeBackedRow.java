@@ -445,7 +445,7 @@ public class BTreeBackedRow extends AbstractRow
                     if (complexIdx >= data.length)
                         return (Cell)data[simpleIdx++];
 
-                    if (comparator.compare(((Cell) data[simpleIdx]).column().name.bytes, ((Cell) data[complexIdx]).column().name.bytes) < 0)
+                    if (comparator.compare(((ColumnData) data[simpleIdx]).column().name.bytes, ((ColumnData) data[complexIdx]).column().name.bytes) < 0)
                         return (Cell)data[simpleIdx++];
                     else
                         complexCells = ((ComplexColumnData)data[complexIdx++]).iterator();
