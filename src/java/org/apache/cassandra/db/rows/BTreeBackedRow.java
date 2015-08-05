@@ -406,12 +406,18 @@ public class BTreeBackedRow extends AbstractRow
         private int simpleIdx;
         private int complexIdx;
         private Iterator<Cell> complexCells;
+        private final Object[] data;
 
         private CellInLegacyOrderIterator(CFMetaData metadata)
         {
             this.comparator = metadata.getColumnDefinitionNameComparator(isStatic() ? ColumnDefinition.Kind.STATIC : ColumnDefinition.Kind.REGULAR);
-            int idx = Iterators.indexOf(Iterators.forArray(btree), cd -> cd instanceof ComplexColumnData);
-            this.firstComplexIdx = idx < 0 ? btree.length : idx;
+
+            // copy btree into array for simple separate iteration of simple and complex columns
+            this.data = new Object[BTree.size(btree)];
+            BTree.toArray(btree, data, 0);
+
+            int idx = Iterators.indexOf(Iterators.forArray(data), cd -> cd instanceof ComplexColumnData);
+            this.firstComplexIdx = idx < 0 ? data.length : idx;
             this.complexIdx = firstComplexIdx;
         }
 
@@ -429,20 +435,20 @@ public class BTreeBackedRow extends AbstractRow
 
                 if (simpleIdx >= firstComplexIdx)
                 {
-                    if (complexIdx >= btree.length)
+                    if (complexIdx >= data.length)
                         return endOfData();
 
-                    complexCells = ((ComplexColumnData)btree[complexIdx++]).iterator();
+                    complexCells = ((ComplexColumnData)data[complexIdx++]).iterator();
                 }
                 else
                 {
-                    if (complexIdx >= btree.length)
-                        return (Cell)btree[simpleIdx++];
+                    if (complexIdx >= data.length)
+                        return (Cell)data[simpleIdx++];
 
-                    if (comparator.compare(((Cell) btree[simpleIdx]).column().name.bytes, ((Cell) btree[complexIdx]).column().name.bytes) < 0)
-                        return (Cell)btree[simpleIdx++];
+                    if (comparator.compare(((Cell) data[simpleIdx]).column().name.bytes, ((Cell) data[complexIdx]).column().name.bytes) < 0)
+                        return (Cell)data[simpleIdx++];
                     else
-                        complexCells = ((ComplexColumnData)btree[complexIdx++]).iterator();
+                        complexCells = ((ComplexColumnData)data[complexIdx++]).iterator();
                 }
             }
         }
