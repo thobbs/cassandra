@@ -1601,8 +1601,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                         logger.debug("using snapshot sstable {}", entries.getKey());
                     // open without tracking hotness
                     sstable = SSTableReader.open(entries.getKey(), entries.getValue(), metadata, true, false);
-                    // This is technically not necessary since it's a snapshot but makes things easier
                     refs.tryRef(sstable);
+                    // release the self ref as we never add the snapshot sstable to DataTracker where it is otherwise released
+                    sstable.selfRef().release();
                 }
                 else if (logger.isDebugEnabled())
                 {
@@ -2052,6 +2053,19 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             count += n;
         }
         return count > 0 ? (int) (sum / count) : 0;
+    }
+
+    public double getMeanPartitionSize()
+    {
+        long sum = 0;
+        long count = 0;
+        for (SSTableReader sstable : getSSTables(SSTableSet.CANONICAL))
+        {
+            long n = sstable.getEstimatedPartitionSize().count();
+            sum += sstable.getEstimatedPartitionSize().mean() * n;
+            count += n;
+        }
+        return count > 0 ? sum * 1.0 / count : 0;
     }
 
     public long estimateKeys()

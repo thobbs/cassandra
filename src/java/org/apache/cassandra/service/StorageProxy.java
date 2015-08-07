@@ -837,17 +837,17 @@ public class StorageProxy implements StorageProxyMBean
             {
                 insertLocal(Stage.BATCHLOG_MUTATION, message.payload, handler);
             }
-            else if (targetVersion == MessagingService.current_version)
-            {
-                MessagingService.instance().sendRR(message, target, handler, false);
-            }
-            else
+            else if (targetVersion < MessagingService.VERSION_30)
             {
                 MessagingService.instance().sendRR(BatchlogManager.getBatchlogMutationFor(mutations, uuid, targetVersion)
-                                                                  .createMessage(MessagingService.Verb.BATCHLOG_MUTATION),
+                                                                  .createMessage(MessagingService.Verb.MUTATION),
                                                    target,
                                                    handler,
                                                    false);
+            }
+            else
+            {
+                MessagingService.instance().sendRR(message, target, handler, false);
             }
         }
 
@@ -863,17 +863,29 @@ public class StorageProxy implements StorageProxyMBean
                                                                         null,
                                                                         WriteType.SIMPLE);
         Mutation mutation = new Mutation(
-                PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batchlog,
+                PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batches,
                                                     UUIDType.instance.decompose(uuid),
                                                     FBUtilities.timestampMicros(),
                                                     FBUtilities.nowInSeconds()));
         MessageOut<Mutation> message = mutation.createMessage(MessagingService.Verb.BATCHLOG_MUTATION);
         for (InetAddress target : endpoints)
         {
+            int targetVersion = MessagingService.instance().getVersion(target);
             if (canDoLocalRequest(target))
+            {
                 insertLocal(Stage.BATCHLOG_MUTATION, message.payload, handler);
+            }
+            else if (targetVersion < MessagingService.VERSION_30)
+            {
+                MessagingService.instance().sendRR(mutation.createMessage(MessagingService.Verb.MUTATION),
+                                                   target,
+                                                   handler,
+                                                   false);
+            }
             else
+            {
                 MessagingService.instance().sendRR(message, target, handler, false);
+            }
         }
     }
 
