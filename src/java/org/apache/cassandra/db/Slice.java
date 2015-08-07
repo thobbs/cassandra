@@ -204,6 +204,9 @@ public class Slice
      */
     public Slice forPaging(ClusteringComparator comparator, Clustering lastReturned, boolean inclusive, boolean reversed)
     {
+        if (lastReturned == null)
+            return this;
+
         if (reversed)
         {
             int cmp = comparator.compare(lastReturned, start);
