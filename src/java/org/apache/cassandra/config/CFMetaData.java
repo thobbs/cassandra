@@ -79,7 +79,7 @@ public final class CFMetaData
     private final boolean isCompound;
     private final boolean isSuper;
     private final boolean isCounter;
-    private final boolean isMaterializedView;
+    private final boolean isView;
 
     private final boolean isIndex;
 
@@ -94,8 +94,8 @@ public final class CFMetaData
     private volatile AbstractType<?> keyValidator = BytesType.instance;
     private volatile Map<ByteBuffer, DroppedColumn> droppedColumns = new HashMap<>();
     private volatile Triggers triggers = Triggers.none();
-    private volatile MaterializedViews materializedViews = MaterializedViews.none();
     private volatile Indexes indexes = Indexes.none();
+    private volatile Views views = Views.none();
 
     /*
      * All CQL3 columns definition are stored in the columnMetadata map.
@@ -219,9 +219,9 @@ public final class CFMetaData
         return this;
     }
 
-    public CFMetaData materializedViews(MaterializedViews prop)
+    public CFMetaData views(Views prop)
     {
-        materializedViews = prop;
+        views = prop;
         return this;
     }
 
@@ -238,7 +238,7 @@ public final class CFMetaData
                        boolean isCounter,
                        boolean isDense,
                        boolean isCompound,
-                       boolean isMaterializedView,
+                       boolean isView,
                        List<ColumnDefinition> partitionKeyColumns,
                        List<ColumnDefinition> clusteringColumns,
                        PartitionColumns partitionColumns,
@@ -252,7 +252,7 @@ public final class CFMetaData
         this.isCompound = isCompound;
         this.isSuper = isSuper;
         this.isCounter = isCounter;
-        this.isMaterializedView = isMaterializedView;
+        this.isView = isView;
 
         EnumSet<Flag> flags = EnumSet.noneOf(Flag.class);
         if (isSuper)
@@ -263,7 +263,7 @@ public final class CFMetaData
             flags.add(Flag.DENSE);
         if (isCompound)
             flags.add(Flag.COMPOUND);
-        if (isMaterializedView)
+        if (isView)
             flags.add(Flag.VIEW);
         this.flags = Sets.immutableEnumSet(flags);
 
@@ -307,14 +307,14 @@ public final class CFMetaData
             this.compactValueColumn = CompactTables.getCompactValueColumn(partitionColumns, isSuper());
     }
 
-    public MaterializedViews getMaterializedViews()
+    public Views getViews()
     {
-        return materializedViews;
+        return views;
     }
 
-    public boolean hasMaterializedViews()
+    public boolean hasViews()
     {
-        return !materializedViews.isEmpty();
+        return !views.isEmpty();
     }
 
     public Indexes getIndexes()
@@ -329,7 +329,7 @@ public final class CFMetaData
                                     boolean isCompound,
                                     boolean isSuper,
                                     boolean isCounter,
-                                    boolean isMaterializedView,
+                                    boolean isView,
                                     List<ColumnDefinition> columns,
                                     IPartitioner partitioner)
     {
@@ -363,7 +363,7 @@ public final class CFMetaData
                               isCounter,
                               isDense,
                               isCompound,
-                              isMaterializedView,
+                              isView,
                               partitions,
                               clusterings,
                               builder.build(),
@@ -464,7 +464,7 @@ public final class CFMetaData
                                        isCounter(),
                                        isDense(),
                                        isCompound(),
-                                       isMaterializedView(),
+                                       isView(),
                                        copy(partitionKeyColumns),
                                        copy(clusteringColumns),
                                        copy(partitionColumns),
@@ -481,7 +481,7 @@ public final class CFMetaData
                                        isCounter,
                                        isDense,
                                        isCompound,
-                                       isMaterializedView,
+                                       isView,
                                        copy(partitionKeyColumns),
                                        copy(clusteringColumns),
                                        copy(partitionColumns),
@@ -511,7 +511,7 @@ public final class CFMetaData
         return newCFMD.params(oldCFMD.params)
                       .droppedColumns(new HashMap<>(oldCFMD.droppedColumns))
                       .triggers(oldCFMD.triggers)
-                      .materializedViews(oldCFMD.materializedViews)
+                      .views(oldCFMD.views)
                       .indexes(oldCFMD.indexes);
     }
 
@@ -702,7 +702,7 @@ public final class CFMetaData
             && Objects.equal(columnMetadata, other.columnMetadata)
             && Objects.equal(droppedColumns, other.droppedColumns)
             && Objects.equal(triggers, other.triggers)
-            && Objects.equal(materializedViews, other.materializedViews)
+            && Objects.equal(views, other.views)
             && Objects.equal(indexes, other.indexes);
     }
 
@@ -720,7 +720,7 @@ public final class CFMetaData
             .append(columnMetadata)
             .append(droppedColumns)
             .append(triggers)
-            .append(materializedViews)
+            .append(views)
             .append(indexes)
             .toHashCode();
     }
@@ -766,7 +766,7 @@ public final class CFMetaData
             droppedColumns = cfm.droppedColumns;
 
         triggers = cfm.triggers;
-        materializedViews = cfm.materializedViews;
+        views = cfm.views;
         indexes = cfm.indexes;
 
         logger.debug("application result is {}", this);
@@ -1070,9 +1070,9 @@ public final class CFMetaData
         return isCompound;
     }
 
-    public boolean isMaterializedView()
+    public boolean isView()
     {
-        return isMaterializedView;
+        return isView;
     }
 
     public Serializers serializers()
@@ -1121,7 +1121,7 @@ public final class CFMetaData
             .append("columnMetadata", columnMetadata.values())
             .append("droppedColumns", droppedColumns)
             .append("triggers", triggers)
-            .append("materializedViews", materializedViews)
+            .append("views", views)
             .append("indexes", indexes)
             .toString();
     }
@@ -1134,7 +1134,7 @@ public final class CFMetaData
         private final boolean isCompound;
         private final boolean isSuper;
         private final boolean isCounter;
-        private final boolean isMaterializedView;
+        private final boolean isView;
         private IPartitioner partitioner;
 
         private UUID tableId;
@@ -1144,7 +1144,7 @@ public final class CFMetaData
         private final List<Pair<ColumnIdentifier, AbstractType>> staticColumns = new ArrayList<>();
         private final List<Pair<ColumnIdentifier, AbstractType>> regularColumns = new ArrayList<>();
 
-        private Builder(String keyspace, String table, boolean isDense, boolean isCompound, boolean isSuper, boolean isCounter, boolean isMaterializedView)
+        private Builder(String keyspace, String table, boolean isDense, boolean isCompound, boolean isSuper, boolean isCounter, boolean isView)
         {
             this.keyspace = keyspace;
             this.table = table;
@@ -1152,7 +1152,7 @@ public final class CFMetaData
             this.isCompound = isCompound;
             this.isSuper = isSuper;
             this.isCounter = isCounter;
-            this.isMaterializedView = isMaterializedView;
+            this.isView = isView;
             this.partitioner = DatabaseDescriptor.getPartitioner();
         }
 
@@ -1302,7 +1302,7 @@ public final class CFMetaData
                                   isCounter,
                                   isDense,
                                   isCompound,
-                                  isMaterializedView,
+                                  isView,
                                   partitions,
                                   clusterings,
                                   builder.build(),

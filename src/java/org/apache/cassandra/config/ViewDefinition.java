@@ -25,7 +25,7 @@ import java.util.Set;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 
-public class MaterializedViewDefinition
+public class ViewDefinition
 {
     public final String baseCfName;
     public final String viewName;
@@ -35,7 +35,7 @@ public class MaterializedViewDefinition
     public final Set<ColumnIdentifier> included;
     public final boolean includeAll;
 
-    public MaterializedViewDefinition(MaterializedViewDefinition def)
+    public ViewDefinition(ViewDefinition def)
     {
         this(def.baseCfName, def.viewName, new ArrayList<>(def.partitionColumns), new ArrayList<>(def.clusteringColumns), new HashSet<>(def.included));
     }
@@ -47,7 +47,7 @@ public class MaterializedViewDefinition
      * @param clusteringColumns List of all of the clustering columns, in the order they are defined
      * @param included
      */
-    public MaterializedViewDefinition(String baseCfName, String viewName, List<ColumnIdentifier> partitionColumns, List<ColumnIdentifier> clusteringColumns, Set<ColumnIdentifier> included)
+    public ViewDefinition(String baseCfName, String viewName, List<ColumnIdentifier> partitionColumns, List<ColumnIdentifier> clusteringColumns, Set<ColumnIdentifier> included)
     {
         assert partitionColumns != null && !partitionColumns.isEmpty();
         assert included != null;

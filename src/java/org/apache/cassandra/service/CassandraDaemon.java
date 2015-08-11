@@ -304,7 +304,7 @@ public class CassandraDaemon
                 {
                     for (ColumnFamilyStore cf: keyspace.getColumnFamilyStores())
                     {
-                        cf.materializedViewManager.buildAllViews();
+                        cf.viewManager.buildAllViews();
                     }
                 }
             }

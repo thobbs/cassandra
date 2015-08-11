@@ -32,7 +32,7 @@ import com.google.common.collect.Iterables;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.MaterializedViewDefinition;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.CFProperties;
@@ -65,23 +65,23 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.pager.QueryPager;
 
 /**
- * A Materialized View copies data from a base table into a view table which can be queried independently from the
- * base. Every update which targets the base table must be fed through the {@link MaterializedViewManager} to ensure
+ * A View copies data from a base table into a view table which can be queried independently from the
+ * base. Every update which targets the base table must be fed through the {@link ViewManager} to ensure
  * that if a view needs to be updated, the updates are properly created and fed into the view.
  *
  * This class does the job of translating the base row to the view row.
  *
  * It handles reading existing state and figuring out what tombstones need to be generated.
  *
- * createMutations below is the "main method"
+ * {@link View#createMutations(ByteBuffer, AbstractThreadUnsafePartition, boolean)} is the "main method"
  *
  */
-public class MaterializedView
+public class View
 {
     /**
      * The columns should all be updated together, so we use this object as group.
      */
-    private static class MVColumns
+    private static class Columns
     {
         //These are the base column definitions in terms of the *views* partitioning.
         //Meaning we can see (for example) the partition key of the view contains a clustering key
@@ -90,7 +90,7 @@ public class MaterializedView
         public final List<ColumnDefinition> primaryKeyDefs;
         public final List<ColumnDefinition> baseComplexColumns;
 
-        private MVColumns(List<ColumnDefinition> partitionDefs, List<ColumnDefinition> primaryKeyDefs, List<ColumnDefinition> baseComplexColumns)
+        private Columns(List<ColumnDefinition> partitionDefs, List<ColumnDefinition> primaryKeyDefs, List<ColumnDefinition> baseComplexColumns)
         {
             this.partitionDefs = partitionDefs;
             this.primaryKeyDefs = primaryKeyDefs;
@@ -103,14 +103,14 @@ public class MaterializedView
     private final ColumnFamilyStore baseCfs;
     private ColumnFamilyStore _viewCfs = null;
 
-    private MVColumns columns;
+    private Columns columns;
 
     private final boolean viewHasAllPrimaryKeys;
     private final boolean includeAll;
-    private MaterializedViewBuilder builder;
+    private ViewBuilder builder;
 
-    public MaterializedView(MaterializedViewDefinition definition,
-                            ColumnFamilyStore baseCfs)
+    public View(ViewDefinition definition,
+                ColumnFamilyStore baseCfs)
     {
         this.baseCfs = baseCfs;
 
@@ -170,7 +170,7 @@ public class MaterializedView
      * @return true if the view contains only columns which are part of the base's primary key; false if there is at
      *         least one column which is not.
      */
-    public boolean updateDefinition(MaterializedViewDefinition definition)
+    public boolean updateDefinition(ViewDefinition definition)
     {
         List<ColumnDefinition> partitionDefs = new ArrayList<>(definition.partitionColumns.size());
         List<ColumnDefinition> primaryKeyDefs = new ArrayList<>(definition.partitionColumns.size()
@@ -190,7 +190,7 @@ public class MaterializedView
             }
         }
 
-        this.columns = new MVColumns(partitionDefs, primaryKeyDefs, baseComplexColumns);
+        this.columns = new Columns(partitionDefs, primaryKeyDefs, baseComplexColumns);
 
         return partitionAllPrimaryKeyColumns && clusteringAllPrimaryKeyColumns;
     }
@@ -214,7 +214,7 @@ public class MaterializedView
         if (includeAll)
             return true;
 
-        // If there are range tombstones, tombstones will also need to be generated for the materialized view
+        // If there are range tombstones, tombstones will also need to be generated for the view
         // This requires a query of the base rows and generating tombstones for all of those values
         if (!partition.deletionInfo().isLive())
             return true;
@@ -348,7 +348,7 @@ public class MaterializedView
     }
 
     /**
-     * @return Mutation which is the transformed base table mutation for the materialized view.
+     * @return Mutation which is the transformed base table mutation for the view.
      */
     private PartitionUpdate createUpdatesForInserts(TemporalRow temporalRow)
     {
@@ -671,8 +671,8 @@ public class MaterializedView
             this.builder = null;
         }
 
-        this.builder = new MaterializedViewBuilder(baseCfs, this);
-        CompactionManager.instance.submitMaterializedViewBuilder(builder);
+        this.builder = new ViewBuilder(baseCfs, this);
+        CompactionManager.instance.submitViewBuilder(builder);
     }
 
     @Nullable
@@ -683,7 +683,7 @@ public class MaterializedView
             return null;
 
         for (CFMetaData cfm : ksm.tables)
-            if (cfm.getMaterializedViews().get(view).isPresent())
+            if (cfm.getViews().get(view).isPresent())
                 return cfm;
 
         return null;
@@ -692,7 +692,7 @@ public class MaterializedView
     /**
      * @return CFMetaData which represents the definition given
      */
-    public static CFMetaData getCFMetaData(MaterializedViewDefinition definition,
+    public static CFMetaData getCFMetaData(ViewDefinition definition,
                                            CFMetaData baseCf,
                                            CFProperties properties)
     {

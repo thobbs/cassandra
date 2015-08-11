@@ -40,7 +40,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.view.MaterializedViewManager;
+import org.apache.cassandra.db.view.ViewManager;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -81,7 +81,7 @@ public class Keyspace
     private volatile KeyspaceMetadata metadata;
 
     //OpOrder is defined globally since we need to order writes across
-    //Keyspaces in the case of MaterializedViews (batchlog of MV mutations)
+    //Keyspaces in the case of Views (batchlog of view mutations)
     public static final OpOrder writeOrder = new OpOrder();
 
     /* ColumnFamilyStore per column family */
@@ -418,11 +418,11 @@ public class Keyspace
             throw new RuntimeException("Testing write failures");
 
         Lock lock = null;
-        boolean requiresViewUpdate = updateIndexes && MaterializedViewManager.updatesAffectView(Collections.singleton(mutation), false);
+        boolean requiresViewUpdate = updateIndexes && ViewManager.updatesAffectView(Collections.singleton(mutation), false);
 
         if (requiresViewUpdate)
         {
-            lock = MaterializedViewManager.acquireLockFor(mutation.key().getKey());
+            lock = ViewManager.acquireLockFor(mutation.key().getKey());
 
             if (lock == null)
             {
@@ -430,11 +430,11 @@ public class Keyspace
                 {
                     logger.debug("Could not acquire lock for {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()));
                     Tracing.trace("Could not acquire MV lock");
-                    throw new WriteTimeoutException(WriteType.MATERIALIZED_VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
+                    throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
                 }
                 else
                 {
-                    //This MV update can't happen right now. so rather than keep this thread busy
+                    //This view update can't happen right now. so rather than keep this thread busy
                     // we will re-apply ourself to the queue and try again later
                     StageManager.getStage(Stage.MUTATION).execute(() -> {
                         if (writeCommitLog)
@@ -472,7 +472,7 @@ public class Keyspace
                     try
                     {
                         Tracing.trace("Creating materialized view mutations from base table replica");
-                        cfs.materializedViewManager.pushViewReplicaUpdates(upd, !isClReplay);
+                        cfs.viewManager.pushViewReplicaUpdates(upd, !isClReplay);
                     }
                     catch (Throwable t)
                     {

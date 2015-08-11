@@ -28,12 +28,12 @@ import com.google.common.collect.Iterables;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.MaterializedViewDefinition;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
-import org.apache.cassandra.db.view.MaterializedView;
+import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.AlreadyExistsException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -44,7 +44,7 @@ import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.Event;
 
-public class CreateMaterializedViewStatement extends SchemaAlteringStatement
+public class CreateViewStatement extends SchemaAlteringStatement
 {
     private final CFName baseName;
     private final List<RawSelector> selectClause;
@@ -54,13 +54,13 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
     public final CFProperties properties = new CFProperties();
     private final boolean ifNotExists;
 
-    public CreateMaterializedViewStatement(CFName viewName,
-                                           CFName baseName,
-                                           List<RawSelector> selectClause,
-                                           List<ColumnIdentifier.Raw> notNullWhereClause,
-                                           List<ColumnIdentifier.Raw> partitionKeys,
-                                           List<ColumnIdentifier.Raw> clusteringKeys,
-                                           boolean ifNotExists)
+    public CreateViewStatement(CFName viewName,
+                               CFName baseName,
+                               List<RawSelector> selectClause,
+                               List<ColumnIdentifier.Raw> notNullWhereClause,
+                               List<ColumnIdentifier.Raw> partitionKeys,
+                               List<ColumnIdentifier.Raw> clusteringKeys,
+                               boolean ifNotExists)
     {
         super(viewName);
         this.baseName = baseName;
@@ -109,8 +109,7 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
 
         if (cfm.isCounter())
             throw new InvalidRequestException("Materialized views are not supported on counter tables");
-
-        if (cfm.isMaterializedView())
+        if (cfm.isView())
             throw new InvalidRequestException("Materialized views cannot be created against other materialized views");
 
         if (cfm.params.gcGraceSeconds == 0)
@@ -194,11 +193,10 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
         }
 
         // We need to include all of the primary key colums from the base table in order to make sure that we do not
-        // overwrite values in the materialized view. We cannot support "collapsing" the base table into a smaller
-        // number of rows in the view because if we need to generate a tombstone, we have no way of knowing which value
-        // is currently being used in the view and whether or not to generate a tombstone.
-        // In order to not surprise our users, we require that they include all of the columns. We provide them with
-        // a list of all of the columns left to include.
+        // overwrite values in the view. We cannot support "collapsing" the base table into a smaller number of rows in
+        // the view because if we need to generate a tombstone, we have no way of knowing which value is currently being
+        // used in the view and whether or not to generate a tombstone. In order to not surprise our users, we require
+        // that they include all of the columns. We provide them with a list of all of the columns left to include.
         boolean missingClusteringColumns = false;
         StringBuilder columnNames = new StringBuilder();
         for (ColumnDefinition def : cfm.allColumns())
@@ -225,13 +223,13 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
         if (targetClusteringColumns.isEmpty())
             throw new InvalidRequestException("No columns are defined for Materialized View other than primary key");
 
-        MaterializedViewDefinition definition = new MaterializedViewDefinition(baseName.getColumnFamily(),
+        ViewDefinition definition = new ViewDefinition(baseName.getColumnFamily(),
                                                                                columnFamily(),
                                                                                targetPartitionKeys,
                                                                                targetClusteringColumns,
                                                                                included);
 
-        CFMetaData indexCf = MaterializedView.getCFMetaData(definition, cfm, properties);
+        CFMetaData indexCf = View.getCFMetaData(definition, cfm, properties);
         try
         {
             MigrationManager.announceNewColumnFamily(indexCf, isLocalOnly);
@@ -244,7 +242,7 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
         }
 
         CFMetaData newCfm = cfm.copy();
-        newCfm.materializedViews(newCfm.getMaterializedViews().with(definition));
+        newCfm.views(newCfm.getViews().with(definition));
 
         MigrationManager.announceColumnFamilyUpdate(newCfm, false, isLocalOnly);
 

@@ -32,7 +32,7 @@ import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Striped;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.MaterializedViewDefinition;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Keyspace;
@@ -41,38 +41,34 @@ import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.exceptions.OverloadedException;
-import org.apache.cassandra.exceptions.UnavailableException;
-import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.StorageService;
 
 /**
- * Manages {@link MaterializedView}'s for a single {@link ColumnFamilyStore}. All of the materialized views for that
- * table are created when this manager is initialized.
+ * Manages {@link View}'s for a single {@link ColumnFamilyStore}. All of the views for that table are created when this
+ * manager is initialized.
  *
  * The main purposes of the manager are to provide a single location for updates to be vetted to see whether they update
- * any views {@link MaterializedViewManager#updateAffectsView(PartitionUpdate)}, provide locks to prevent multiple
- * updates from creating incoherent updates in the view {@link MaterializedViewManager#acquireLockFor(ByteBuffer)}, and
+ * any views {@link ViewManager#updateAffectsView(PartitionUpdate)}, provide locks to prevent multiple
+ * updates from creating incoherent updates in the view {@link ViewManager#acquireLockFor(ByteBuffer)}, and
  * to affect change on the view.
  */
-public class MaterializedViewManager
+public class ViewManager
 {
-    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
+    private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentViewWriters() * 1024);
     private static final boolean disableCoordinatorBatchlog = Boolean.getBoolean("cassandra.mv_disable_coordinator_batchlog");
 
-    private final ConcurrentNavigableMap<String, MaterializedView> viewsByName;
+    private final ConcurrentNavigableMap<String, View> viewsByName;
 
     private final ColumnFamilyStore baseCfs;
 
-    public MaterializedViewManager(ColumnFamilyStore baseCfs)
+    public ViewManager(ColumnFamilyStore baseCfs)
     {
         this.viewsByName = new ConcurrentSkipListMap<>();
 
         this.baseCfs = baseCfs;
     }
 
-    public Iterable<MaterializedView> allViews()
+    public Iterable<View> allViews()
     {
         return viewsByName.values();
     }
@@ -80,7 +76,7 @@ public class MaterializedViewManager
     public Iterable<ColumnFamilyStore> allViewsCfs()
     {
         List<ColumnFamilyStore> viewColumnFamilies = new ArrayList<>();
-        for (MaterializedView view : allViews())
+        for (View view : allViews())
             viewColumnFamilies.add(view.getViewCfs());
         return viewColumnFamilies;
     }
@@ -92,14 +88,14 @@ public class MaterializedViewManager
 
     public void invalidate()
     {
-        for (MaterializedView view : allViews())
-            removeMaterializedView(view.name);
+        for (View view : allViews())
+            removeView(view.name);
     }
 
     public void reload()
     {
-        Map<String, MaterializedViewDefinition> newViewsByName = new HashMap<>();
-        for (MaterializedViewDefinition definition : baseCfs.metadata.getMaterializedViews())
+        Map<String, ViewDefinition> newViewsByName = new HashMap<>();
+        for (ViewDefinition definition : baseCfs.metadata.getViews())
         {
             newViewsByName.put(definition.viewName, definition);
         }
@@ -107,16 +103,16 @@ public class MaterializedViewManager
         for (String viewName : viewsByName.keySet())
         {
             if (!newViewsByName.containsKey(viewName))
-                removeMaterializedView(viewName);
+                removeView(viewName);
         }
 
-        for (Map.Entry<String, MaterializedViewDefinition> entry : newViewsByName.entrySet())
+        for (Map.Entry<String, ViewDefinition> entry : newViewsByName.entrySet())
         {
             if (!viewsByName.containsKey(entry.getKey()))
-                addMaterializedView(entry.getValue());
+                addView(entry.getValue());
         }
 
-        for (MaterializedView view : allViews())
+        for (View view : allViews())
         {
             view.build();
             // We provide the new definition from the base metadata
@@ -126,38 +122,37 @@ public class MaterializedViewManager
 
     public void buildAllViews()
     {
-        for (MaterializedView view : allViews())
+        for (View view : allViews())
             view.build();
     }
 
-    public void removeMaterializedView(String name)
+    public void removeView(String name)
     {
-        MaterializedView view = viewsByName.remove(name);
+        View view = viewsByName.remove(name);
 
         if (view == null)
             return;
 
-        SystemKeyspace.setMaterializedViewRemoved(baseCfs.metadata.ksName, view.name);
+        SystemKeyspace.setViewRemoved(baseCfs.metadata.ksName, view.name);
     }
 
-    public void addMaterializedView(MaterializedViewDefinition definition)
+    public void addView(ViewDefinition definition)
     {
-        MaterializedView view = new MaterializedView(definition, baseCfs);
+        View view = new View(definition, baseCfs);
 
         viewsByName.put(definition.viewName, view);
     }
 
     /**
      * Calculates and pushes updates to the views replicas. The replicas are determined by
-     * {@link MaterializedViewUtils#getViewNaturalEndpoint(String, Token, Token)}.
+     * {@link ViewUtils#getViewNaturalEndpoint(String, Token, Token)}.
      */
     public void pushViewReplicaUpdates(PartitionUpdate update, boolean writeCommitLog)
     {
         List<Mutation> mutations = null;
         TemporalRow.Set temporalRows = null;
-        for (Map.Entry<String, MaterializedView> view : viewsByName.entrySet())
+        for (Map.Entry<String, View> view : viewsByName.entrySet())
         {
-
             temporalRows = view.getValue().getTemporalRowSet(update, temporalRows, false);
 
             Collection<Mutation> viewMutations = view.getValue().createMutations(update, temporalRows, false);
@@ -168,15 +163,14 @@ public class MaterializedViewManager
                 mutations.addAll(viewMutations);
             }
         }
+
         if (mutations != null)
-        {
             StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog);
-        }
     }
 
     public boolean updateAffectsView(PartitionUpdate upd)
     {
-        for (MaterializedView view : allViews())
+        for (View view : allViews())
         {
             if (view.updateAffectsView(upd))
                 return true;
@@ -208,7 +202,7 @@ public class MaterializedViewManager
                 if (coordinatorBatchlog && keyspace.getReplicationStrategy().getReplicationFactor() == 1)
                     continue;
 
-                MaterializedViewManager viewManager = keyspace.getColumnFamilyStore(cf.metadata().cfId).materializedViewManager;
+                ViewManager viewManager = keyspace.getColumnFamilyStore(cf.metadata().cfId).viewManager;
                 if (viewManager.updateAffectsView(cf))
                     return true;
             }

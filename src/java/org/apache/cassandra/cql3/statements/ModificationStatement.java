@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.MaterializedViewDefinition;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.Function;
@@ -43,7 +43,6 @@ import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -156,14 +155,14 @@ public abstract class ModificationStatement implements CQLStatement
         return cfm.isCounter();
     }
 
-    public boolean isMaterializedView()
+    public boolean isView()
     {
-        return cfm.isMaterializedView();
+        return cfm.isView();
     }
 
-    public boolean hasMaterializedViews()
+    public boolean hasViews()
     {
-        return !cfm.getMaterializedViews().isEmpty();
+        return !cfm.getViews().isEmpty();
     }
 
     public long getTimestamp(long now, QueryOptions options) throws InvalidRequestException
@@ -189,12 +188,12 @@ public abstract class ModificationStatement implements CQLStatement
         if (hasConditions())
             state.hasColumnFamilyAccess(keyspace(), columnFamily(), Permission.SELECT);
 
-        // MV updates need to get the current state from the table, and might update the materialized views
+        // MV updates need to get the current state from the table, and might update the views
         // Require Permission.SELECT on the base table, and Permission.MODIFY on the views
-        if (hasMaterializedViews())
+        if (hasViews())
         {
             state.hasColumnFamilyAccess(keyspace(), columnFamily(), Permission.SELECT);
-            for (MaterializedViewDefinition view : cfm.getMaterializedViews())
+            for (ViewDefinition view : cfm.getViews())
                 state.hasColumnFamilyAccess(keyspace(), view.viewName, Permission.MODIFY);
         }
 
@@ -213,7 +212,7 @@ public abstract class ModificationStatement implements CQLStatement
         if (isCounter() && attrs.isTimeToLiveSet())
             throw new InvalidRequestException("Cannot provide custom TTL for counter updates");
 
-        if (isMaterializedView())
+        if (isView())
             throw new InvalidRequestException("Cannot directly modify a materialized view");
     }
 

@@ -28,9 +28,9 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.utils.FBUtilities;
 
-public final class MaterializedViewUtils
+public final class ViewUtils
 {
-    private MaterializedViewUtils()
+    private ViewUtils()
     {
     }
 

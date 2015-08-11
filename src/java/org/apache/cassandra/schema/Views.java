@@ -24,17 +24,17 @@ import java.util.Optional;
 
 import com.google.common.collect.ImmutableMap;
 
-import org.apache.cassandra.config.MaterializedViewDefinition;
+import org.apache.cassandra.config.ViewDefinition;
 
 import static com.google.common.collect.Iterables.filter;
 
-public final class MaterializedViews implements Iterable<MaterializedViewDefinition>
+public final class Views implements Iterable<ViewDefinition>
 {
-    private final ImmutableMap<String, MaterializedViewDefinition> materializedViews;
+    private final ImmutableMap<String, ViewDefinition> views;
 
-    private MaterializedViews(Builder builder)
+    private Views(Builder builder)
     {
-        materializedViews = builder.materializedViews.build();
+        views = builder.views.build();
     }
 
     public static Builder builder()
@@ -42,54 +42,54 @@ public final class MaterializedViews implements Iterable<MaterializedViewDefinit
         return new Builder();
     }
 
-    public static MaterializedViews none()
+    public static Views none()
     {
         return builder().build();
     }
 
-    public Iterator<MaterializedViewDefinition> iterator()
+    public Iterator<ViewDefinition> iterator()
     {
-        return materializedViews.values().iterator();
+        return views.values().iterator();
     }
 
     public int size()
     {
-        return materializedViews.size();
+        return views.size();
     }
 
     public boolean isEmpty()
     {
-        return materializedViews.isEmpty();
+        return views.isEmpty();
     }
 
     /**
      * Get the materialized view with the specified name
      *
      * @param name a non-qualified materialized view name
-     * @return an empty {@link Optional} if the materialized view name is not found; a non-empty optional of {@link MaterializedViewDefinition} otherwise
+     * @return an empty {@link Optional} if the materialized view name is not found; a non-empty optional of {@link ViewDefinition} otherwise
      */
-    public Optional<MaterializedViewDefinition> get(String name)
+    public Optional<ViewDefinition> get(String name)
     {
-        return Optional.ofNullable(materializedViews.get(name));
+        return Optional.ofNullable(views.get(name));
     }
 
     /**
      * Create a MaterializedViews instance with the provided materialized view added
      */
-    public MaterializedViews with(MaterializedViewDefinition materializedView)
+    public Views with(ViewDefinition view)
     {
-        if (get(materializedView.viewName).isPresent())
-            throw new IllegalStateException(String.format("Materialized View %s already exists", materializedView.viewName));
+        if (get(view.viewName).isPresent())
+            throw new IllegalStateException(String.format("Materialized View %s already exists", view.viewName));
 
-        return builder().add(this).add(materializedView).build();
+        return builder().add(this).add(view).build();
     }
 
     /**
      * Creates a MaterializedViews instance with the materializedView with the provided name removed
      */
-    public MaterializedViews without(String name)
+    public Views without(String name)
     {
-        MaterializedViewDefinition materializedView =
+        ViewDefinition materializedView =
         get(name).orElseThrow(() -> new IllegalStateException(String.format("Materialized View %s doesn't exists", name)));
 
         return builder().add(filter(this, v -> v != materializedView)).build();
@@ -98,51 +98,51 @@ public final class MaterializedViews implements Iterable<MaterializedViewDefinit
     /**
      * Creates a MaterializedViews instance which contains an updated materialized view
      */
-    public MaterializedViews replace(MaterializedViewDefinition materializedView)
+    public Views replace(ViewDefinition view)
     {
-        return without(materializedView.viewName).with(materializedView);
+        return without(view.viewName).with(view);
     }
 
     @Override
     public boolean equals(Object o)
     {
-        return this == o || (o instanceof MaterializedViews && materializedViews.equals(((MaterializedViews) o).materializedViews));
+        return this == o || (o instanceof Views && views.equals(((Views) o).views));
     }
 
     @Override
     public int hashCode()
     {
-        return materializedViews.hashCode();
+        return views.hashCode();
     }
 
     @Override
     public String toString()
     {
-        return materializedViews.values().toString();
+        return views.values().toString();
     }
 
     public static final class Builder
     {
-        final ImmutableMap.Builder<String, MaterializedViewDefinition> materializedViews = new ImmutableMap.Builder<>();
+        final ImmutableMap.Builder<String, ViewDefinition> views = new ImmutableMap.Builder<>();
 
         private Builder()
         {
         }
 
-        public MaterializedViews build()
+        public Views build()
         {
-            return new MaterializedViews(this);
+            return new Views(this);
         }
 
-        public Builder add(MaterializedViewDefinition materializedView)
+        public Builder add(ViewDefinition view)
         {
-            materializedViews.put(materializedView.viewName, materializedView);
+            views.put(view.viewName, view);
             return this;
         }
 
-        public Builder add(Iterable<MaterializedViewDefinition> materializedViews)
+        public Builder add(Iterable<ViewDefinition> view)
         {
-            materializedViews.forEach(this::add);
+            view.forEach(this::add);
             return this;
         }
     }

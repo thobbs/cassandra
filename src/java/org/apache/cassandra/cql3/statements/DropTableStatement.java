@@ -19,7 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.MaterializedViewDefinition;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -64,12 +64,12 @@ public class DropTableStatement extends SchemaAlteringStatement
             CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), columnFamily());
             if (cfm != null)
             {
-                if (cfm.isMaterializedView())
+                if (cfm.isView())
                     throw new InvalidRequestException("Cannot use DROP TABLE on Materialized View");
 
                 boolean rejectDrop = false;
                 StringBuilder messageBuilder = new StringBuilder();
-                for (MaterializedViewDefinition def : cfm.getMaterializedViews())
+                for (ViewDefinition def : cfm.getViews())
                 {
                     if (rejectDrop)
                         messageBuilder.append(',');
