@@ -36,7 +36,6 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Refs;
@@ -127,7 +126,7 @@ public class StreamReceiveTask extends StreamTask
                 return;
             }
             ColumnFamilyStore cfs = Keyspace.open(kscf.left).getColumnFamilyStore(kscf.right);
-            boolean hasMaterializedViews = cfs.materializedViewManager.allViews().iterator().hasNext();
+            boolean hasViews = cfs.viewManager.allViews().iterator().hasNext();
 
             try
             {
@@ -143,11 +142,11 @@ public class StreamReceiveTask extends StreamTask
 
                 try (Refs<SSTableReader> refs = Refs.ref(readers))
                 {
-                    //We have a special path for Materialized view.
-                    //Since the MV requires cleaning up any pre-existing state, we must put
+                    //We have a special path for views.
+                    //Since the view requires cleaning up any pre-existing state, we must put
                     //all partitions through the same write path as normal mutations.
-                    //This also ensures any 2i's are also updated
-                    if (hasMaterializedViews)
+                    //This also ensures any 2is are also updated
+                    if (hasViews)
                     {
                         for (SSTableReader reader : readers)
                         {
@@ -183,7 +182,7 @@ public class StreamReceiveTask extends StreamTask
                 {
                     //We don't keep the streamed sstables since we've applied them manually
                     //So we abort the txn and delete the streamed sstables
-                    if (hasMaterializedViews)
+                    if (hasViews)
                     {
                         cfs.forceBlockingFlush();
                         task.txn.abort();

@@ -272,8 +272,8 @@ public class ThriftConversion
                                       defaultValidator);
             }
 
-            // We do not allow Thrift materialized views, so we always set it to false
-            boolean isMaterializedView = false;
+            // We do not allow Thrift views, so we always set it to false
+            boolean isView = false;
 
             CFMetaData newCFMD = CFMetaData.create(cf_def.keyspace,
                                                    cf_def.name,
@@ -282,7 +282,7 @@ public class ThriftConversion
                                                    isCompound,
                                                    isSuper,
                                                    isCounter,
-                                                   isMaterializedView,
+                                                   isView,
                                                    defs,
                                                    DatabaseDescriptor.getPartitioner());
 
