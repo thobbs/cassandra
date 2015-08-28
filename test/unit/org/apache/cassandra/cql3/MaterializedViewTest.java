@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -490,6 +491,90 @@ public class MaterializedViewTest extends CQLTester
         assertRows(execute("SELECT k, bigintval from mv1_asciival WHERE asciival = ?", "ascii text"));
         assertRows(execute("SELECT k, bigintval from mv2_k WHERE asciival = ? and k = ?", "ascii text", 0));
         assertRows(execute("SELECT asciival from mv3_bigintval where bigintval = ? AND k = ?", 1L, 0));
+    }
+
+    @Test
+    public void testMultipleNonPKColumns() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                "a int, " +
+                "b int, " +
+                "c int, " +
+                "d int, " +
+                "e int, " +
+                "f int, " +
+                "PRIMARY KEY ((a, b), c))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        try
+        {
+            // we only accept multiple non-PK columns in the MV PK if the partition key is shared
+            createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s " +
+                    "WHERE a IS NOT NULL " +
+                    "AND b IS NOT NULL " +
+                    "AND c IS NOT NULL " +
+                    "AND d IS NOT NULL " +
+                    "AND e IS NOT NULL " +
+                    "PRIMARY KEY ((b, a), d, e, c)");
+            Assert.fail("Expected MV creation to fail");
+        }
+        catch (InvalidQueryException exc) {}
+
+        // with a shared partition key it should work
+        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s " +
+                    "WHERE a IS NOT NULL " +
+                    "AND b IS NOT NULL " +
+                    "AND c IS NOT NULL " +
+                    "AND d IS NOT NULL " +
+                    "AND e IS NOT NULL " +
+                    "PRIMARY KEY ((a, b), d, e, c)");
+
+        updateMV("INSERT INTO %s (a, b, c, d, e, f) VALUES (?, ?, ?, ?, ?, ?)", 0, 0, 0, 0, 0, 0);
+        updateMV("INSERT INTO %s (a, b, c, d, e, f) VALUES (?, ?, ?, ?, ?, ?)", 0, 0, 1, 0, 0, 0);
+
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 0, 0),
+                row(0, 0, 0, 0, 1, 0)
+        );
+
+        // update a regular base column that is in the MV clustering key
+        updateMV("INSERT INTO %s (a, b, c, d, e, f) VALUES (?, ?, ?, ?, ?, ?)", 0, 0, 0, 4, 0, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 1, 0),
+                row(0, 0, 4, 0, 0, 0)
+        );
+
+        // update the other regular base column that is in the MV clustering key
+        updateMV("INSERT INTO %s (a, b, c, d, e, f) VALUES (?, ?, ?, ?, ?, ?)", 0, 0, 0, 4, 2, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 1, 0),
+                row(0, 0, 4, 2, 0, 0)
+        );
+
+        // do the same thing again, but with UPDATE statements
+        updateMV("UPDATE %s SET e = ? WHERE a = ? AND b = ? AND c = ?", 0, 0, 0, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 1, 0),
+                row(0, 0, 4, 0, 0, 0)
+        );
+
+        updateMV("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 0, 0, 0, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 0, 0),
+                row(0, 0, 0, 0, 1, 0)
+        );
+
+        // delete a single row
+        updateMV("DELETE FROM %s WHERE a = ? AND b = ? AND c = ?", 0, 0, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 1, 0)
+        );
+
+        // delete the entire partition
+        updateMV("DELETE FROM %s WHERE a = ? AND b = ?", 0, 0);
+        assertEmpty(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0));
     }
 
     @Test

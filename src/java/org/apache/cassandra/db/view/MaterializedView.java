@@ -28,8 +28,6 @@ import java.util.Set;
 
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterables;
-
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.MaterializedViewDefinition;
@@ -246,14 +244,9 @@ public class MaterializedView
      */
     private Clustering viewClustering(TemporalRow temporalRow, TemporalRow.Resolver resolver)
     {
-        CFMetaData viewCfm = getViewCfs().metadata;
-        int numViewClustering = viewCfm.clusteringColumns().size();
         CBuilder clustering = CBuilder.create(getViewCfs().getComparator());
-        for (int i = 0; i < numViewClustering; i++)
-        {
-            ColumnDefinition definition = viewCfm.clusteringColumns().get(i);
-            clustering.add(temporalRow.clusteringValue(definition, resolver));
-        }
+        for (ColumnDefinition viewClusteringColumn : getViewCfs().metadata.clusteringColumns())
+            clustering.add(temporalRow.clusteringValue(viewClusteringColumn, resolver));
 
         return clustering.build();
     }
@@ -699,15 +692,13 @@ public class MaterializedView
         CFMetaData.Builder viewBuilder = CFMetaData.Builder
                                          .createView(baseCf.ksName, definition.viewName);
 
-        ColumnDefinition nonPkTarget = null;
+        Set<ColumnDefinition> mvPrimaryKeyColumns = new HashSet<>();
 
         for (ColumnIdentifier targetIdentifier : definition.partitionColumns)
         {
             ColumnDefinition target = baseCf.getColumnDefinition(targetIdentifier);
-            if (!target.isPartitionKey())
-                nonPkTarget = target;
-
             viewBuilder.addPartitionKey(target.name, properties.getReversableType(targetIdentifier, target.type));
+            mvPrimaryKeyColumns.add(target);
         }
 
         Collection<ColumnDefinition> included = new ArrayList<>();
@@ -724,24 +715,13 @@ public class MaterializedView
         {
             ColumnDefinition column = baseCf.getColumnDefinition(ident);
             viewBuilder.addClusteringColumn(ident, properties.getReversableType(ident, column.type));
+            mvPrimaryKeyColumns.add(column);
         }
 
         for (ColumnDefinition column : baseCf.partitionColumns().regulars)
         {
-            if (column != nonPkTarget && (includeAll || included.contains(column)))
-            {
+            if (!mvPrimaryKeyColumns.contains(column) && (includeAll || included.contains(column)))
                 viewBuilder.addRegularColumn(column.name, column.type);
-            }
-        }
-
-        //Add any extra clustering columns
-        for (ColumnDefinition column : Iterables.concat(baseCf.partitionKeyColumns(), baseCf.clusteringColumns()))
-        {
-            if ( (!definition.partitionColumns.contains(column.name) && !definition.clusteringColumns.contains(column.name)) &&
-                 (includeAll || included.contains(column)) )
-            {
-                viewBuilder.addRegularColumn(column.name, column.type);
-            }
         }
 
         return viewBuilder.build().params(properties.properties.asNewTableParams());

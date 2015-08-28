@@ -184,14 +184,20 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
         // This is only used as an intermediate state; this is to catch whether multiple non-PK columns are used
         boolean hasNonPKColumn = false;
         for (ColumnIdentifier.Raw raw : partitionKeys)
+            hasNonPKColumn = addPartitionKeyColumn(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetPartitionKeys, notNullColumns);
+
+        boolean hasMatchingPartitionKey = cfm.partitionKeyColumns().size() == targetPartitionKeys.size();
+        if (hasMatchingPartitionKey)
         {
-            hasNonPKColumn = getColumnIdentifier(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetPartitionKeys, notNullColumns);
+            for (int i = 0; i < targetPartitionKeys.size(); i++)
+                hasMatchingPartitionKey &= cfm.partitionKeyColumns().get(i).name.equals(targetPartitionKeys.get(i));
         }
 
+        if (hasMatchingPartitionKey)
+            assert !hasNonPKColumn;
+
         for (ColumnIdentifier.Raw raw : clusteringKeys)
-        {
-            hasNonPKColumn = getColumnIdentifier(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetClusteringColumns, notNullColumns);
-        }
+            hasNonPKColumn = addClusteringColumn(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetClusteringColumns, notNullColumns, hasMatchingPartitionKey);
 
         // We need to include all of the primary key colums from the base table in order to make sure that we do not
         // overwrite values in the materialized view. We cannot support "collapsing" the base table into a smaller
@@ -251,24 +257,44 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
         return true;
     }
 
-    private static boolean getColumnIdentifier(CFMetaData cfm,
-                                               Set<ColumnIdentifier> basePK,
-                                               boolean hasNonPKColumn,
-                                               ColumnIdentifier.Raw raw,
-                                               List<ColumnIdentifier> columns,
-                                               Set<ColumnIdentifier> allowedPKColumns)
+    private static boolean addPartitionKeyColumn(CFMetaData cfm,
+                                                 Set<ColumnIdentifier> basePK,
+                                                 boolean hasNonPKColumn,
+                                                 ColumnIdentifier.Raw raw,
+                                                 List<ColumnIdentifier> columns,
+                                                 Set<ColumnIdentifier> allowedPKColumns)
     {
         ColumnIdentifier identifier = raw.prepare(cfm);
 
         boolean isPk = basePK.contains(identifier);
         if (!isPk && hasNonPKColumn)
-        {
             throw new InvalidRequestException(String.format("Cannot include more than one non-primary key column '%s' in materialized view partition key", identifier));
-        }
         if (!allowedPKColumns.contains(identifier))
+            throw new InvalidRequestException(String.format("Partition key column '%s' is required to be filtered by 'IS NOT NULL'", identifier));
+
+        columns.add(identifier);
+        return !isPk;
+    }
+
+    private static boolean addClusteringColumn(CFMetaData cfm,
+                                               Set<ColumnIdentifier> basePK,
+                                               boolean hasNonPKColumn,
+                                               ColumnIdentifier.Raw raw,
+                                               List<ColumnIdentifier> columns,
+                                               Set<ColumnIdentifier> allowedPKColumns,
+                                               boolean hasMatchingPartitionKey)
+    {
+        ColumnIdentifier identifier = raw.prepare(cfm);
+
+        boolean isPk = basePK.contains(identifier);
+        if (!isPk && hasNonPKColumn && !hasMatchingPartitionKey)
         {
-            throw new InvalidRequestException(String.format("Primary key column '%s' is required to be filtered by 'IS NOT NULL'", identifier));
+            throw new InvalidRequestException(String.format("Cannot include more than one non-primary key column '%s' in the " +
+                                                            "materialized view primary key unless the partition keys match", identifier));
         }
+
+        if (!allowedPKColumns.contains(identifier))
+            throw new InvalidRequestException(String.format("Primary key column '%s' is required to be filtered by 'IS NOT NULL'", identifier));
 
         columns.add(identifier);
         return !isPk;
