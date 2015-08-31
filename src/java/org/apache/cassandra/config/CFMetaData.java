@@ -62,7 +62,7 @@ public final class CFMetaData
 {
     public enum Flag
     {
-        SUPER, COUNTER, DENSE, COMPOUND, VIEW
+        SUPER, COUNTER, DENSE, COMPOUND
     }
 
     private static final Logger logger = LoggerFactory.getLogger(CFMetaData.class);
@@ -95,7 +95,6 @@ public final class CFMetaData
     private volatile Map<ByteBuffer, DroppedColumn> droppedColumns = new HashMap<>();
     private volatile Triggers triggers = Triggers.none();
     private volatile Indexes indexes = Indexes.none();
-    private volatile Views views = Views.none();
 
     /*
      * All CQL3 columns definition are stored in the columnMetadata map.
@@ -219,12 +218,6 @@ public final class CFMetaData
         return this;
     }
 
-    public CFMetaData views(Views prop)
-    {
-        views = prop;
-        return this;
-    }
-
     public CFMetaData indexes(Indexes indexes)
     {
         this.indexes = indexes;
@@ -263,8 +256,6 @@ public final class CFMetaData
             flags.add(Flag.DENSE);
         if (isCompound)
             flags.add(Flag.COMPOUND);
-        if (isView)
-            flags.add(Flag.VIEW);
         this.flags = Sets.immutableEnumSet(flags);
 
         isIndex = cfName.contains(".");
@@ -305,16 +296,6 @@ public final class CFMetaData
 
         if (isCompactTable())
             this.compactValueColumn = CompactTables.getCompactValueColumn(partitionColumns, isSuper());
-    }
-
-    public Views getViews()
-    {
-        return views;
-    }
-
-    public boolean hasViews()
-    {
-        return !views.isEmpty();
     }
 
     public Indexes getIndexes()
@@ -511,7 +492,6 @@ public final class CFMetaData
         return newCFMD.params(oldCFMD.params)
                       .droppedColumns(new HashMap<>(oldCFMD.droppedColumns))
                       .triggers(oldCFMD.triggers)
-                      .views(oldCFMD.views)
                       .indexes(oldCFMD.indexes);
     }
 
@@ -702,7 +682,6 @@ public final class CFMetaData
             && Objects.equal(columnMetadata, other.columnMetadata)
             && Objects.equal(droppedColumns, other.droppedColumns)
             && Objects.equal(triggers, other.triggers)
-            && Objects.equal(views, other.views)
             && Objects.equal(indexes, other.indexes);
     }
 
@@ -720,7 +699,6 @@ public final class CFMetaData
             .append(columnMetadata)
             .append(droppedColumns)
             .append(triggers)
-            .append(views)
             .append(indexes)
             .toHashCode();
     }
@@ -731,7 +709,8 @@ public final class CFMetaData
      */
     public boolean reload()
     {
-        return apply(SchemaKeyspace.createTableFromName(ksName, cfName));
+        return apply(isView ? SchemaKeyspace.createViewFromName(ksName, cfName).metadata
+                            : SchemaKeyspace.createTableFromName(ksName, cfName));
     }
 
     /**
@@ -766,7 +745,6 @@ public final class CFMetaData
             droppedColumns = cfm.droppedColumns;
 
         triggers = cfm.triggers;
-        views = cfm.views;
         indexes = cfm.indexes;
 
         logger.debug("application result is {}", this);
@@ -1121,7 +1099,6 @@ public final class CFMetaData
             .append("columnMetadata", columnMetadata.values())
             .append("droppedColumns", droppedColumns)
             .append("triggers", triggers)
-            .append("views", views)
             .append("indexes", indexes)
             .toString();
     }

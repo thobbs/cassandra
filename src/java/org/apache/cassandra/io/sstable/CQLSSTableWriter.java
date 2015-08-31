@@ -386,7 +386,7 @@ public class CQLSSTableWriter implements Closeable
         private static void addTableToKeyspace(KeyspaceMetadata keyspace, CFMetaData table)
         {
             Schema.instance.load(table);
-            Schema.instance.setKeyspaceMetadata(keyspace.withSwapped(keyspace.tables.with(table)));
+            Schema.instance.setKeyspaceMetadata(keyspace.withSwapped(keyspace.derived.with(table)));
         }
 
         /**

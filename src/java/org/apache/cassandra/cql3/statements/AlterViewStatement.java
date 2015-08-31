@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -59,23 +61,24 @@ public class AlterViewStatement extends SchemaAlteringStatement
         if (!meta.isView())
             throw new InvalidRequestException("Cannot use ALTER MATERIALIZED VIEW on Table");
 
-        CFMetaData cfm = meta.copy();
+        ViewDefinition view = Schema.instance.getView(keyspace(), columnFamily());
+        ViewDefinition viewCopy = view.copy();
 
         if (attrs == null)
             throw new InvalidRequestException("ALTER MATERIALIZED VIEW WITH invoked, but no parameters found");
 
         attrs.validate();
 
-        TableParams params = attrs.asAlteredTableParams(cfm.params);
+        TableParams params = attrs.asAlteredTableParams(view.metadata.params);
         if (params.gcGraceSeconds == 0)
         {
             throw new InvalidRequestException("Cannot alter gc_grace_seconds of a materialized view to 0, since this " +
                                               "value is used to TTL undelivered updates. Setting gc_grace_seconds too " +
                                               "low might cause undelivered updates to expire before being replayed.");
         }
-        cfm.params(params);
+        view.metadata.params(params);
 
-        MigrationManager.announceColumnFamilyUpdate(cfm, false, isLocalOnly);
+        MigrationManager.announceViewUpdate(viewCopy, isLocalOnly);
         return true;
     }
 

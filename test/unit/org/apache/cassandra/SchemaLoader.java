@@ -309,7 +309,7 @@ public class SchemaLoader
     private static void useCompression(List<KeyspaceMetadata> schema)
     {
         for (KeyspaceMetadata ksm : schema)
-            for (CFMetaData cfm : ksm.tables)
+            for (CFMetaData cfm : ksm.derived)
                 cfm.compression(CompressionParams.snappy());
     }
 

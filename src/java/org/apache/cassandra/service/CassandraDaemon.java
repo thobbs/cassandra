@@ -295,22 +295,19 @@ public class CassandraDaemon
             }
         }
 
-        Runnable indexRebuild = new Runnable()
+        Runnable viewRebuild = new Runnable()
         {
             @Override
             public void run()
             {
                 for (Keyspace keyspace : Keyspace.all())
                 {
-                    for (ColumnFamilyStore cf: keyspace.getColumnFamilyStores())
-                    {
-                        cf.viewManager.buildAllViews();
-                    }
+                    keyspace.viewManager.buildAllViews();
                 }
             }
         };
 
-        ScheduledExecutors.optionalTasks.schedule(indexRebuild, StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
+        ScheduledExecutors.optionalTasks.schedule(viewRebuild, StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
 
 
         SystemKeyspace.finishStartup();

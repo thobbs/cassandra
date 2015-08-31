@@ -47,6 +47,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.*;
@@ -2017,7 +2018,7 @@ public class CassandraServer implements Cassandra.Iface
 
             if (oldCfm.isView())
                 throw new InvalidRequestException("Cannot modify Materialized View table " + oldCfm.cfName + " as it may break the schema. You should use cqlsh to modify Materialized View tables instead.");
-            if (!oldCfm.getViews().isEmpty())
+            if (!Iterables.isEmpty(View.findAll(cf_def.keyspace, cf_def.name)))
                 throw new InvalidRequestException("Cannot modify table with Materialized View " + oldCfm.cfName + " as it may break the schema. You should use cqlsh to modify tables with Materialized Views instead.");
 
             if (!oldCfm.isThriftCompatible())

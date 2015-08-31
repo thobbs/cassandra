@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.locks.Lock;
@@ -48,99 +49,78 @@ import org.apache.cassandra.service.StorageProxy;
  * manager is initialized.
  *
  * The main purposes of the manager are to provide a single location for updates to be vetted to see whether they update
- * any views {@link ViewManager#updateAffectsView(PartitionUpdate)}, provide locks to prevent multiple
+ * any views {@link ViewManager#updatesAffectView(Collection, boolean)}, provide locks to prevent multiple
  * updates from creating incoherent updates in the view {@link ViewManager#acquireLockFor(ByteBuffer)}, and
  * to affect change on the view.
  */
 public class ViewManager
 {
+    public class ForStore
+    {
+        private final ConcurrentNavigableMap<String, View> viewsByName;
+
+        public ForStore()
+        {
+            this.viewsByName = new ConcurrentSkipListMap<>();
+        }
+
+        public Iterable<View> allViews()
+        {
+            return viewsByName.values();
+        }
+
+        public Iterable<ColumnFamilyStore> allViewsCfs()
+        {
+            List<ColumnFamilyStore> viewColumnFamilies = new ArrayList<>();
+            for (View view : allViews())
+                viewColumnFamilies.add(keyspace.getColumnFamilyStore(view.getDefinition().viewName));
+            return viewColumnFamilies;
+        }
+
+        public void forceBlockingFlush()
+        {
+            for (ColumnFamilyStore viewCfs : allViewsCfs())
+                viewCfs.forceBlockingFlush();
+        }
+
+        public void dumpMemtables()
+        {
+            for (ColumnFamilyStore viewCfs : allViewsCfs())
+                viewCfs.dumpMemtable();
+        }
+
+        public void truncateBlocking(long truncatedAt)
+        {
+            for (ColumnFamilyStore viewCfs : allViewsCfs())
+            {
+                ReplayPosition replayAfter = viewCfs.discardSSTables(truncatedAt);
+                SystemKeyspace.saveTruncationRecord(viewCfs, truncatedAt, replayAfter);
+            }
+        }
+
+        public void addView(View view)
+        {
+            viewsByName.put(view.name, view);
+        }
+
+        public void removeView(String name)
+        {
+            viewsByName.remove(name);
+        }
+    }
+
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentViewWriters() * 1024);
     private static final boolean disableCoordinatorBatchlog = Boolean.getBoolean("cassandra.mv_disable_coordinator_batchlog");
 
+    private final ConcurrentNavigableMap<UUID, ForStore> viewManagersByStore;
     private final ConcurrentNavigableMap<String, View> viewsByName;
+    private final Keyspace keyspace;
 
-    private final ColumnFamilyStore baseCfs;
-
-    public ViewManager(ColumnFamilyStore baseCfs)
+    public ViewManager(Keyspace keyspace)
     {
+        this.viewManagersByStore = new ConcurrentSkipListMap<>();
         this.viewsByName = new ConcurrentSkipListMap<>();
-
-        this.baseCfs = baseCfs;
-    }
-
-    public Iterable<View> allViews()
-    {
-        return viewsByName.values();
-    }
-
-    public Iterable<ColumnFamilyStore> allViewsCfs()
-    {
-        List<ColumnFamilyStore> viewColumnFamilies = new ArrayList<>();
-        for (View view : allViews())
-            viewColumnFamilies.add(view.getViewCfs());
-        return viewColumnFamilies;
-    }
-
-    public void init()
-    {
-        reload();
-    }
-
-    public void invalidate()
-    {
-        for (View view : allViews())
-            removeView(view.name);
-    }
-
-    public void reload()
-    {
-        Map<String, ViewDefinition> newViewsByName = new HashMap<>();
-        for (ViewDefinition definition : baseCfs.metadata.getViews())
-        {
-            newViewsByName.put(definition.viewName, definition);
-        }
-
-        for (String viewName : viewsByName.keySet())
-        {
-            if (!newViewsByName.containsKey(viewName))
-                removeView(viewName);
-        }
-
-        for (Map.Entry<String, ViewDefinition> entry : newViewsByName.entrySet())
-        {
-            if (!viewsByName.containsKey(entry.getKey()))
-                addView(entry.getValue());
-        }
-
-        for (View view : allViews())
-        {
-            view.build();
-            // We provide the new definition from the base metadata
-            view.updateDefinition(newViewsByName.get(view.name));
-        }
-    }
-
-    public void buildAllViews()
-    {
-        for (View view : allViews())
-            view.build();
-    }
-
-    public void removeView(String name)
-    {
-        View view = viewsByName.remove(name);
-
-        if (view == null)
-            return;
-
-        SystemKeyspace.setViewRemoved(baseCfs.metadata.ksName, view.name);
-    }
-
-    public void addView(ViewDefinition definition)
-    {
-        View view = new View(definition, baseCfs);
-
-        viewsByName.put(definition.viewName, view);
+        this.keyspace = keyspace;
     }
 
     /**
@@ -168,14 +148,102 @@ public class ViewManager
             StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog);
     }
 
-    public boolean updateAffectsView(PartitionUpdate upd)
+    public boolean updatesAffectView(Collection<? extends IMutation> mutations, boolean coordinatorBatchlog)
     {
+        if (coordinatorBatchlog && disableCoordinatorBatchlog)
+            return false;
+
+        for (IMutation mutation : mutations)
+        {
+            for (PartitionUpdate cf : mutation.getPartitionUpdates())
+            {
+                assert keyspace.getName().equals(cf.metadata().ksName);
+
+                if (coordinatorBatchlog && keyspace.getReplicationStrategy().getReplicationFactor() == 1)
+                    continue;
+
+                for (View view : allViews())
+                {
+                    if (!cf.metadata().cfId.equals(view.getDefinition().baseId))
+                        continue;
+
+                    if (view.updateAffectsView(cf))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public Iterable<View> allViews()
+    {
+        return viewsByName.values();
+    }
+
+    public void reload()
+    {
+        Map<String, ViewDefinition> newViewsByName = new HashMap<>();
+        for (ViewDefinition definition : keyspace.getMetadata().views)
+        {
+            newViewsByName.put(definition.viewName, definition);
+        }
+
+        for (String viewName : viewsByName.keySet())
+        {
+            if (!newViewsByName.containsKey(viewName))
+                removeView(viewName);
+        }
+
+        for (Map.Entry<String, ViewDefinition> entry : newViewsByName.entrySet())
+        {
+            if (!viewsByName.containsKey(entry.getKey()))
+                addView(entry.getValue());
+        }
+
         for (View view : allViews())
         {
-            if (view.updateAffectsView(upd))
-                return true;
+            view.build();
+            // We provide the new definition from the base metadata
+            view.updateDefinition(newViewsByName.get(view.name));
         }
-        return false;
+    }
+
+    public void addView(ViewDefinition definition)
+    {
+        View view = new View(definition, keyspace.getColumnFamilyStore(definition.baseId));
+        forTable(view.getDefinition().baseId).addView(view);
+        viewsByName.put(definition.viewName, view);
+    }
+
+    public void removeView(String name)
+    {
+        View view = viewsByName.remove(name);
+
+        if (view == null)
+            return;
+
+        forTable(view.getDefinition().baseId).removeView(name);
+        SystemKeyspace.setViewRemoved(keyspace.getName(), view.name);
+    }
+
+    public void buildAllViews()
+    {
+        for (View view : allViews())
+            view.build();
+    }
+
+    public ForStore forTable(UUID baseId)
+    {
+        ForStore forStore = viewManagersByStore.get(baseId);
+        if (forStore == null)
+        {
+            forStore = new ForStore();
+            ForStore previous = viewManagersByStore.put(baseId, forStore);
+            if (previous != null)
+                forStore = previous;
+        }
+        return forStore;
     }
 
     public static Lock acquireLockFor(ByteBuffer key)
@@ -186,50 +254,5 @@ public class ViewManager
             return lock;
 
         return null;
-    }
-
-    public static boolean updatesAffectView(Collection<? extends IMutation> mutations, boolean coordinatorBatchlog)
-    {
-        if (coordinatorBatchlog && disableCoordinatorBatchlog)
-            return false;
-
-        for (IMutation mutation : mutations)
-        {
-            for (PartitionUpdate cf : mutation.getPartitionUpdates())
-            {
-                Keyspace keyspace = Keyspace.open(cf.metadata().ksName);
-
-                if (coordinatorBatchlog && keyspace.getReplicationStrategy().getReplicationFactor() == 1)
-                    continue;
-
-                ViewManager viewManager = keyspace.getColumnFamilyStore(cf.metadata().cfId).viewManager;
-                if (viewManager.updateAffectsView(cf))
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
-
-    public void forceBlockingFlush()
-    {
-        for (ColumnFamilyStore viewCfs : allViewsCfs())
-            viewCfs.forceBlockingFlush();
-    }
-
-    public void dumpMemtables()
-    {
-        for (ColumnFamilyStore viewCfs : allViewsCfs())
-            viewCfs.dumpMemtable();
-    }
-
-    public void truncateBlocking(long truncatedAt)
-    {
-        for (ColumnFamilyStore viewCfs : allViewsCfs())
-        {
-            ReplayPosition replayAfter = viewCfs.discardSSTables(truncatedAt);
-            SystemKeyspace.saveTruncationRecord(viewCfs, truncatedAt, replayAfter);
-        }
     }
 }

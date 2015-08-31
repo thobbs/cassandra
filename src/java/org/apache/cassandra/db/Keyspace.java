@@ -87,6 +87,7 @@ public class Keyspace
     /* ColumnFamilyStore per column family */
     private final ConcurrentMap<UUID, ColumnFamilyStore> columnFamilyStores = new ConcurrentHashMap<>();
     private volatile AbstractReplicationStrategy replicationStrategy;
+    public final ViewManager viewManager;
 
     public static final Function<String,Keyspace> keyspaceTransformer = new Function<String, Keyspace>()
     {
@@ -305,11 +306,13 @@ public class Keyspace
         createReplicationStrategy(metadata);
 
         this.metric = new KeyspaceMetrics(this);
-        for (CFMetaData cfm : metadata.tables)
+        this.viewManager = new ViewManager(this);
+        for (CFMetaData cfm : metadata.derived)
         {
             logger.debug("Initializing {}.{}", getName(), cfm.cfName);
             initCf(cfm.cfId, cfm.cfName, loadSSTables);
         }
+        this.viewManager.reload();
     }
 
     private Keyspace(KeyspaceMetadata metadata)
@@ -317,6 +320,7 @@ public class Keyspace
         this.metadata = metadata;
         createReplicationStrategy(metadata);
         this.metric = new KeyspaceMetrics(this);
+        this.viewManager = new ViewManager(this);
     }
 
     public static Keyspace mockKS(KeyspaceMetadata metadata)
@@ -418,7 +422,7 @@ public class Keyspace
             throw new RuntimeException("Testing write failures");
 
         Lock lock = null;
-        boolean requiresViewUpdate = updateIndexes && ViewManager.updatesAffectView(Collections.singleton(mutation), false);
+        boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
         if (requiresViewUpdate)
         {
@@ -472,7 +476,7 @@ public class Keyspace
                     try
                     {
                         Tracing.trace("Creating materialized view mutations from base table replica");
-                        cfs.viewManager.pushViewReplicaUpdates(upd, !isClReplay);
+                        viewManager.pushViewReplicaUpdates(upd, !isClReplay);
                     }
                     catch (Throwable t)
                     {

@@ -149,12 +149,25 @@ public final class SchemaKeyspace
                 "view definitions",
                 "CREATE TABLE %s ("
                 + "keyspace_name text,"
-                + "table_name text,"
                 + "view_name text,"
-                + "target_columns frozen<list<text>>,"
-                + "clustering_columns frozen<list<text>>,"
-                + "included_columns frozen<list<text>>,"
-                + "PRIMARY KEY ((keyspace_name), table_name, view_name))");
+                + "base_id uuid,"
+                + "bloom_filter_fp_chance double,"
+                + "caching frozen<map<text, text>>,"
+                + "comment text,"
+                + "compaction frozen<map<text, text>>,"
+                + "compression frozen<map<text, text>>,"
+                + "dclocal_read_repair_chance double,"
+                + "default_time_to_live int,"
+                + "extensions frozen<map<text, blob>>,"
+                + "gc_grace_seconds int,"
+                + "id uuid,"
+                + "include_all boolean,"
+                + "max_index_interval int,"
+                + "memtable_flush_period_in_ms int,"
+                + "min_index_interval int,"
+                + "read_repair_chance double,"
+                + "speculative_retry text,"
+                + "PRIMARY KEY ((keyspace_name), view_name))");
 
     private static final CFMetaData Indexes =
         compile(INDEXES,
@@ -265,9 +278,10 @@ public final class SchemaKeyspace
 
                     readSchemaPartitionForKeyspaceAndApply(TYPES, key,
                         types -> readSchemaPartitionForKeyspaceAndApply(TABLES, key,
-                        tables -> readSchemaPartitionForKeyspaceAndApply(FUNCTIONS, key,
+                        tables -> readSchemaPartitionForKeyspaceAndApply(VIEWS, key,
+                        views -> readSchemaPartitionForKeyspaceAndApply(FUNCTIONS, key,
                         functions -> readSchemaPartitionForKeyspaceAndApply(AGGREGATES, key,
-                        aggregates -> keyspaces.add(createKeyspaceFromSchemaPartitions(partition, tables, types, functions, aggregates)))))
+                        aggregates -> keyspaces.add(createKeyspaceFromSchemaPartitions(partition, tables, views, types, functions, aggregates))))))
                     );
                 }
             }
@@ -473,6 +487,7 @@ public final class SchemaKeyspace
         // current state of the schema
         Map<DecoratedKey, FilteredPartition> oldKeyspaces = readSchemaForKeyspaces(KEYSPACES, keyspaces);
         Map<DecoratedKey, FilteredPartition> oldColumnFamilies = readSchemaForKeyspaces(TABLES, keyspaces);
+        Map<DecoratedKey, FilteredPartition> oldViews = readSchemaForKeyspaces(VIEWS, keyspaces);
         Map<DecoratedKey, FilteredPartition> oldTypes = readSchemaForKeyspaces(TYPES, keyspaces);
         Map<DecoratedKey, FilteredPartition> oldFunctions = readSchemaForKeyspaces(FUNCTIONS, keyspaces);
         Map<DecoratedKey, FilteredPartition> oldAggregates = readSchemaForKeyspaces(AGGREGATES, keyspaces);
@@ -485,12 +500,14 @@ public final class SchemaKeyspace
         // with new data applied
         Map<DecoratedKey, FilteredPartition> newKeyspaces = readSchemaForKeyspaces(KEYSPACES, keyspaces);
         Map<DecoratedKey, FilteredPartition> newColumnFamilies = readSchemaForKeyspaces(TABLES, keyspaces);
+        Map<DecoratedKey, FilteredPartition> newViews = readSchemaForKeyspaces(VIEWS, keyspaces);
         Map<DecoratedKey, FilteredPartition> newTypes = readSchemaForKeyspaces(TYPES, keyspaces);
         Map<DecoratedKey, FilteredPartition> newFunctions = readSchemaForKeyspaces(FUNCTIONS, keyspaces);
         Map<DecoratedKey, FilteredPartition> newAggregates = readSchemaForKeyspaces(AGGREGATES, keyspaces);
 
         Set<String> keyspacesToDrop = mergeKeyspaces(oldKeyspaces, newKeyspaces);
         mergeTables(oldColumnFamilies, newColumnFamilies);
+        mergeViews(oldViews, newViews);
         mergeTypes(oldTypes, newTypes);
         mergeFunctions(oldFunctions, newFunctions);
         mergeAggregates(oldAggregates, newAggregates);
@@ -542,6 +559,27 @@ public final class SchemaKeyspace
             public void onUpdated(UntypedResultSet.Row oldRow, UntypedResultSet.Row newRow)
             {
                 Schema.instance.updateTable(newRow.getString("keyspace_name"), newRow.getString("table_name"));
+            }
+        });
+    }
+
+    private static void mergeViews(Map<DecoratedKey, FilteredPartition> before, Map<DecoratedKey, FilteredPartition> after)
+    {
+        diffSchema(before, after, new Differ()
+        {
+            public void onDropped(UntypedResultSet.Row oldRow)
+            {
+                Schema.instance.dropView(oldRow.getString("keyspace_name"), oldRow.getString("view_name"));
+            }
+
+            public void onAdded(UntypedResultSet.Row newRow)
+            {
+                Schema.instance.addView(createViewFromViewRow(newRow));
+            }
+
+            public void onUpdated(UntypedResultSet.Row oldRow, UntypedResultSet.Row newRow)
+            {
+                Schema.instance.updateView(newRow.getString("keyspace_name"), newRow.getString("view_name"));
             }
         });
     }
@@ -697,6 +735,7 @@ public final class SchemaKeyspace
         Mutation mutation = makeCreateKeyspaceMutation(keyspace.name, keyspace.params, timestamp);
 
         keyspace.tables.forEach(table -> addTableToSchemaMutation(table, timestamp, true, mutation));
+        keyspace.views.forEach(view -> addViewToSchemaMutation(view, timestamp, true, mutation));
         keyspace.types.forEach(type -> addTypeToSchemaMutation(type, timestamp, mutation));
         keyspace.functions.udfs().forEach(udf -> addFunctionToSchemaMutation(udf, timestamp, mutation));
         keyspace.functions.udas().forEach(uda -> addAggregateToSchemaMutation(uda, timestamp, mutation));
@@ -717,6 +756,7 @@ public final class SchemaKeyspace
 
     private static KeyspaceMetadata createKeyspaceFromSchemaPartitions(RowIterator serializedParams,
                                                                        RowIterator serializedTables,
+                                                                       RowIterator serializedViews,
                                                                        RowIterator serializedTypes,
                                                                        RowIterator serializedFunctions,
                                                                        RowIterator serializedAggregates)
@@ -725,13 +765,14 @@ public final class SchemaKeyspace
 
         KeyspaceParams params = createKeyspaceParamsFromSchemaPartition(serializedParams);
         Tables tables = createTablesFromTablesPartition(serializedTables);
+        Views views = createViewsFromViewsPartition(serializedViews);
         Types types = createTypesFromPartition(serializedTypes);
 
         Collection<UDFunction> udfs = createFunctionsFromFunctionsPartition(serializedFunctions);
         Collection<UDAggregate> udas = createAggregatesFromAggregatesPartition(serializedAggregates);
         Functions functions = org.apache.cassandra.schema.Functions.builder().add(udfs).add(udas).build();
 
-        return KeyspaceMetadata.create(name, params, tables, types, functions);
+        return KeyspaceMetadata.create(name, params, tables, views, types, functions);
     }
 
     /**
@@ -849,9 +890,6 @@ public final class SchemaKeyspace
             for (TriggerMetadata trigger : table.getTriggers())
                 addTriggerToSchemaMutation(table, trigger, timestamp, mutation);
 
-            for (ViewDefinition view: table.getViews())
-                addViewToSchemaMutation(table, view, timestamp, mutation);
-
             for (IndexMetadata index : table.getIndexes())
                 addIndexToSchemaMutation(table, index, timestamp, mutation);
         }
@@ -931,22 +969,6 @@ public final class SchemaKeyspace
         for (TriggerMetadata trigger : triggerDiff.entriesOnlyOnRight().values())
             addTriggerToSchemaMutation(newTable, trigger, timestamp, mutation);
 
-        MapDifference<String, ViewDefinition> viewDiff = viewsDiff(oldTable.getViews(), newTable.getViews());
-
-        // dropped views
-        for (ViewDefinition view : viewDiff.entriesOnlyOnLeft().values())
-            dropViewFromSchemaMutation(oldTable, view, timestamp, mutation);
-
-        // newly created views
-        for (ViewDefinition view : viewDiff.entriesOnlyOnRight().values())
-            addViewToSchemaMutation(newTable, view, timestamp, mutation);
-
-        // updated views need to be updated
-        for (MapDifference.ValueDifference<ViewDefinition> diff : viewDiff.entriesDiffering().values())
-        {
-            addUpdatedViewDefinitionToSchemaMutation(newTable, diff.rightValue(), timestamp, mutation);
-        }
-
         MapDifference<String, IndexMetadata> indexesDiff = indexesDiff(oldTable.getIndexes(),
                                                                        newTable.getIndexes());
 
@@ -989,17 +1011,6 @@ public final class SchemaKeyspace
         return Maps.difference(beforeMap, afterMap);
     }
 
-    private static MapDifference<String, ViewDefinition> viewsDiff(Views before, Views after)
-    {
-        Map<String, ViewDefinition> beforeMap = new HashMap<>();
-        before.forEach(v -> beforeMap.put(v.viewName, v));
-
-        Map<String, ViewDefinition> afterMap = new HashMap<>();
-        after.forEach(v -> afterMap.put(v.viewName, v));
-
-        return Maps.difference(beforeMap, afterMap);
-    }
-
     public static Mutation makeDropTableMutation(KeyspaceMetadata keyspace, CFMetaData table, long timestamp)
     {
         // Include the serialized keyspace in case the target node missed a CREATE KEYSPACE migration (see CASSANDRA-5631).
@@ -1012,9 +1023,6 @@ public final class SchemaKeyspace
 
         for (TriggerMetadata trigger : table.getTriggers())
             dropTriggerFromSchemaMutation(table, trigger, timestamp, mutation);
-
-        for (ViewDefinition view : table.getViews())
-            dropViewFromSchemaMutation(table, view, timestamp, mutation);
 
         for (IndexMetadata index : table.getIndexes())
             dropIndexFromSchemaMutation(table, index, timestamp, mutation);
@@ -1083,12 +1091,8 @@ public final class SchemaKeyspace
         Triggers triggers =
             readSchemaPartitionForTableAndApply(TRIGGERS, keyspace, table, SchemaKeyspace::createTriggersFromTriggersPartition);
 
-        Views views =
-            readSchemaPartitionForTableAndApply(VIEWS, keyspace, table, SchemaKeyspace::createViewsFromViewsPartition);
-
         CFMetaData cfm = createTableFromTableRowAndColumns(row, columns).droppedColumns(droppedColumns)
-                                                                        .triggers(triggers)
-                                                                        .views(views);
+                                                                        .triggers(triggers);
 
         // the CFMetaData itself is required to build the collection of indexes as
         // the column definitions are needed because we store only the name each
@@ -1114,7 +1118,6 @@ public final class SchemaKeyspace
         boolean isCounter = flags.contains(CFMetaData.Flag.COUNTER);
         boolean isDense = flags.contains(CFMetaData.Flag.DENSE);
         boolean isCompound = flags.contains(CFMetaData.Flag.COMPOUND);
-        boolean isView = flags.contains(CFMetaData.Flag.VIEW);
 
         return CFMetaData.create(keyspace,
                                  table,
@@ -1123,7 +1126,7 @@ public final class SchemaKeyspace
                                  isCompound,
                                  isSuper,
                                  isCounter,
-                                 isView,
+                                 false,
                                  columns,
                                  DatabaseDescriptor.getPartitioner())
                          .params(createTableParamsFromRow(row));
@@ -1279,26 +1282,112 @@ public final class SchemaKeyspace
      * View metadata serialization/deserialization.
      */
 
-    private static void addViewToSchemaMutation(CFMetaData table, ViewDefinition view, long timestamp, Mutation mutation)
+    public static Mutation makeCreateViewMutation(KeyspaceMetadata keyspace, ViewDefinition view, long timestamp)
+    {
+        // Include the serialized keyspace in case the target node missed a CREATE KEYSPACE migration (see CASSANDRA-5631).
+        Mutation mutation = makeCreateKeyspaceMutation(keyspace.name, keyspace.params, timestamp);
+        addViewToSchemaMutation(view, timestamp, true, mutation);
+        return mutation;
+    }
+
+    private static void addViewToSchemaMutation(ViewDefinition view, long timestamp, boolean includeColumns, Mutation mutation)
     {
         RowUpdateBuilder builder = new RowUpdateBuilder(Views, timestamp, mutation)
-            .clustering(table.cfName, view.viewName);
+            .clustering(view.viewName);
 
-        builder.frozenList("target_columns", view.partitionColumns.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
-        builder.frozenList("clustering_columns", view.clusteringColumns.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
-        builder.frozenList("included_columns", view.included.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
+        CFMetaData table = view.metadata;
+
+        builder.add("include_all", view.includeAll)
+               .add("base_id", view.baseId)
+               .add("id", table.cfId);
+
+        addTableParamsToSchemaMutation(table.params, builder);
+
+        if (includeColumns)
+        {
+            for (ColumnDefinition column : table.allColumns())
+                addColumnToSchemaMutation(table, column, timestamp, mutation);
+
+            for (CFMetaData.DroppedColumn column : table.getDroppedColumns().values())
+                addDroppedColumnToSchemaMutation(table, column, timestamp, mutation);
+        }
 
         builder.build();
     }
 
-    private static void dropViewFromSchemaMutation(CFMetaData table, ViewDefinition view, long timestamp, Mutation mutation)
+    public static Mutation makeDropViewMutation(KeyspaceMetadata keyspace, ViewDefinition view, long timestamp)
     {
-        RowUpdateBuilder.deleteRow(Views, timestamp, mutation, table.cfName, view.viewName);
+        // Include the serialized keyspace in case the target node missed a CREATE KEYSPACE migration (see CASSANDRA-5631).
+        Mutation mutation = makeCreateKeyspaceMutation(keyspace.name, keyspace.params, timestamp);
+
+        RowUpdateBuilder.deleteRow(Views, timestamp, mutation, view.viewName);
+
+        CFMetaData table = view.metadata;
+        for (ColumnDefinition column : table.allColumns())
+            dropColumnFromSchemaMutation(table, column, timestamp, mutation);
+
+        for (IndexMetadata index : table.getIndexes())
+            dropIndexFromSchemaMutation(table, index, timestamp, mutation);
+
+        return mutation;
     }
 
-    private static void addUpdatedViewDefinitionToSchemaMutation(CFMetaData table, ViewDefinition view, long timestamp, Mutation mutation)
+    public static Mutation makeUpdateViewMutation(KeyspaceMetadata keyspace,
+                                                  ViewDefinition oldView,
+                                                  ViewDefinition newView,
+                                                  long timestamp)
     {
-        addViewToSchemaMutation(table, view, timestamp, mutation);
+        Mutation mutation = makeCreateKeyspaceMutation(keyspace.name, keyspace.params, timestamp);
+
+        addViewToSchemaMutation(newView, timestamp, false, mutation);
+
+        MapDifference<ByteBuffer, ColumnDefinition> columnDiff = Maps.difference(oldView.metadata.getColumnMetadata(),
+                                                                                 newView.metadata.getColumnMetadata());
+
+        // columns that are no longer needed
+        for (ColumnDefinition column : columnDiff.entriesOnlyOnLeft().values())
+        {
+            dropColumnFromSchemaMutation(oldView.metadata, column, timestamp, mutation);
+        }
+
+        // newly added columns
+        for (ColumnDefinition column : columnDiff.entriesOnlyOnRight().values())
+            addColumnToSchemaMutation(newView.metadata, column, timestamp, mutation);
+
+        // old columns with updated attributes
+        for (ByteBuffer name : columnDiff.entriesDiffering().keySet())
+            addColumnToSchemaMutation(newView.metadata, newView.metadata.getColumnDefinition(name), timestamp, mutation);
+
+        // dropped columns
+        MapDifference<ByteBuffer, CFMetaData.DroppedColumn> droppedColumnDiff =
+        Maps.difference(oldView.metadata.getDroppedColumns(), oldView.metadata.getDroppedColumns());
+
+        // newly dropped columns
+        for (CFMetaData.DroppedColumn column : droppedColumnDiff.entriesOnlyOnRight().values())
+            addDroppedColumnToSchemaMutation(oldView.metadata, column, timestamp, mutation);
+
+        // columns added then dropped again
+        for (ByteBuffer name : droppedColumnDiff.entriesDiffering().keySet())
+            addDroppedColumnToSchemaMutation(newView.metadata, newView.metadata.getDroppedColumns().get(name), timestamp, mutation);
+
+        return mutation;
+    }
+
+    public static ViewDefinition createViewFromName(String keyspace, String view)
+    {
+        return readSchemaPartitionForTableAndApply(VIEWS, keyspace, view, partition ->
+        {
+            if (partition.isEmpty())
+                throw new RuntimeException(String.format("%s:%s not found in the schema definitions keyspace.", keyspace, view));
+
+            return createViewFromViewPartition(partition);
+        });
+    }
+
+    private static ViewDefinition createViewFromViewPartition(RowIterator partition)
+    {
+        String query = String.format("SELECT * FROM %s.%s", NAME, VIEWS);
+        return createViewFromViewRow(QueryProcessor.resultify(query, partition).one());
     }
 
     /**
@@ -1321,37 +1410,36 @@ public final class SchemaKeyspace
 
     private static ViewDefinition createViewFromViewRow(UntypedResultSet.Row row)
     {
-        String name = row.getString("view_name");
-        List<String> partitionColumnNames = row.getFrozenList("target_columns", UTF8Type.instance);
+        String keyspace = row.getString("keyspace_name");
+        String view = row.getString("view_name");
+        UUID id = row.getUUID("id");
+        UUID baseId = row.getUUID("base_id");
+        boolean includeAll = row.getBoolean("include_all");
 
-        String cfName = row.getString("table_name");
-        List<String> clusteringColumnNames = row.getFrozenList("clustering_columns", UTF8Type.instance);
+        List<ColumnDefinition> columns =
+        readSchemaPartitionForTableAndApply(COLUMNS, keyspace, view, SchemaKeyspace::createColumnsFromColumnsPartition);
 
-        List<ColumnIdentifier> partitionColumns = new ArrayList<>();
-        for (String columnName : partitionColumnNames)
-        {
-            partitionColumns.add(ColumnIdentifier.getInterned(columnName, true));
-        }
+        Map<ByteBuffer, CFMetaData.DroppedColumn> droppedColumns =
+        readSchemaPartitionForTableAndApply(DROPPED_COLUMNS, keyspace, view, SchemaKeyspace::createDroppedColumnsFromDroppedColumnsPartition);
 
-        List<ColumnIdentifier> clusteringColumns = new ArrayList<>();
-        for (String columnName : clusteringColumnNames)
-        {
-            clusteringColumns.add(ColumnIdentifier.getInterned(columnName, true));
-        }
+        CFMetaData cfm = CFMetaData.create(keyspace,
+                                           view,
+                                           id,
+                                           false,
+                                           true,
+                                           false,
+                                           false,
+                                           true,
+                                           columns,
+                                           DatabaseDescriptor.getPartitioner())
+                                   .params(createTableParamsFromRow(row))
+                                   .droppedColumns(droppedColumns);
 
-        List<String> includedColumnNames = row.getFrozenList("included_columns", UTF8Type.instance);
-        Set<ColumnIdentifier> includedColumns = new HashSet<>();
-        if (includedColumnNames != null)
-        {
-            for (String columnName : includedColumnNames)
-                includedColumns.add(ColumnIdentifier.getInterned(columnName, true));
-        }
-
-        return new ViewDefinition(cfName,
-                                  name,
-                                  partitionColumns,
-                                  clusteringColumns,
-                                  includedColumns);
+        return new ViewDefinition(keyspace,
+                                  view,
+                                  baseId,
+                                  includeAll,
+                                  cfm);
     }
 
     /*

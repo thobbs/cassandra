@@ -18,45 +18,40 @@
 
 package org.apache.cassandra.config;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.Objects;
+import java.util.UUID;
+
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+import org.apache.commons.lang3.builder.ToStringBuilder;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 
 public class ViewDefinition
 {
-    public final String baseCfName;
+    public final String ksName;
     public final String viewName;
-    // The order of partititon columns and clustering columns is important, so we cannot switch these two to sets
-    public final List<ColumnIdentifier> partitionColumns;
-    public final List<ColumnIdentifier> clusteringColumns;
-    public final Set<ColumnIdentifier> included;
+    public final UUID baseId;
     public final boolean includeAll;
+    // The order of partititon columns and clustering columns is important, so we cannot switch these two to sets
+    public final CFMetaData metadata;
 
     public ViewDefinition(ViewDefinition def)
     {
-        this(def.baseCfName, def.viewName, new ArrayList<>(def.partitionColumns), new ArrayList<>(def.clusteringColumns), new HashSet<>(def.included));
+        this(def.ksName, def.viewName, def.baseId, def.includeAll, def.metadata);
     }
 
     /**
-     * @param baseCfName        Name of the column family from which this view is based
      * @param viewName          Name of the view
-     * @param partitionColumns  List of all of the partition columns, in the order they are defined
-     * @param clusteringColumns List of all of the clustering columns, in the order they are defined
-     * @param included
+     * @param baseId            Internal ID of the table which this view is based off of
+     * @param includeAll        Whether to include all columns or not
      */
-    public ViewDefinition(String baseCfName, String viewName, List<ColumnIdentifier> partitionColumns, List<ColumnIdentifier> clusteringColumns, Set<ColumnIdentifier> included)
+    public ViewDefinition(String ksName, String viewName, UUID baseId, boolean includeAll, CFMetaData metadata)
     {
-        assert partitionColumns != null && !partitionColumns.isEmpty();
-        assert included != null;
-        this.baseCfName = baseCfName;
+        this.ksName = ksName;
         this.viewName = viewName;
-        this.partitionColumns = partitionColumns;
-        this.clusteringColumns = clusteringColumns;
-        this.includeAll = included.isEmpty();
-        this.included = included;
+        this.baseId = baseId;
+        this.includeAll = includeAll;
+        this.metadata = metadata;
     }
 
     /**
@@ -64,30 +59,52 @@ public class ViewDefinition
      */
     public boolean includes(ColumnIdentifier column)
     {
-        return includeAll
-               || partitionColumns.contains(column)
-               || clusteringColumns.contains(column)
-               || included.contains(column);
+        return metadata.getColumnDefinition(column) != null;
     }
 
-    /**
-     * Replace the column {@param from} with {@param to} in this materialized view definition's partition,
-     * clustering, or included columns.
-     */
-    public void renameColumn(ColumnIdentifier from, ColumnIdentifier to)
+    public ViewDefinition copy()
     {
-        if (!includeAll && included.contains(from))
-        {
-            included.remove(from);
-            included.add(to);
-        }
+        return new ViewDefinition(ksName, viewName, baseId, includeAll, metadata.copy());
+    }
 
-        int partitionIndex = partitionColumns.indexOf(from);
-        if (partitionIndex >= 0)
-            partitionColumns.set(partitionIndex, to);
+    @Override
+    public boolean equals(Object o)
+    {
+        if (this == o)
+            return true;
 
-        int clusteringIndex = clusteringColumns.indexOf(from);
-        if (clusteringIndex >= 0)
-            clusteringColumns.set(clusteringIndex, to);
+        if (!(o instanceof ViewDefinition))
+            return false;
+
+        ViewDefinition other = (ViewDefinition) o;
+        return Objects.equals(ksName, other.ksName)
+               && Objects.equals(viewName, other.viewName)
+               && Objects.equals(baseId, other.baseId)
+               && Objects.equals(includeAll, other.includeAll)
+               && Objects.equals(metadata, other.metadata);
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return new HashCodeBuilder(29, 1597)
+               .append(ksName)
+               .append(viewName)
+               .append(baseId)
+               .append(includeAll)
+               .append(metadata)
+               .toHashCode();
+    }
+
+    @Override
+    public String toString()
+    {
+        return new ToStringBuilder(this)
+               .append("ksName", ksName)
+               .append("viewName", viewName)
+               .append("baseId", baseId)
+               .append("includeAll", includeAll)
+               .append("metadata", metadata)
+               .toString();
     }
 }

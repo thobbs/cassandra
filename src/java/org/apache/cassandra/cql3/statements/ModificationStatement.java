@@ -39,6 +39,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -160,11 +161,6 @@ public abstract class ModificationStatement implements CQLStatement
         return cfm.isView();
     }
 
-    public boolean hasViews()
-    {
-        return !cfm.getViews().isEmpty();
-    }
-
     public long getTimestamp(long now, QueryOptions options) throws InvalidRequestException
     {
         return attrs.getTimestamp(now, options);
@@ -190,11 +186,14 @@ public abstract class ModificationStatement implements CQLStatement
 
         // MV updates need to get the current state from the table, and might update the views
         // Require Permission.SELECT on the base table, and Permission.MODIFY on the views
-        if (hasViews())
+        Iterator<ViewDefinition> views = View.findAll(keyspace(), columnFamily()).iterator();
+        if (views.hasNext())
         {
             state.hasColumnFamilyAccess(keyspace(), columnFamily(), Permission.SELECT);
-            for (ViewDefinition view : cfm.getViews())
-                state.hasColumnFamilyAccess(keyspace(), view.viewName, Permission.MODIFY);
+            do
+            {
+                state.hasColumnFamilyAccess(keyspace(), views.next().viewName, Permission.MODIFY);
+            } while (views.hasNext());
         }
 
         for (Function function : getFunctions())

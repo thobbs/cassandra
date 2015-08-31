@@ -25,6 +25,7 @@ import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MigrationManager;
 import org.apache.cassandra.transport.Event;
@@ -61,7 +62,8 @@ public class DropTableStatement extends SchemaAlteringStatement
     {
         try
         {
-            CFMetaData cfm = Schema.instance.getCFMetaData(keyspace(), columnFamily());
+            KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace());
+            CFMetaData cfm = ksm.tables.getNullable(columnFamily());
             if (cfm != null)
             {
                 if (cfm.isView())
@@ -69,12 +71,15 @@ public class DropTableStatement extends SchemaAlteringStatement
 
                 boolean rejectDrop = false;
                 StringBuilder messageBuilder = new StringBuilder();
-                for (ViewDefinition def : cfm.getViews())
+                for (ViewDefinition def : ksm.views)
                 {
-                    if (rejectDrop)
-                        messageBuilder.append(',');
-                    rejectDrop = true;
-                    messageBuilder.append(def.viewName);
+                    if (def.baseId.equals(cfm.cfId))
+                    {
+                        if (rejectDrop)
+                            messageBuilder.append(',');
+                        rejectDrop = true;
+                        messageBuilder.append(def.viewName);
+                    }
                 }
                 if (rejectDrop)
                 {

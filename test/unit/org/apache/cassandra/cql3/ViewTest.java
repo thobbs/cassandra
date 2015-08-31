@@ -641,6 +641,33 @@ public class ViewTest extends CQLTester
     }
 
     @Test
+    public void testReuseName() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                    "k int, " +
+                    "intval int, " +
+                    "PRIMARY KEY (k))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND intval IS NOT NULL PRIMARY KEY (intval, k)");
+
+        updateView("INSERT INTO %s (k, intval) VALUES (?, ?)", 0, 0);
+        assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 0));
+        assertRows(execute("SELECT k, intval from mv WHERE intval = ?", 0), row(0, 0));
+
+        executeNet(protocolVersion, "DROP MATERIALIZED VIEW mv");
+        views.remove("mv");
+
+        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND intval IS NOT NULL PRIMARY KEY (intval, k)");
+
+        updateView("INSERT INTO %s (k, intval) VALUES (?, ?)", 0, 1);
+        assertRows(execute("SELECT k, intval FROM %s WHERE k = ?", 0), row(0, 1));
+        assertRows(execute("SELECT k, intval from mv WHERE intval = ?", 1), row(0, 1));
+    }
+
+    @Test
     public void testAllTypes() throws Throwable
     {
         String myType = createType("CREATE TYPE %s (a int, b uuid, c set<text>)");
