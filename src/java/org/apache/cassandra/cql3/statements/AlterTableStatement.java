@@ -19,6 +19,8 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.*;
 
+import com.google.common.collect.Iterables;
+
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.CFName;
@@ -27,6 +29,7 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CounterColumnType;
+import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
@@ -95,7 +98,8 @@ public class AlterTableStatement extends SchemaAlteringStatement
             def = cfm.getColumnDefinition(columnName);
         }
 
-        List<CFMetaData> viewUpdates = null;
+        List<ViewDefinition> viewUpdates = null;
+        Iterable<ViewDefinition> views = View.findAll(keyspace(), columnFamily());
 
         switch (oType)
         {
@@ -158,17 +162,18 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
                 // Adding a column to a table which has an include all view requires the column to be added to the view
                 // as well
-                for (ViewDefinition view : cfm.getViews())
+                if (!isStatic)
                 {
-                    if (view.includeAll)
+                    for (ViewDefinition view : views)
                     {
-                        CFMetaData indexCfm = Schema.instance.getCFMetaData(keyspace(), view.viewName).copy();
-                        indexCfm.addColumnDefinition(isStatic
-                                                     ? ColumnDefinition.staticDef(indexCfm, columnName.bytes, type)
-                                                     : ColumnDefinition.regularDef(indexCfm, columnName.bytes, type));
-                        if (viewUpdates == null)
-                            viewUpdates = new ArrayList<>();
-                        viewUpdates.add(indexCfm);
+                        if (view.includeAll)
+                        {
+                            ViewDefinition viewCopy = view.copy();
+                            viewCopy.metadata.addColumnDefinition(ColumnDefinition.regularDef(viewCopy.metadata, columnName.bytes, type));
+                            if (viewUpdates == null)
+                                viewUpdates = new ArrayList<>();
+                            viewUpdates.add(viewCopy);
+                        }
                     }
                 }
                 break;
@@ -222,16 +227,15 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 cfm.addOrReplaceColumnDefinition(def.withNewType(validatorType));
 
                 // We have to alter the schema of the view table as well; it doesn't affect the definition however
-                for (ViewDefinition view : cfm.getViews())
+                for (ViewDefinition view : views)
                 {
                     if (!view.includes(columnName)) continue;
-                    // We have to use the pre-adjusted CFM, otherwise we can't resolve the Index
-                    CFMetaData indexCfm = Schema.instance.getCFMetaData(keyspace(), view.viewName).copy();
-                    indexCfm.addOrReplaceColumnDefinition(def.withNewType(validatorType));
+                    ViewDefinition viewCopy = view.copy();
+                    viewCopy.metadata.addOrReplaceColumnDefinition(def.withNewType(validatorType));
 
                     if (viewUpdates == null)
                         viewUpdates = new ArrayList<>();
-                    viewUpdates.add(indexCfm);
+                    viewUpdates.add(viewCopy);
                 }
                 break;
 
@@ -279,7 +283,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 // If a column is dropped which is included in a view, we don't allow the drop to take place.
                 boolean rejectAlter = false;
                 StringBuilder builder = new StringBuilder();
-                for (ViewDefinition view : cfm.getViews())
+                for (ViewDefinition view : views)
                 {
                     if (!view.includes(columnName)) continue;
                     if (rejectAlter)
@@ -300,7 +304,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
 
                 TableParams params = attrs.asAlteredTableParams(cfm.params);
 
-                if (cfm.hasViews() && params.gcGraceSeconds == 0)
+                if (!Iterables.isEmpty(views) && params.gcGraceSeconds == 0)
                 {
                     throw new InvalidRequestException("Cannot alter gc_grace_seconds of the base table of a " +
                                                       "materialized view to 0, since this value is used to TTL " +
@@ -323,35 +327,30 @@ public class AlterTableStatement extends SchemaAlteringStatement
                     cfm.renameColumn(from, to);
 
                     // If the view includes a renamed column, it must be renamed in the view table and the definition.
-                    for (ViewDefinition view : cfm.getViews())
+                    for (ViewDefinition view : views)
                     {
                         if (!view.includes(from)) continue;
 
-                        CFMetaData viewCfm = Schema.instance.getCFMetaData(keyspace(), view.viewName).copy();
-                        ColumnIdentifier viewFrom = entry.getKey().prepare(viewCfm);
-                        ColumnIdentifier viewTo = entry.getValue().prepare(viewCfm);
-                        viewCfm.renameColumn(viewFrom, viewTo);
-
-                        ViewDefinition viewCopy = new ViewDefinition(view);
-                        viewCopy.renameColumn(from, to);
-
-                        cfm.views(cfm.getViews().replace(viewCopy));
+                        ViewDefinition viewCopy = view.copy();
+                        ColumnIdentifier viewFrom = entry.getKey().prepare(viewCopy.metadata);
+                        ColumnIdentifier viewTo = entry.getValue().prepare(viewCopy.metadata);
+                        viewCopy.metadata.renameColumn(viewFrom, viewTo);
 
                         if (viewUpdates == null)
                             viewUpdates = new ArrayList<>();
-                        viewUpdates.add(viewCfm);
+                        viewUpdates.add(viewCopy);
                     }
                 }
                 break;
         }
 
+        MigrationManager.announceColumnFamilyUpdate(cfm, false, isLocalOnly);
+
         if (viewUpdates != null)
         {
-            for (CFMetaData viewUpdate : viewUpdates)
-                MigrationManager.announceColumnFamilyUpdate(viewUpdate, false, isLocalOnly);
+            for (ViewDefinition viewUpdate : viewUpdates)
+                MigrationManager.announceViewUpdate(viewUpdate, isLocalOnly);
         }
-
-        MigrationManager.announceColumnFamilyUpdate(cfm, false, isLocalOnly);
         return true;
     }
 

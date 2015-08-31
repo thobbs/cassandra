@@ -22,8 +22,12 @@ package org.apache.cassandra.schema;
 import java.util.Iterator;
 import java.util.Optional;
 
-import com.google.common.collect.ImmutableMap;
+import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Iterables;
+
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ViewDefinition;
 
 import static com.google.common.collect.Iterables.filter;
@@ -52,6 +56,11 @@ public final class Views implements Iterable<ViewDefinition>
         return views.values().iterator();
     }
 
+    public Iterable<CFMetaData> metadatas()
+    {
+        return Iterables.transform(views.values(), view -> view.metadata);
+    }
+
     public int size()
     {
         return views.size();
@@ -74,6 +83,18 @@ public final class Views implements Iterable<ViewDefinition>
     }
 
     /**
+     * Get the view with the specified name
+     *
+     * @param name a non-qualified view name
+     * @return null if the view name is not found; the found {@link ViewDefinition} otherwise
+     */
+    @Nullable
+    public ViewDefinition getNullable(String name)
+    {
+        return views.get(name);
+    }
+
+    /**
      * Create a MaterializedViews instance with the provided materialized view added
      */
     public Views with(ViewDefinition view)
@@ -90,7 +111,7 @@ public final class Views implements Iterable<ViewDefinition>
     public Views without(String name)
     {
         ViewDefinition materializedView =
-        get(name).orElseThrow(() -> new IllegalStateException(String.format("Materialized View %s doesn't exists", name)));
+            get(name).orElseThrow(() -> new IllegalStateException(String.format("Materialized View %s doesn't exists", name)));
 
         return builder().add(filter(this, v -> v != materializedView)).build();
     }
@@ -98,7 +119,7 @@ public final class Views implements Iterable<ViewDefinition>
     /**
      * Creates a MaterializedViews instance which contains an updated materialized view
      */
-    public Views replace(ViewDefinition view)
+    public Views replace(ViewDefinition view, CFMetaData cfm)
     {
         return without(view.viewName).with(view);
     }
@@ -134,15 +155,16 @@ public final class Views implements Iterable<ViewDefinition>
             return new Views(this);
         }
 
+
         public Builder add(ViewDefinition view)
         {
             views.put(view.viewName, view);
             return this;
         }
 
-        public Builder add(Iterable<ViewDefinition> view)
+        public Builder add(Iterable<ViewDefinition> views)
         {
-            view.forEach(this::add);
+            views.forEach(this::add);
             return this;
         }
     }

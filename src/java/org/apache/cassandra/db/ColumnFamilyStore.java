@@ -48,13 +48,11 @@ import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.*;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.view.ViewManager;
 import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.partitions.CachedPartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.CellPath;
-import org.apache.cassandra.db.view.ViewManager;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.exceptions.ConfigurationException;
@@ -195,7 +193,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     private final AtomicInteger fileIndexGenerator = new AtomicInteger(0);
 
     public final SecondaryIndexManager indexManager;
-    public final ViewManager viewManager;
+    public final ViewManager.ForStore viewManager;
 
     /* These are locally held copies to be changed from the config during runtime */
     private volatile DefaultInteger minCompactionThreshold;
@@ -233,7 +231,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         indexManager.reload();
 
-        viewManager.reload();
         // If the CF comparator has changed, we need to change the memtable,
         // because the old one still aliases the previous comparator.
         if (data.getView().getCurrentMemtable().initialComparator != metadata.comparator)
@@ -379,7 +376,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         this.maxCompactionThreshold = new DefaultInteger(metadata.params.compaction.maxCompactionThreshold());
         this.directories = directories;
         this.indexManager = new SecondaryIndexManager(this);
-        this.viewManager = new ViewManager(this);
+        this.viewManager = keyspace.viewManager.forTable(metadata.cfId);
         this.metric = new TableMetrics(this);
         fileIndexGenerator.set(generation);
         sampleLatencyNanos = DatabaseDescriptor.getReadRpcTimeout() / 2;
@@ -515,7 +512,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         data.dropSSTables();
         LifecycleTransaction.waitForDeletions();
         indexManager.invalidateAllIndexesBlocking();
-        viewManager.invalidate();
 
         invalidateCaches();
     }
@@ -635,8 +631,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     // must be called after all sstables are loaded since row cache merges all row versions
     public void init()
     {
-        viewManager.init();
-
         if (!isRowCacheEnabled())
             return;
 
