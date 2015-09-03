@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,7 +54,7 @@ public class Tuples
      * A raw, literal tuple.  When prepared, this will become a Tuples.Value or Tuples.DelayedValue, depending
      * on whether the tuple holds NonTerminals.
      */
-    public static class Literal implements Term.MultiColumnRaw
+    public static class Literal implements Term.MultiColumnRaw, Term.Literal
     {
         private final List<Term.Raw> elements;
 
@@ -131,6 +132,11 @@ public class Tuples
             {
                 return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
             }
+        }
+
+        public String getRawText()
+        {
+            return elements.stream().map(raw -> ((Term.Literal) raw).getRawText()).collect(Collectors.joining(", ", "(", ")"));
         }
 
         @Override

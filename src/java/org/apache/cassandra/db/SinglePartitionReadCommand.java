@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.collect.Iterables;
 import org.apache.cassandra.cache.*;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -28,6 +29,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.view.TemporalRow;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -188,6 +190,19 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
         if (!partitionKey().equals(partitionKey))
             return false;
 
+        if (clustering == Clustering.STATIC_CLUSTERING)
+            return !columnFilter().fetchedColumns().statics.isEmpty();
+
+        return clusteringIndexFilter().selects(clustering);
+    }
+
+    public boolean selectsKey(DecoratedKey key)
+    {
+        return this.partitionKey().equals(key);
+    }
+
+    public boolean selectsClustering(DecoratedKey key, Clustering clustering)
+    {
         if (clustering == Clustering.STATIC_CLUSTERING)
             return !columnFilter().fetchedColumns().statics.isEmpty();
 
@@ -495,6 +510,16 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
                 return SinglePartitionReadCommand.getPager(commands.get(0), pagingState);
 
             return new MultiPartitionPager(this, pagingState);
+        }
+
+        public boolean selectsKey(DecoratedKey key)
+        {
+            return Iterables.any(commands, c -> c.selectsKey(key));
+        }
+
+        public boolean selectsClustering(DecoratedKey key, Clustering clustering)
+        {
+            return Iterables.any(commands, c -> c.selectsClustering(key, clustering));
         }
 
         @Override

@@ -23,6 +23,7 @@ import java.util.*;
 
 import com.google.common.base.Objects;
 
+import com.google.common.collect.Iterables;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.Operator;
@@ -30,6 +31,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.view.TemporalRow;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -106,6 +108,40 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * @return the filtered iterator.
      */
     public abstract UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec);
+
+    /**
+     * Returns true if all of the expressions within this filter that apply to the partition key are satisfied by
+     * the given key, false otherwise.
+     */
+    public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key)
+    {
+        for (Expression e : expressions)
+        {
+            if (!e.column.isPartitionKey())
+                continue;
+
+            if (!e.operator().isSatisfiedBy(e.column.type, key.getKey(), e.value))
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Returns true if all of the expressions within this filter that apply to the clustering key are satisfied by
+     * the given Clustering, false otherwise.
+     */
+    public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering clustering)
+    {
+        for (Expression e : expressions)
+        {
+            if (!e.column.isClusteringColumn())
+                continue;
+
+            if (!e.operator().isSatisfiedBy(e.column.type, clustering.get(e.column.position()), e.value))
+                return false;
+        }
+        return true;
+    }
 
     /**
      * Returns this filter but without the provided expression. This method

@@ -68,6 +68,8 @@ public final class StatementRestrictions
      */
     private RestrictionSet nonPrimaryKeyRestrictions;
 
+    private Set<ColumnIdentifier> notNullColumns;
+
     /**
      * The restrictions used to build the row filter
      */
@@ -100,6 +102,7 @@ public final class StatementRestrictions
         this.partitionKeyRestrictions = new PrimaryKeyRestrictionSet(cfm.getKeyValidatorAsClusteringComparator(), true);
         this.clusteringColumnsRestrictions = new PrimaryKeyRestrictionSet(cfm.comparator, false);
         this.nonPrimaryKeyRestrictions = new RestrictionSet();
+        this.notNullColumns = new HashSet<>();
     }
 
     public StatementRestrictions(CFMetaData cfm,
@@ -107,7 +110,8 @@ public final class StatementRestrictions
                                  VariableSpecifications boundNames,
                                  boolean selectsOnlyStaticColumns,
                                  boolean selectACollection,
-                                 boolean useFiltering) throws InvalidRequestException
+                                 boolean useFiltering,
+                                 boolean forMaterializedView) throws InvalidRequestException
     {
         this(cfm);
 
@@ -121,7 +125,20 @@ public final class StatementRestrictions
          *     in CQL so far)
          */
         for (Relation relation : whereClause)
-            addRestriction(relation.toRestriction(cfm, boundNames));
+        {
+            if (relation.operator() == Operator.IS_NOT)
+            {
+                if (!forMaterializedView)
+                    throw new InvalidRequestException("Unsupported restriction: " + relation);
+
+                for (ColumnDefinition def : relation.toRestriction(cfm, boundNames).getColumnDefs())
+                    this.notNullColumns.add(def.name);
+            }
+            else
+            {
+                addRestriction(relation.toRestriction(cfm, boundNames));
+            }
+        }
 
         ColumnFamilyStore cfs = Keyspace.open(cfm.ksName).getColumnFamilyStore(cfm.cfName);
         SecondaryIndexManager secondaryIndexManager = cfs.indexManager;
@@ -142,7 +159,7 @@ public final class StatementRestrictions
         checkFalse(selectsOnlyStaticColumns && hasClusteringColumnsRestriction(),
                    "Cannot restrict clustering columns when selecting only static columns");
 
-        processClusteringColumnsRestrictions(hasQueriableIndex, selectACollection);
+        processClusteringColumnsRestrictions(hasQueriableIndex, selectACollection, forMaterializedView);
 
         // Covers indexes on the first clustering column (among others).
         if (isKeyRange && hasQueriableClusteringColumnIndex)
@@ -208,6 +225,27 @@ public final class StatementRestrictions
                 if (!def.isPrimaryKeyColumn())
                     columns.add(def);
         return columns;
+    }
+
+    /**
+     * @return the set of columns that have an IS NOT NULL restriction on them
+     */
+    public Set<ColumnIdentifier> notNullColumns()
+    {
+        return this.notNullColumns;
+    }
+
+    /**
+     * @return true if column is restricted by some restriction, false otherwise
+     */
+    public boolean isRestricted(ColumnDefinition column)
+    {
+        if (column.isPartitionKey())
+            return partitionKeyRestrictions.getColumnDefs().contains(column);
+        else if (column.isClusteringColumn())
+            return clusteringColumnsRestrictions.getColumnDefs().contains(column);
+        else
+            return nonPrimaryKeyRestrictions.getColumnDefs().contains(column);
     }
 
     /**
@@ -299,7 +337,8 @@ public final class StatementRestrictions
      * @throws InvalidRequestException if the request is invalid
      */
     private void processClusteringColumnsRestrictions(boolean hasQueriableIndex,
-                                                      boolean selectACollection) throws InvalidRequestException
+                                                      boolean selectACollection,
+                                                      boolean forMaterializedView) throws InvalidRequestException
     {
         checkFalse(clusteringColumnsRestrictions.isIN() && selectACollection,
                    "Cannot restrict clustering columns by IN relations when a collection is selected by the query");
@@ -318,7 +357,7 @@ public final class StatementRestrictions
 
                 if (!clusteringColumn.equals(restrictedColumn))
                 {
-                    checkTrue(hasQueriableIndex,
+                    checkTrue(hasQueriableIndex || forMaterializedView,
                               "PRIMARY KEY column \"%s\" cannot be restricted as preceding column \"%s\" is not restricted",
                               restrictedColumn.name,
                               clusteringColumn.name);

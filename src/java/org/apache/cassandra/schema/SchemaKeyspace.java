@@ -34,16 +34,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
-import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.*;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.view.MaterializedView;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -73,6 +74,7 @@ public final class SchemaKeyspace
     public static final String FUNCTIONS = "functions";
     public static final String AGGREGATES = "aggregates";
     public static final String INDEXES = "indexes";
+
 
     public static final List<String> ALL =
         ImmutableList.of(KEYSPACES, TABLES, COLUMNS, TRIGGERS, MATERIALIZED_VIEWS, TYPES, FUNCTIONS, AGGREGATES, INDEXES);
@@ -144,6 +146,8 @@ public final class SchemaKeyspace
                 + "trigger_options frozen<map<text, text>>,"
                 + "PRIMARY KEY ((keyspace_name), table_name, trigger_name))");
 
+    // where_clause is a list of <list<id>, operator, list<value>> tuples.  The inner lists allow us to represent
+    // multi-column relations.
     private static final CFMetaData MaterializedViews =
         compile(MATERIALIZED_VIEWS,
                 "materialized views definitions",
@@ -154,6 +158,7 @@ public final class SchemaKeyspace
                 + "target_columns frozen<list<text>>,"
                 + "clustering_columns frozen<list<text>>,"
                 + "included_columns frozen<list<text>>,"
+                + "where_clause frozen<list<tuple<list<text>, int, list<text>>>>,"
                 + "PRIMARY KEY ((keyspace_name), table_name, view_name))");
 
     private static final CFMetaData Indexes =
@@ -1287,7 +1292,19 @@ public final class SchemaKeyspace
         builder.frozenList("target_columns", materializedView.partitionColumns.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
         builder.frozenList("clustering_columns", materializedView.clusteringColumns.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
         builder.frozenList("included_columns", materializedView.included.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
-
+        List<ByteBuffer> expressions = new ArrayList<>(materializedView.expressions.size());
+        for (MaterializedView.WhereExpression expression : materializedView.expressions)
+        {
+            ByteBuffer[] components = new ByteBuffer[3];
+            components[0] = ListType.getInstance(UTF8Type.instance, false).getSerializer().serialize(expression.identifiers);
+            components[1] = Int32Type.instance.getSerializer().serialize(expression.operator.getValue());
+            if (expression.values == null)
+                components[2] = null;
+            else
+                components[2] =  ListType.getInstance(UTF8Type.instance, false).getSerializer().serialize(expression.values);
+            expressions.add(TupleType.buildValue(components));
+        }
+        builder.frozenList("where_clause", expressions);
         builder.build();
     }
 
@@ -1319,25 +1336,23 @@ public final class SchemaKeyspace
         return views.build();
     }
 
+
     private static MaterializedViewDefinition createMaterializedViewFromMaterializedViewRow(UntypedResultSet.Row row)
     {
         String name = row.getString("view_name");
         List<String> partitionColumnNames = row.getFrozenList("target_columns", UTF8Type.instance);
 
+        String ksName = row.getString("keyspace_name");
         String cfName = row.getString("table_name");
         List<String> clusteringColumnNames = row.getFrozenList("clustering_columns", UTF8Type.instance);
 
         List<ColumnIdentifier> partitionColumns = new ArrayList<>();
         for (String columnName : partitionColumnNames)
-        {
             partitionColumns.add(ColumnIdentifier.getInterned(columnName, true));
-        }
 
         List<ColumnIdentifier> clusteringColumns = new ArrayList<>();
         for (String columnName : clusteringColumnNames)
-        {
             clusteringColumns.add(ColumnIdentifier.getInterned(columnName, true));
-        }
 
         List<String> includedColumnNames = row.getFrozenList("included_columns", UTF8Type.instance);
         Set<ColumnIdentifier> includedColumns = new HashSet<>();
@@ -1347,11 +1362,32 @@ public final class SchemaKeyspace
                 includedColumns.add(ColumnIdentifier.getInterned(columnName, true));
         }
 
-        return new MaterializedViewDefinition(cfName,
+        ListType innerList = ListType.getInstance(UTF8Type.instance, false);
+        TupleType inner = new TupleType(Arrays.asList(innerList, Int32Type.instance, innerList));
+        Iterator<ByteBuffer> whereClause = row.getFrozenList("where_clause", inner).iterator();
+        List<MaterializedView.WhereExpression> expressions = new ArrayList<>();
+
+        while (whereClause.hasNext())
+        {
+            ByteBuffer[] buffers = inner.split(whereClause.next());
+            List<String> identifiers = (List<String>) innerList.serializer.deserializeForNativeProtocol(buffers[0], Server.CURRENT_VERSION);
+            Operator operator = Operator.fromValue(Int32Type.instance.getSerializer().deserialize(buffers[1]));
+            List<String> values = innerList.serializer.deserializeForNativeProtocol(buffers[2], Server.CURRENT_VERSION);
+
+            expressions.add(new MaterializedView.WhereExpression(identifiers, operator, values));
+        }
+
+        String rawSelect = MaterializedView.buildSelectStatement(cfName, includedColumns, expressions);
+        SelectStatement.RawStatement rawStatement = (SelectStatement.RawStatement) QueryProcessor.parseStatement(rawSelect);
+
+        return new MaterializedViewDefinition(ksName,
+                                              cfName,
                                               name,
                                               partitionColumns,
                                               clusteringColumns,
-                                              includedColumns);
+                                              includedColumns,
+                                              rawStatement,
+                                              expressions);
     }
 
     /*

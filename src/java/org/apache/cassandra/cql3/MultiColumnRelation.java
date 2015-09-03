@@ -114,9 +114,15 @@ public class MultiColumnRelation extends Relation
      * For non-IN relations, returns the Tuples.Literal or Tuples.Raw marker for a single tuple.
      * @return a Tuples.Literal for non-IN relations or Tuples.Raw marker for a single tuple.
      */
-    private Term.MultiColumnRaw getValue()
+    public Term.MultiColumnRaw getValue()
     {
         return relationType == Operator.IN ? inMarker : valuesOrMarker;
+    }
+
+    public List<? extends Term.Raw> getInValues()
+    {
+        assert relationType == Operator.IN;
+        return inValues;
     }
 
     @Override
@@ -164,7 +170,15 @@ public class MultiColumnRelation extends Relation
                                                  VariableSpecifications boundNames,
                                                  boolean isKey) throws InvalidRequestException
     {
-        throw invalidRequest("%s cannot be used for Multi-column relations", operator());
+        throw invalidRequest("%s cannot be used for multi-column relations", operator());
+    }
+
+    @Override
+    protected Restriction newIsNotRestriction(CFMetaData cfm,
+                                              VariableSpecifications boundNames) throws InvalidRequestException
+    {
+        // this is currently disallowed by the grammar
+        throw new AssertionError(String.format("%s cannot be used for multi-column relations", operator()));
     }
 
     @Override

@@ -39,6 +39,16 @@ public abstract class Relation {
     }
 
     /**
+     * Returns the raw value for this relation, or null if this is an IN relation.
+     */
+    public abstract Term.Raw getValue();
+
+    /**
+     * Returns the list of raw IN values for this relation, or null if this is not an IN relation.
+     */
+    public abstract List<? extends Term.Raw> getInValues();
+
+    /**
      * Checks if this relation apply to multiple columns.
      *
      * @return <code>true</code> if this relation apply to multiple columns, <code>false</code> otherwise.
@@ -132,6 +142,7 @@ public abstract class Relation {
             case IN: return newINRestriction(cfm, boundNames);
             case CONTAINS: return newContainsRestriction(cfm, boundNames, false);
             case CONTAINS_KEY: return newContainsRestriction(cfm, boundNames, true);
+            case IS_NOT: return newIsNotRestriction(cfm, boundNames);
             default: throw invalidRequest("Unsupported \"!=\" relation: %s", this);
         }
     }
@@ -185,6 +196,9 @@ public abstract class Relation {
     protected abstract Restriction newContainsRestriction(CFMetaData cfm,
                                                           VariableSpecifications boundNames,
                                                           boolean isKey) throws InvalidRequestException;
+
+    protected abstract Restriction newIsNotRestriction(CFMetaData cfm,
+                                                       VariableSpecifications boundNames) throws InvalidRequestException;
 
     /**
      * Converts the specified <code>Raw</code> into a <code>Term</code>.

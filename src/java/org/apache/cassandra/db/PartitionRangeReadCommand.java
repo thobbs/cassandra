@@ -30,6 +30,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.view.TemporalRow;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
@@ -141,6 +142,19 @@ public class PartitionRangeReadCommand extends ReadCommand
             return !columnFilter().fetchedColumns().statics.isEmpty();
 
         return dataRange().clusteringIndexFilter(partitionKey).selects(clustering);
+    }
+
+    public boolean selectsKey(DecoratedKey key)
+    {
+        return dataRange().contains(key) && rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key);
+    }
+
+    public boolean selectsClustering(DecoratedKey key, Clustering clustering)
+    {
+        if (clustering == Clustering.STATIC_CLUSTERING)
+            return !columnFilter().fetchedColumns().statics.isEmpty();
+
+        return dataRange().clusteringIndexFilter(key).selects(clustering) && rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
     public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState) throws RequestExecutionException

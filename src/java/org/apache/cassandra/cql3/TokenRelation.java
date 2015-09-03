@@ -63,6 +63,16 @@ public final class TokenRelation extends Relation
         return true;
     }
 
+    public Term.Raw getValue()
+    {
+        return value;
+    }
+
+    public List<? extends Term.Raw> getInValues()
+    {
+        return null;
+    }
+
     @Override
     protected Restriction newEQRestriction(CFMetaData cfm, VariableSpecifications boundNames) throws InvalidRequestException
     {
@@ -90,6 +100,12 @@ public final class TokenRelation extends Relation
 
     @Override
     protected Restriction newContainsRestriction(CFMetaData cfm, VariableSpecifications boundNames, boolean isKey) throws InvalidRequestException
+    {
+        throw invalidRequest("%s cannot be used with the token function", operator());
+    }
+
+    @Override
+    protected Restriction newIsNotRestriction(CFMetaData cfm, VariableSpecifications boundNames) throws InvalidRequestException
     {
         throw invalidRequest("%s cannot be used with the token function", operator());
     }

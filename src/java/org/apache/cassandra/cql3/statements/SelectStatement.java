@@ -451,6 +451,17 @@ public class SelectStatement implements CQLStatement
         return new SinglePartitionReadCommand.Group(commands, limit);
     }
 
+    /**
+     * Returns a read command that can be used internally to filter individual rows when building a materialized view.
+     */
+    public SinglePartitionReadCommand internalReadForMVBuild(DecoratedKey key)
+    {
+        QueryOptions options = QueryOptions.forInternalCalls(Collections.emptyList());
+        ClusteringIndexFilter filter = makeClusteringIndexFilter(options);
+        RowFilter rowFilter = getRowFilter(options);
+        return SinglePartitionReadCommand.create(cfm, FBUtilities.nowInSeconds(), queriedColumns, rowFilter, DataLimits.NONE, key, filter);
+    }
+
     private ReadQuery getRangeCommand(QueryOptions options, DataLimits limit, int nowInSec) throws RequestValidationException
     {
         ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options);
@@ -737,6 +748,11 @@ public class SelectStatement implements CQLStatement
 
         public ParsedStatement.Prepared prepare() throws InvalidRequestException
         {
+            return prepare(false);
+        }
+
+        public ParsedStatement.Prepared prepare(boolean forMaterializedView) throws InvalidRequestException
+        {
             CFMetaData cfm = ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
             VariableSpecifications boundNames = getBoundVariables();
 
@@ -744,7 +760,7 @@ public class SelectStatement implements CQLStatement
                                   ? Selection.wildcard(cfm)
                                   : Selection.fromSelectors(cfm, selectClause);
 
-            StatementRestrictions restrictions = prepareRestrictions(cfm, boundNames, selection);
+            StatementRestrictions restrictions = prepareRestrictions(cfm, boundNames, selection, forMaterializedView);
 
             if (parameters.isDistinct)
                 validateDistinctSelection(cfm, selection, restrictions);
@@ -754,6 +770,7 @@ public class SelectStatement implements CQLStatement
 
             if (!parameters.orderings.isEmpty())
             {
+                assert !forMaterializedView;
                 verifyOrderingIsAllowed(restrictions);
                 orderingComparator = getOrderingComparator(cfm, selection, restrictions);
                 isReversed = isReversed(cfm);
@@ -786,7 +803,8 @@ public class SelectStatement implements CQLStatement
          */
         private StatementRestrictions prepareRestrictions(CFMetaData cfm,
                                                           VariableSpecifications boundNames,
-                                                          Selection selection) throws InvalidRequestException
+                                                          Selection selection,
+                                                          boolean forMaterializedView) throws InvalidRequestException
         {
             try
             {
@@ -795,7 +813,8 @@ public class SelectStatement implements CQLStatement
                                                  boundNames,
                                                  selection.containsOnlyStaticColumns(),
                                                  selection.containsACollection(),
-                                                 parameters.allowFiltering);
+                                                 parameters.allowFiltering,
+                                                 forMaterializedView);
             }
             catch (UnrecognizedEntityException e)
             {

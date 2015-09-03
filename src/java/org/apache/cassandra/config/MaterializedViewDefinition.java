@@ -18,15 +18,16 @@
 
 package org.apache.cassandra.config;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.db.view.MaterializedView;
 
 public class MaterializedViewDefinition
 {
+    public final String keyspace;
     public final String baseCfName;
     public final String viewName;
     // The order of partititon columns and clustering columns is important, so we cannot switch these two to sets
@@ -35,9 +36,15 @@ public class MaterializedViewDefinition
     public final Set<ColumnIdentifier> included;
     public final boolean includeAll;
 
+    public SelectStatement.RawStatement select;
+
+    // the list of expressions must be maintained to support renaming of base table columns
+    public List<MaterializedView.WhereExpression> expressions;
+
     public MaterializedViewDefinition(MaterializedViewDefinition def)
     {
-        this(def.baseCfName, def.viewName, new ArrayList<>(def.partitionColumns), new ArrayList<>(def.clusteringColumns), new HashSet<>(def.included));
+        this(def.keyspace, def.baseCfName, def.viewName, new ArrayList<>(def.partitionColumns), new ArrayList<>(def.clusteringColumns),
+             new HashSet<>(def.included), def.select, def.expressions);
     }
 
     /**
@@ -47,16 +54,21 @@ public class MaterializedViewDefinition
      * @param clusteringColumns List of all of the clustering columns, in the order they are defined
      * @param included
      */
-    public MaterializedViewDefinition(String baseCfName, String viewName, List<ColumnIdentifier> partitionColumns, List<ColumnIdentifier> clusteringColumns, Set<ColumnIdentifier> included)
+    public MaterializedViewDefinition(String keyspace, String baseCfName, String viewName, List<ColumnIdentifier> partitionColumns,
+                                      List<ColumnIdentifier> clusteringColumns, Set<ColumnIdentifier> included,
+                                      SelectStatement.RawStatement select, List<MaterializedView.WhereExpression> expressions)
     {
         assert partitionColumns != null && !partitionColumns.isEmpty();
         assert included != null;
+        this.keyspace = keyspace;
         this.baseCfName = baseCfName;
         this.viewName = viewName;
         this.partitionColumns = partitionColumns;
         this.clusteringColumns = clusteringColumns;
         this.includeAll = included.isEmpty();
         this.included = included;
+        this.select = select;
+        this.expressions = expressions;
     }
 
     /**
@@ -89,5 +101,14 @@ public class MaterializedViewDefinition
         int clusteringIndex = clusteringColumns.indexOf(from);
         if (clusteringIndex >= 0)
             clusteringColumns.set(clusteringIndex, to);
+
+        List<MaterializedView.WhereExpression> newExpressions = new ArrayList<>(expressions.size());
+        for (MaterializedView.WhereExpression expression : expressions)
+            newExpressions.add(expression.renameIdentifier(from.toString(), to.toString()));
+
+        this.expressions = newExpressions;
+
+        String rawSelect = MaterializedView.buildSelectStatement(baseCfName, included, newExpressions);
+        this.select = (SelectStatement.RawStatement) QueryProcessor.parseStatement(rawSelect);
     }
 }

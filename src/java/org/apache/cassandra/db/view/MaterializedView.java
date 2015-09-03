@@ -18,13 +18,8 @@
 package org.apache.cassandra.db.view;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
@@ -35,22 +30,13 @@ import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.MaterializedViewDefinition;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.CFProperties;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.AbstractReadCommandBuilder.SinglePartitionSliceBuilder;
-import org.apache.cassandra.db.CBuilder;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionInfo;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.RangeTombstone;
-import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadOrderGroup;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.partitions.AbstractBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
@@ -62,7 +48,10 @@ import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.commons.lang.StringUtils;
 
 /**
  * A Materialized View copies data from a base table into a view table which can be queried independently from the
@@ -109,6 +98,12 @@ public class MaterializedView
     private final boolean includeAll;
     private MaterializedViewBuilder builder;
 
+    // only the raw statement can be final, because the statement cannot always be prepared when the MV is initialized;
+    // sometimes the keyspace does not yet exist or an alter to the base table has not been comitted yet
+    private final SelectStatement.RawStatement rawSelect;
+    private SelectStatement select;
+    private ReadQuery query;
+
     public MaterializedView(MaterializedViewDefinition definition,
                             ColumnFamilyStore baseCfs)
     {
@@ -118,6 +113,7 @@ public class MaterializedView
         includeAll = definition.includeAll;
 
         viewHasAllPrimaryKeys = updateDefinition(definition);
+        this.rawSelect = definition.select;
     }
 
     /**
@@ -134,6 +130,34 @@ public class MaterializedView
         return _viewCfs;
     }
 
+    /**
+     * Returns the SelectStatement used to populate and filter this view.  Internal users should access the select
+     * statement this way to ensure it has been prepared.
+     */
+    public SelectStatement getSelectStatement()
+    {
+        if (select == null)
+        {
+            ClientState state = ClientState.forInternalCalls();
+            state.setKeyspace(baseCfs.keyspace.getName());
+            rawSelect.prepareKeyspace(state);
+            ParsedStatement.Prepared prepared = rawSelect.prepare(true);
+            select = (SelectStatement) prepared.statement;
+        }
+
+        return select;
+    }
+
+    /**
+     * Returns the ReadQuery used to filter this view.  Internal users should access the query this way to ensure it
+     * has been prepared.
+     */
+    public ReadQuery getReadQuery()
+    {
+        if (query == null)
+            query = getSelectStatement().getQuery(QueryOptions.forInternalCalls(Collections.emptyList()), FBUtilities.nowInSeconds());
+        return query;
+    }
 
     /**
      * Lookup column definitions in the base table that correspond to the view columns (should be 1:1)
@@ -210,9 +234,9 @@ public class MaterializedView
      */
     public boolean updateAffectsView(AbstractBTreePartition partition)
     {
-        // If we are including all of the columns, then any update will be included
-        if (includeAll)
-            return true;
+        ReadQuery selectQuery = getReadQuery();
+        if (!selectQuery.selectsKey(partition.partitionKey()))
+            return false;
 
         // If there are range tombstones, tombstones will also need to be generated for the materialized view
         // This requires a query of the base rows and generating tombstones for all of those values
@@ -222,9 +246,10 @@ public class MaterializedView
         // Check each row for deletion or update
         for (Row row : partition)
         {
-            if (row.hasComplexDeletion())
-                return true;
-            if (!row.deletion().isLive())
+            if (!selectQuery.selectsClustering(partition.partitionKey(), row.clustering()))
+                continue;
+
+            if (includeAll || viewHasAllPrimaryKeys || row.hasComplexDeletion() || !row.deletion().isLive())
                 return true;
 
             for (ColumnData data : row)
@@ -312,9 +337,8 @@ public class MaterializedView
         }
 
         CFMetaData metadata = getViewCfs().metadata;
-        return metadata.decorateKey(CFMetaData.serializePartitionKey(metadata
-                                                                     .getKeyValidatorAsClusteringComparator()
-                                                                     .make(partitionKey)));
+        return metadata.decorateKey(CFMetaData.serializePartitionKey(
+                metadata.getKeyValidatorAsClusteringComparator().make(partitionKey)));
     }
 
     /**
@@ -745,5 +769,60 @@ public class MaterializedView
         }
 
         return viewBuilder.build().params(properties.properties.asNewTableParams());
+    }
+
+    /**
+     * Builds the string text for a materialized view's SELECT statement.
+     */
+    public static String buildSelectStatement(String cfName, Collection<ColumnIdentifier> includedColumns, List<WhereExpression> expressions)
+    {
+        StringBuilder rawSelect = new StringBuilder("SELECT ");
+        if (includedColumns == null || includedColumns.isEmpty())
+            rawSelect.append("*");
+        else
+            rawSelect.append(includedColumns.stream().map(id -> String.format("\"%s\"", id)).collect(Collectors.joining(", ")));
+        rawSelect.append(" FROM \"").append(cfName).append("\" WHERE ");
+        rawSelect.append(StringUtils.join(expressions, " AND "));
+        rawSelect.append(" ALLOW FILTERING");
+        return rawSelect.toString();
+    }
+
+    public static class WhereExpression
+    {
+        public final List<String> identifiers;
+        public final Operator operator;
+        public final List<String> values;
+
+        public WhereExpression(List<String> identifiers, Operator operator, List<String> values)
+        {
+            this.identifiers = identifiers;
+            this.operator = operator;
+            this.values = values;
+        }
+
+        public WhereExpression renameIdentifier(String from, String to)
+        {
+            ArrayList<String> newIdentifiers = new ArrayList<>(identifiers.size());
+            for (String identifier : identifiers)
+                newIdentifiers.add(identifier.equals(from) ? to : identifier);
+            return new WhereExpression(newIdentifiers, operator, values);
+        }
+
+        public String toString()
+        {
+            StringBuilder sb = new StringBuilder();
+            if (identifiers.size() > 1)
+                sb.append(identifiers.stream().collect(Collectors.joining("\", \"", "(\"", "\")")));
+            else
+                sb.append('"').append(identifiers.get(0)).append('"').append(" ");
+
+            sb.append(operator).append(" ");
+
+            if (values.size() > 1)
+                sb.append(values.stream().collect(Collectors.joining(", ", "(", ")")));
+            else
+                sb.append(values.get(0));
+            return sb.toString();
+        }
     }
 }
