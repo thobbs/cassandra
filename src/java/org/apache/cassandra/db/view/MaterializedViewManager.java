@@ -59,6 +59,7 @@ import org.apache.cassandra.service.StorageService;
 public class MaterializedViewManager
 {
     private static final Striped<Lock> LOCKS = Striped.lazyWeakLock(DatabaseDescriptor.getConcurrentWriters() * 1024);
+    private static final boolean disableCoordinatorBatchlog = Boolean.getBoolean("cassandra.mv_disable_coordinator_batchlog");
 
     private final ConcurrentNavigableMap<String, MaterializedView> viewsByName;
 
@@ -150,12 +151,8 @@ public class MaterializedViewManager
      * Calculates and pushes updates to the views replicas. The replicas are determined by
      * {@link MaterializedViewUtils#getViewNaturalEndpoint(String, Token, Token)}.
      */
-    public void pushViewReplicaUpdates(PartitionUpdate update) throws UnavailableException, OverloadedException, WriteTimeoutException
+    public void pushViewReplicaUpdates(PartitionUpdate update, boolean writeCommitLog)
     {
-        // This happens when we are replaying from commitlog. In that case, we have already sent this commit off to the
-        // view node.
-        if (!StorageService.instance.isJoined()) return;
-
         List<Mutation> mutations = null;
         TemporalRow.Set temporalRows = null;
         for (Map.Entry<String, MaterializedView> view : viewsByName.entrySet())
@@ -173,7 +170,7 @@ public class MaterializedViewManager
         }
         if (mutations != null)
         {
-            StorageProxy.mutateMV(update.partitionKey().getKey(), mutations);
+            StorageProxy.mutateMV(update.partitionKey().getKey(), mutations, writeCommitLog);
         }
     }
 
@@ -197,15 +194,18 @@ public class MaterializedViewManager
         return null;
     }
 
-    public static boolean updatesAffectView(Collection<? extends IMutation> mutations, boolean ignoreRf1)
+    public static boolean updatesAffectView(Collection<? extends IMutation> mutations, boolean coordinatorBatchlog)
     {
+        if (coordinatorBatchlog && disableCoordinatorBatchlog)
+            return false;
+
         for (IMutation mutation : mutations)
         {
             for (PartitionUpdate cf : mutation.getPartitionUpdates())
             {
                 Keyspace keyspace = Keyspace.open(cf.metadata().ksName);
 
-                if (ignoreRf1 && keyspace.getReplicationStrategy().getReplicationFactor() == 1)
+                if (coordinatorBatchlog && keyspace.getReplicationStrategy().getReplicationFactor() == 1)
                     continue;
 
                 MaterializedViewManager viewManager = keyspace.getColumnFamilyStore(cf.metadata().cfId).materializedViewManager;

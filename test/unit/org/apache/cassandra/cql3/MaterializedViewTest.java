@@ -31,6 +31,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import com.datastax.driver.core.*;
+import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.exceptions.InvalidQueryException;
 import junit.framework.Assert;
 import org.apache.cassandra.concurrent.SEPExecutor;
@@ -284,6 +285,32 @@ public class MaterializedViewTest extends CQLTester
         catch (InvalidQueryException e)
         {
         }
+    }
+
+    @Test
+    public void testBuilderWidePartition() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                    "k int, " +
+                    "c int, " +
+                    "intval int, " +
+                    "PRIMARY KEY (k, c))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+
+        for(int i = 0; i < 1024; i++)
+            execute("INSERT INTO %s (k, c, intval) VALUES (?, ?, ?)", 0, i, 0);
+
+        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE k IS NOT NULL AND c IS NOT NULL AND intval IS NOT NULL PRIMARY KEY (intval, c, k)");
+
+
+        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv"))
+            Thread.sleep(1000);
+
+        assertRows(execute("SELECT count(*) from %s WHERE k = ?", 0), row(1024L));
+        assertRows(execute("SELECT count(*) from mv WHERE intval = ?", 0), row(1024L));
     }
 
     @Test
@@ -2001,5 +2028,30 @@ public class MaterializedViewTest extends CQLTester
             execute("DELETE FROM %s WHERE a = ?", 1);
             assertEmpty(execute("SELECT a, b, c, d FROM mv_test" + i));
         }
+    }
+
+    @Test
+    public void conflictingTimestampTest() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                    "a int," +
+                    "b int," +
+                    "c int," +
+                    "PRIMARY KEY (a, b))");
+
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE c IS NOT NULL AND a IS NOT NULL AND b IS NOT NULL PRIMARY KEY (c, a, b)");
+
+        for (int i = 0; i < 50; i++)
+        {
+            updateMV("INSERT INTO %s (a, b, c) VALUES (?, ?, ?) USING TIMESTAMP 1", 1, 1, i);
+        }
+
+        ResultSet mvRows = executeNet(protocolVersion, "SELECT c FROM mv");
+        List<Row> rows = executeNet(protocolVersion, "SELECT c FROM %s").all();
+        Assert.assertEquals("There should be exactly one row in base", 1, rows.size());
+        int expected = rows.get(0).getInt("c");
+        assertRowsNet(protocolVersion, mvRows, row(expected));
     }
 }

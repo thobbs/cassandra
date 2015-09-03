@@ -80,6 +80,7 @@ public class NodeTool
                 GetCompactionThreshold.class,
                 GetCompactionThroughput.class,
                 GetStreamThroughput.class,
+                GetTraceProbability.class,
                 GetEndpoints.class,
                 GetSSTables.class,
                 GossipInfo.class,
@@ -339,11 +340,11 @@ public class NodeTool
         }
     }
 
-    public static Map<String, SetHostStat> getOwnershipByDc(NodeProbe probe, boolean resolveIp,
-                                                             Map<String, String> tokenToEndpoint,
-                                                             Map<InetAddress, Float> ownerships)
+    public static SortedMap<String, SetHostStat> getOwnershipByDc(NodeProbe probe, boolean resolveIp,
+                                                                  Map<String, String> tokenToEndpoint,
+                                                                  Map<InetAddress, Float> ownerships)
     {
-        Map<String, SetHostStat> ownershipByDc = Maps.newLinkedHashMap();
+        SortedMap<String, SetHostStat> ownershipByDc = Maps.newTreeMap();
         EndpointSnitchInfoMBean epSnitchInfo = probe.getEndpointSnitchInfoProxy();
         try
         {
