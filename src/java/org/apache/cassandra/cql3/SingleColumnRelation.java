@@ -133,6 +133,13 @@ public final class SingleColumnRelation extends Relation
         }
     }
 
+    public Relation renameIdentifier(ColumnIdentifier.Raw from, ColumnIdentifier.Raw to)
+    {
+        return entity.equals(from)
+               ? new SingleColumnRelation(to, mapKey, operator(), value, inValues)
+               : this;
+    }
+
     @Override
     public String toString()
     {

@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 
@@ -119,6 +120,15 @@ public final class TokenRelation extends Relation
         Term term = raw.prepare(keyspace, receivers.get(0));
         term.collectMarkerSpecification(boundNames);
         return term;
+    }
+
+    public Relation renameIdentifier(ColumnIdentifier.Raw from, ColumnIdentifier.Raw to)
+    {
+        if (!entities.contains(from))
+            return this;
+
+        List<ColumnIdentifier.Raw> newEntities = entities.stream().map(e -> e.equals(from) ? to : e).collect(Collectors.toList());
+        return new TokenRelation(newEntities, operator(), value);
     }
 
     @Override

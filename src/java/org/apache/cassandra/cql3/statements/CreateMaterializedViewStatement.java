@@ -181,7 +181,7 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
                     ColumnDefinition.toIdentifiers(new ArrayList<>(restrictions.nonPKRestrictedColumns()))));
         }
 
-        List<MaterializedView.WhereExpression> expressions = relationsToExpressions(whereClause);
+        String whereClauseText = MaterializedView.relationsToWhereClause(whereClause);
 
         Set<ColumnIdentifier> basePrimaryKeyCols = new HashSet<>();
         for (ColumnDefinition definition : Iterables.concat(cfm.partitionKeyColumns(), cfm.clusteringColumns()))
@@ -243,7 +243,7 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
                                                                                targetClusteringColumns,
                                                                                included,
                                                                                rawSelect,
-                                                                               expressions);
+                                                                               whereClauseText);
 
         CFMetaData indexCf = MaterializedView.getCFMetaData(definition, cfm, properties);
         try
@@ -263,42 +263,6 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
         MigrationManager.announceColumnFamilyUpdate(newCfm, false, isLocalOnly);
 
         return true;
-    }
-
-    private static List<MaterializedView.WhereExpression> relationsToExpressions(List<Relation> whereClause)
-    {
-        List<MaterializedView.WhereExpression> expressions = new ArrayList<>(whereClause.size());
-        for (Relation rel : whereClause)
-        {
-            List<String> identifiers;
-            if (rel.isMultiColumn())
-            {
-                MultiColumnRelation relation = (MultiColumnRelation) rel;
-                identifiers = new ArrayList<>(relation.getEntities().size());
-                for (ColumnIdentifier.Raw raw : relation.getEntities())
-                    identifiers.add(raw.toString());
-            }
-            else
-            {
-                SingleColumnRelation relation = (SingleColumnRelation) rel;
-                identifiers = Collections.singletonList(relation.getEntity().toString());
-            }
-
-            List<String> values = new ArrayList<>();
-            if (rel.isIN())
-            {
-                values.add(rel.getInValues().stream()
-                                            .map(rawTerm -> ((Term.Literal) rawTerm).getRawText())
-                                            .collect(Collectors.joining(", ", "(", ")")));
-            }
-            else
-            {
-                values.add(((Term.Literal) rel.getValue()).getRawText());
-            }
-
-            expressions.add(new MaterializedView.WhereExpression(identifiers, rel.operator(), values));
-        }
-        return expressions;
     }
 
     private static boolean getColumnIdentifier(CFMetaData cfm,

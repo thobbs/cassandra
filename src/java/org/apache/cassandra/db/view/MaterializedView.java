@@ -29,9 +29,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.MaterializedViewDefinition;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.Operator;
-import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.CFProperties;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
@@ -774,55 +772,51 @@ public class MaterializedView
     /**
      * Builds the string text for a materialized view's SELECT statement.
      */
-    public static String buildSelectStatement(String cfName, Collection<ColumnIdentifier> includedColumns, List<WhereExpression> expressions)
+    public static String buildSelectStatement(String cfName, Collection<ColumnIdentifier> includedColumns, String whereClause)
     {
-        StringBuilder rawSelect = new StringBuilder("SELECT ");
+         StringBuilder rawSelect = new StringBuilder("SELECT ");
         if (includedColumns == null || includedColumns.isEmpty())
             rawSelect.append("*");
         else
             rawSelect.append(includedColumns.stream().map(id -> String.format("\"%s\"", id)).collect(Collectors.joining(", ")));
-        rawSelect.append(" FROM \"").append(cfName).append("\" WHERE ");
-        rawSelect.append(StringUtils.join(expressions, " AND "));
-        rawSelect.append(" ALLOW FILTERING");
+        rawSelect.append(" FROM \"").append(cfName).append("\" WHERE ") .append(whereClause).append(" ALLOW FILTERING");
         return rawSelect.toString();
     }
 
-    public static class WhereExpression
+    public static String relationsToWhereClause(List<Relation> whereClause)
     {
-        public final List<String> identifiers;
-        public final Operator operator;
-        public final List<String> values;
-
-        public WhereExpression(List<String> identifiers, Operator operator, List<String> values)
-        {
-            this.identifiers = identifiers;
-            this.operator = operator;
-            this.values = values;
-        }
-
-        public WhereExpression renameIdentifier(String from, String to)
-        {
-            ArrayList<String> newIdentifiers = new ArrayList<>(identifiers.size());
-            for (String identifier : identifiers)
-                newIdentifiers.add(identifier.equals(from) ? to : identifier);
-            return new WhereExpression(newIdentifiers, operator, values);
-        }
-
-        public String toString()
+        List<String> expressions = new ArrayList<>(whereClause.size());
+        for (Relation rel : whereClause)
         {
             StringBuilder sb = new StringBuilder();
-            if (identifiers.size() > 1)
-                sb.append(identifiers.stream().collect(Collectors.joining("\", \"", "(\"", "\")")));
-            else
-                sb.append('"').append(identifiers.get(0)).append('"').append(" ");
 
-            sb.append(operator).append(" ");
-
-            if (values.size() > 1)
-                sb.append(values.stream().collect(Collectors.joining(", ", "(", ")")));
+            if (rel.isMultiColumn())
+            {
+                sb.append(((MultiColumnRelation) rel).getEntities().stream()
+                        .map(ColumnIdentifier.Raw::toString)
+                        .collect(Collectors.joining("\", \"", "(\"", "\")")));
+            }
             else
-                sb.append(values.get(0));
-            return sb.toString();
+            {
+                sb.append('"').append(((SingleColumnRelation) rel).getEntity()).append('"');
+            }
+
+            sb.append(" ").append(rel.operator()).append(" ");
+
+            if (rel.isIN())
+            {
+                sb.append(rel.getInValues().stream()
+                        .map(rawTerm -> ((Term.Literal) rawTerm).getRawText())
+                        .collect(Collectors.joining(", ", "(", ")")));
+            }
+            else
+            {
+                sb.append(((Term.Literal) rel.getValue()).getRawText());
+            }
+
+            expressions.add(sb.toString());
         }
+
+        return expressions.stream().collect(Collectors.joining(" AND "));
     }
 }

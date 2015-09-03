@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -210,6 +211,15 @@ public class MultiColumnRelation extends Relation
             previousPosition = def.position();
         }
         return names;
+    }
+
+    public Relation renameIdentifier(ColumnIdentifier.Raw from, ColumnIdentifier.Raw to)
+    {
+        if (!entities.contains(from))
+            return this;
+
+        List<ColumnIdentifier.Raw> newEntities = entities.stream().map(e -> e.equals(from) ? to : e).collect(Collectors.toList());
+        return new MultiColumnRelation(newEntities, operator(), valuesOrMarker, inValues, inMarker);
     }
 
     @Override

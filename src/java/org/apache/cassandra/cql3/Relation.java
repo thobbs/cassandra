@@ -260,4 +260,13 @@ public abstract class Relation {
 
         return def;
     }
+
+    /**
+     * Renames an identifier in this Relation, if applicable.
+     * @param from the old identifier
+     * @param to the new identifier
+     * @return this object, if the old identifier is not in the set of entities that this relation covers; otherwise
+     *         a new Relation with "from" replaced by "to" is returned.
+     */
+    public abstract Relation renameIdentifier(ColumnIdentifier.Raw from, ColumnIdentifier.Raw to);
 }

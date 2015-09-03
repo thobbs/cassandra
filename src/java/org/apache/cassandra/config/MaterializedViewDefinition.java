@@ -19,11 +19,14 @@
 package org.apache.cassandra.config;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
-import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.QueryProcessor;
+import org.antlr.runtime.*;
+import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.view.MaterializedView;
+import org.apache.cassandra.exceptions.SyntaxException;
 
 public class MaterializedViewDefinition
 {
@@ -37,14 +40,12 @@ public class MaterializedViewDefinition
     public final boolean includeAll;
 
     public SelectStatement.RawStatement select;
-
-    // the list of expressions must be maintained to support renaming of base table columns
-    public List<MaterializedView.WhereExpression> expressions;
+    public String whereClause;
 
     public MaterializedViewDefinition(MaterializedViewDefinition def)
     {
         this(def.keyspace, def.baseCfName, def.viewName, new ArrayList<>(def.partitionColumns), new ArrayList<>(def.clusteringColumns),
-             new HashSet<>(def.included), def.select, def.expressions);
+             new HashSet<>(def.included), def.select, def.whereClause);
     }
 
     /**
@@ -56,7 +57,7 @@ public class MaterializedViewDefinition
      */
     public MaterializedViewDefinition(String keyspace, String baseCfName, String viewName, List<ColumnIdentifier> partitionColumns,
                                       List<ColumnIdentifier> clusteringColumns, Set<ColumnIdentifier> included,
-                                      SelectStatement.RawStatement select, List<MaterializedView.WhereExpression> expressions)
+                                      SelectStatement.RawStatement select, String whereClause)
     {
         assert partitionColumns != null && !partitionColumns.isEmpty();
         assert included != null;
@@ -68,7 +69,7 @@ public class MaterializedViewDefinition
         this.includeAll = included.isEmpty();
         this.included = included;
         this.select = select;
-        this.expressions = expressions;
+        this.whereClause = whereClause;
     }
 
     /**
@@ -102,13 +103,42 @@ public class MaterializedViewDefinition
         if (clusteringIndex >= 0)
             clusteringColumns.set(clusteringIndex, to);
 
-        List<MaterializedView.WhereExpression> newExpressions = new ArrayList<>(expressions.size());
-        for (MaterializedView.WhereExpression expression : expressions)
-            newExpressions.add(expression.renameIdentifier(from.toString(), to.toString()));
+        // convert whereClause to Relations, rename ids in Relations, then convert back to whereClause
+        List<Relation> relations = whereClauseToRelations(whereClause);
+        ColumnIdentifier.Raw fromRaw = new ColumnIdentifier.Raw(from.toString(), true);
+        ColumnIdentifier.Raw toRaw = new ColumnIdentifier.Raw(to.toString(), true);
+        List<Relation> newRelations = relations.stream() .map(r -> r.renameIdentifier(fromRaw, toRaw)) .collect(Collectors.toList());
 
-        this.expressions = newExpressions;
-
-        String rawSelect = MaterializedView.buildSelectStatement(baseCfName, included, newExpressions);
+        this.whereClause = MaterializedView.relationsToWhereClause(newRelations);
+        String rawSelect = MaterializedView.buildSelectStatement(baseCfName, included, whereClause);
         this.select = (SelectStatement.RawStatement) QueryProcessor.parseStatement(rawSelect);
+    }
+
+    /** Parses the whereClause to convert it into a list of Relations. */
+    private static List<Relation> whereClauseToRelations(String whereClause)
+    {
+        ErrorCollector errorCollector = new ErrorCollector(whereClause);
+        CharStream stream = new ANTLRStringStream(whereClause);
+        CqlLexer lexer = new CqlLexer(stream);
+        lexer.addErrorListener(errorCollector);
+
+        TokenStream tokenStream = new CommonTokenStream(lexer);
+        CqlParser parser = new CqlParser(tokenStream);
+        parser.addErrorListener(errorCollector);
+
+        try
+        {
+            List<Relation> relations = parser.whereClause();
+
+            // The errorCollector has queued up any errors that the lexer and parser may have encountered
+            // along the way, if necessary, we turn the last error into exceptions here.
+            errorCollector.throwFirstSyntaxError();
+
+            return relations;
+        }
+        catch (RecognitionException | SyntaxException exc)
+        {
+            throw new RuntimeException("Unexpected error parsing materialized view's where clause while handling column rename: ", exc);
+        }
     }
 }

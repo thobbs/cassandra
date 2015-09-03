@@ -146,8 +146,6 @@ public final class SchemaKeyspace
                 + "trigger_options frozen<map<text, text>>,"
                 + "PRIMARY KEY ((keyspace_name), table_name, trigger_name))");
 
-    // where_clause is a list of <list<id>, operator, list<value>> tuples.  The inner lists allow us to represent
-    // multi-column relations.
     private static final CFMetaData MaterializedViews =
         compile(MATERIALIZED_VIEWS,
                 "materialized views definitions",
@@ -158,7 +156,7 @@ public final class SchemaKeyspace
                 + "target_columns frozen<list<text>>,"
                 + "clustering_columns frozen<list<text>>,"
                 + "included_columns frozen<list<text>>,"
-                + "where_clause frozen<list<tuple<list<text>, int, list<text>>>>,"
+                + "where_clause text,"
                 + "PRIMARY KEY ((keyspace_name), table_name, view_name))");
 
     private static final CFMetaData Indexes =
@@ -1292,19 +1290,7 @@ public final class SchemaKeyspace
         builder.frozenList("target_columns", materializedView.partitionColumns.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
         builder.frozenList("clustering_columns", materializedView.clusteringColumns.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
         builder.frozenList("included_columns", materializedView.included.stream().map(ColumnIdentifier::toString).collect(Collectors.toList()));
-        List<ByteBuffer> expressions = new ArrayList<>(materializedView.expressions.size());
-        for (MaterializedView.WhereExpression expression : materializedView.expressions)
-        {
-            ByteBuffer[] components = new ByteBuffer[3];
-            components[0] = ListType.getInstance(UTF8Type.instance, false).getSerializer().serialize(expression.identifiers);
-            components[1] = Int32Type.instance.getSerializer().serialize(expression.operator.getValue());
-            if (expression.values == null)
-                components[2] = null;
-            else
-                components[2] =  ListType.getInstance(UTF8Type.instance, false).getSerializer().serialize(expression.values);
-            expressions.add(TupleType.buildValue(components));
-        }
-        builder.frozenList("where_clause", expressions);
+        builder.add("where_clause", materializedView.whereClause);
         builder.build();
     }
 
@@ -1362,22 +1348,8 @@ public final class SchemaKeyspace
                 includedColumns.add(ColumnIdentifier.getInterned(columnName, true));
         }
 
-        ListType innerList = ListType.getInstance(UTF8Type.instance, false);
-        TupleType inner = new TupleType(Arrays.asList(innerList, Int32Type.instance, innerList));
-        Iterator<ByteBuffer> whereClause = row.getFrozenList("where_clause", inner).iterator();
-        List<MaterializedView.WhereExpression> expressions = new ArrayList<>();
-
-        while (whereClause.hasNext())
-        {
-            ByteBuffer[] buffers = inner.split(whereClause.next());
-            List<String> identifiers = (List<String>) innerList.serializer.deserializeForNativeProtocol(buffers[0], Server.CURRENT_VERSION);
-            Operator operator = Operator.fromValue(Int32Type.instance.getSerializer().deserialize(buffers[1]));
-            List<String> values = innerList.serializer.deserializeForNativeProtocol(buffers[2], Server.CURRENT_VERSION);
-
-            expressions.add(new MaterializedView.WhereExpression(identifiers, operator, values));
-        }
-
-        String rawSelect = MaterializedView.buildSelectStatement(cfName, includedColumns, expressions);
+        String whereClause = row.getString("where_clause");
+        String rawSelect = MaterializedView.buildSelectStatement(cfName, includedColumns, whereClause);
         SelectStatement.RawStatement rawStatement = (SelectStatement.RawStatement) QueryProcessor.parseStatement(rawSelect);
 
         return new MaterializedViewDefinition(ksName,
@@ -1387,7 +1359,7 @@ public final class SchemaKeyspace
                                               clusteringColumns,
                                               includedColumns,
                                               rawStatement,
-                                              expressions);
+                                              whereClause);
     }
 
     /*
