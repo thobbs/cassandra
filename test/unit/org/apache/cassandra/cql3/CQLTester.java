@@ -29,12 +29,12 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.ResultSet;
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableSet;
-import org.apache.commons.lang.StringUtils;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -833,17 +833,14 @@ public abstract class CQLTester
                 if (!missing.isEmpty())
                     sb.append("and ").append(missing.size()).append(" missing row(s) ");
                 sb.append("in result.  Extra rows:\n    ");
-                sb.append(StringUtils.join(extraRows, "\n    "));
+                sb.append(extraRows.stream().collect(Collectors.joining("\n    ")));
                 if (!missing.isEmpty())
-                    sb.append("\nMissing Rows:\n    ").append(StringUtils.join(missingRows, "\n    "));
+                    sb.append("\nMissing Rows:\n    ").append(missingRows.stream().collect(Collectors.joining("\n    ")));
                 Assert.fail(sb.toString());
             }
 
             if (!missing.isEmpty())
-            {
-                List<String> messages = makeRowStrings(missing, meta);
-                Assert.fail("Missing " + missing.size() + " row(s) in result: \n    " + StringUtils.join(messages, "\n    "));
-            }
+                Assert.fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
         }
 
         assert expectedRows.size() == actualRows.size();

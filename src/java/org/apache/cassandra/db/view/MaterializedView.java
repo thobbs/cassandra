@@ -49,7 +49,6 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.commons.lang.StringUtils;
 
 /**
  * A Materialized View copies data from a base table into a view table which can be queried independently from the
