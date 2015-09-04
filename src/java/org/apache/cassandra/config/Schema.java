@@ -226,7 +226,7 @@ public class Schema
     {
         assert keyspaceName != null;
         KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
-        return (ksm == null) ? null : ksm.derived.getNullable(cfName);
+        return (ksm == null) ? null : ksm.tablesAndViews.getNullable(cfName);
     }
 
     /**
@@ -282,12 +282,12 @@ public class Schema
      *
      * @return metadata about ColumnFamilies the belong to the given keyspace
      */
-    public Tables getTables(String keyspaceName)
+    public Tables getTablesAndViews(String keyspaceName)
     {
         assert keyspaceName != null;
         KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
         assert ksm != null;
-        return ksm.derived;
+        return ksm.tablesAndViews;
     }
 
     /**
@@ -375,7 +375,7 @@ public class Schema
         Pair<String, String> key = Pair.create(cfm.ksName, cfm.cfName);
 
         if (cfIdMap.containsKey(key))
-            throw new RuntimeException(String.format("Attempting to load already loaded table %s.%s", cfm.ksName, cfm.cfName));
+            throw new RuntimeException(String.format("Attempting to load already loaded view %s.%s", cfm.ksName, cfm.cfName));
 
         logger.debug("Adding {} to cfIdMap", cfm);
         cfIdMap.put(key, cfm.cfId);
@@ -505,13 +505,13 @@ public class Schema
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
         String snapshotName = Keyspace.getTimestampedSnapshotName(ksName);
 
-        CompactionManager.instance.interruptCompactionFor(ksm.derived, true);
+        CompactionManager.instance.interruptCompactionFor(ksm.tablesAndViews, true);
 
         Keyspace keyspace = Keyspace.open(ksm.name);
 
         // remove all cfs from the keyspace instance.
         List<UUID> droppedCfs = new ArrayList<>();
-        for (CFMetaData cfm : ksm.derived)
+        for (CFMetaData cfm : ksm.tablesAndViews)
         {
             ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfm.cfName);
 

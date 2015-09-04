@@ -150,7 +150,7 @@ public final class SchemaKeyspace
                 "CREATE TABLE %s ("
                 + "keyspace_name text,"
                 + "view_name text,"
-                + "base_id uuid,"
+                + "base_table_id uuid,"
                 + "bloom_filter_fp_chance double,"
                 + "caching frozen<map<text, text>>,"
                 + "comment text,"
@@ -161,7 +161,7 @@ public final class SchemaKeyspace
                 + "extensions frozen<map<text, blob>>,"
                 + "gc_grace_seconds int,"
                 + "id uuid,"
-                + "include_all boolean,"
+                + "include_all_columns boolean,"
                 + "max_index_interval int,"
                 + "memtable_flush_period_in_ms int,"
                 + "min_index_interval int,"
@@ -1297,8 +1297,8 @@ public final class SchemaKeyspace
 
         CFMetaData table = view.metadata;
 
-        builder.add("include_all", view.includeAll)
-               .add("base_id", view.baseId)
+        builder.add("include_all_columns", view.includeAllColumns)
+               .add("base_table_id", view.baseTableId)
                .add("id", table.cfId);
 
         addTableParamsToSchemaMutation(table.params, builder);
@@ -1413,14 +1413,14 @@ public final class SchemaKeyspace
         String keyspace = row.getString("keyspace_name");
         String view = row.getString("view_name");
         UUID id = row.getUUID("id");
-        UUID baseId = row.getUUID("base_id");
-        boolean includeAll = row.getBoolean("include_all");
+        UUID baseTableId = row.getUUID("base_table_id");
+        boolean includeAll = row.getBoolean("include_all_columns");
 
         List<ColumnDefinition> columns =
-        readSchemaPartitionForTableAndApply(COLUMNS, keyspace, view, SchemaKeyspace::createColumnsFromColumnsPartition);
+            readSchemaPartitionForTableAndApply(COLUMNS, keyspace, view, SchemaKeyspace::createColumnsFromColumnsPartition);
 
         Map<ByteBuffer, CFMetaData.DroppedColumn> droppedColumns =
-        readSchemaPartitionForTableAndApply(DROPPED_COLUMNS, keyspace, view, SchemaKeyspace::createDroppedColumnsFromDroppedColumnsPartition);
+            readSchemaPartitionForTableAndApply(DROPPED_COLUMNS, keyspace, view, SchemaKeyspace::createDroppedColumnsFromDroppedColumnsPartition);
 
         CFMetaData cfm = CFMetaData.create(keyspace,
                                            view,
@@ -1435,11 +1435,7 @@ public final class SchemaKeyspace
                                    .params(createTableParamsFromRow(row))
                                    .droppedColumns(droppedColumns);
 
-        return new ViewDefinition(keyspace,
-                                  view,
-                                  baseId,
-                                  includeAll,
-                                  cfm);
+        return new ViewDefinition(keyspace, view, baseTableId, includeAll, cfm);
     }
 
     /*

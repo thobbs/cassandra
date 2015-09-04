@@ -43,7 +43,6 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionInfo;
 import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RangeTombstone;
@@ -106,7 +105,7 @@ public class View
     private Columns columns;
 
     private final boolean viewHasAllPrimaryKeys;
-    private final boolean includeAll;
+    private final boolean includeAllColumns;
     private ViewBuilder builder;
 
     public View(ViewDefinition definition,
@@ -115,7 +114,7 @@ public class View
         this.baseCfs = baseCfs;
 
         name = definition.viewName;
-        includeAll = definition.includeAll;
+        includeAllColumns = definition.includeAllColumns;
 
         viewHasAllPrimaryKeys = updateDefinition(definition);
     }
@@ -204,7 +203,7 @@ public class View
     public boolean updateAffectsView(AbstractBTreePartition partition)
     {
         // If we are including all of the columns, then any update will be included
-        if (includeAll)
+        if (includeAllColumns)
             return true;
 
         // If there are range tombstones, tombstones will also need to be generated for the view
@@ -671,13 +670,13 @@ public class View
     public static CFMetaData findBaseTable(String keyspace, String viewName)
     {
         ViewDefinition view = Schema.instance.getView(keyspace, viewName);
-        return (view == null) ? null : Schema.instance.getCFMetaData(view.baseId);
+        return (view == null) ? null : Schema.instance.getCFMetaData(view.baseTableId);
     }
 
     public static Iterable<ViewDefinition> findAll(String keyspace, String baseTable)
     {
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace);
         final UUID baseId = Schema.instance.getId(keyspace, baseTable);
-        return Iterables.filter(ksm.views, view -> view.baseId.equals(baseId));
+        return Iterables.filter(ksm.views, view -> view.baseTableId.equals(baseId));
     }
 }

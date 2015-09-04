@@ -71,7 +71,7 @@ public class DropViewStatement extends SchemaAlteringStatement
 //                throw new ConfigurationException(String.format("Cannot drop non existing materialized view '%s' in keyspace '%s'.", columnFamily(), keyspace()));
 //            }
 //
-//            CFMetaData baseCfm = Schema.instance.getCFMetaData(view.baseId);
+//            CFMetaData baseCfm = Schema.instance.getCFMetaData(view.baseTableId);
 //            if (baseCfm == null)
 //            {
 //                if (ifExists)

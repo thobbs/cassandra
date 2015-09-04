@@ -296,7 +296,7 @@ public class MigrationManager
         if (ksm == null)
             throw new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", cfm.cfName, cfm.ksName));
         // If we have a table or a view which has the same name, we can't add a new one
-        else if (ksm.derived.get(cfm.cfName).isPresent())
+        else if (ksm.tablesAndViews.get(cfm.cfName).isPresent())
             throw new AlreadyExistsException(cfm.ksName, cfm.cfName);
 
         logger.info(String.format("Create new table: %s", cfm));
@@ -310,7 +310,7 @@ public class MigrationManager
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(view.ksName);
         if (ksm == null)
             throw new ConfigurationException(String.format("Cannot add table '%s' to non existing keyspace '%s'.", view.viewName, view.ksName));
-        else if (ksm.derived.get(view.viewName).isPresent())
+        else if (ksm.tablesAndViews.get(view.viewName).isPresent())
             throw new AlreadyExistsException(view.ksName, view.viewName);
 
         logger.info(String.format("Create new view: %s", view));

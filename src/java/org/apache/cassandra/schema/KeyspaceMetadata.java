@@ -35,8 +35,8 @@ public final class KeyspaceMetadata
     public final String name;
     public final KeyspaceParams params;
     public final Tables tables;
-    public final Tables derived;
     public final Views views;
+    public final Tables tablesAndViews;
     public final Types types;
     public final Functions functions;
 
@@ -48,7 +48,7 @@ public final class KeyspaceMetadata
         this.views = views;
         this.types = types;
         this.functions = functions;
-        this.derived = Tables.builder().add(this.tables).add(this.views.metadatas()).build();
+        this.tablesAndViews = Tables.builder().add(this.tables).add(this.views.metadatas()).build();
     }
 
     public static KeyspaceMetadata create(String name, KeyspaceParams params)

@@ -166,7 +166,7 @@ public class AlterTableStatement extends SchemaAlteringStatement
                 {
                     for (ViewDefinition view : views)
                     {
-                        if (view.includeAll)
+                        if (view.includeAllColumns)
                         {
                             ViewDefinition viewCopy = view.copy();
                             viewCopy.metadata.addColumnDefinition(ColumnDefinition.regularDef(viewCopy.metadata, columnName.bytes, type));
