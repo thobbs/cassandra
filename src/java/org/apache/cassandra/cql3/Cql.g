@@ -757,10 +757,6 @@ createMaterializedViewStatement returns [CreateMaterializedViewStatement expr]
         ( K_WITH cfamProperty[expr.properties] ( K_AND cfamProperty[expr.properties] )*)?
     ;
 
-mvWhereClause returns [List<ColumnIdentifier.Raw> expr]
-    : t1=cident { $expr = new ArrayList<ColumnIdentifier.Raw>(); $expr.add(t1); } K_IS K_NOT K_NULL (K_AND tN=cident { $expr.add(tN); } K_IS K_NOT K_NULL)*
-    ;
-
 /**
  * CREATE TRIGGER triggerName ON columnFamily USING 'triggerClass';
  */
