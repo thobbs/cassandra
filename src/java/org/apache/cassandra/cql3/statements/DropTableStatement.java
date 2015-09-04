@@ -73,7 +73,7 @@ public class DropTableStatement extends SchemaAlteringStatement
                 StringBuilder messageBuilder = new StringBuilder();
                 for (ViewDefinition def : ksm.views)
                 {
-                    if (def.baseId.equals(cfm.cfId))
+                    if (def.baseTableId.equals(cfm.cfId))
                     {
                         if (rejectDrop)
                             messageBuilder.append(',');

@@ -164,7 +164,7 @@ public class ViewManager
 
                 for (View view : allViews())
                 {
-                    if (!cf.metadata().cfId.equals(view.getDefinition().baseId))
+                    if (!cf.metadata().cfId.equals(view.getDefinition().baseTableId))
                         continue;
 
                     if (view.updateAffectsView(cf))
@@ -211,8 +211,8 @@ public class ViewManager
 
     public void addView(ViewDefinition definition)
     {
-        View view = new View(definition, keyspace.getColumnFamilyStore(definition.baseId));
-        forTable(view.getDefinition().baseId).addView(view);
+        View view = new View(definition, keyspace.getColumnFamilyStore(definition.baseTableId));
+        forTable(view.getDefinition().baseTableId).addView(view);
         viewsByName.put(definition.viewName, view);
     }
 
@@ -223,7 +223,7 @@ public class ViewManager
         if (view == null)
             return;
 
-        forTable(view.getDefinition().baseId).removeView(name);
+        forTable(view.getDefinition().baseTableId).removeView(name);
         SystemKeyspace.setViewRemoved(keyspace.getName(), view.name);
     }
 

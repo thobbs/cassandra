@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.config;
 
 import java.util.Objects;
@@ -30,27 +29,27 @@ public class ViewDefinition
 {
     public final String ksName;
     public final String viewName;
-    public final UUID baseId;
-    public final boolean includeAll;
+    public final UUID baseTableId;
+    public final boolean includeAllColumns;
     // The order of partititon columns and clustering columns is important, so we cannot switch these two to sets
     public final CFMetaData metadata;
 
     public ViewDefinition(ViewDefinition def)
     {
-        this(def.ksName, def.viewName, def.baseId, def.includeAll, def.metadata);
+        this(def.ksName, def.viewName, def.baseTableId, def.includeAllColumns, def.metadata);
     }
 
     /**
      * @param viewName          Name of the view
-     * @param baseId            Internal ID of the table which this view is based off of
-     * @param includeAll        Whether to include all columns or not
+     * @param baseTableId       Internal ID of the table which this view is based off of
+     * @param includeAllColumns Whether to include all columns or not
      */
-    public ViewDefinition(String ksName, String viewName, UUID baseId, boolean includeAll, CFMetaData metadata)
+    public ViewDefinition(String ksName, String viewName, UUID baseTableId, boolean includeAllColumns, CFMetaData metadata)
     {
         this.ksName = ksName;
         this.viewName = viewName;
-        this.baseId = baseId;
-        this.includeAll = includeAll;
+        this.baseTableId = baseTableId;
+        this.includeAllColumns = includeAllColumns;
         this.metadata = metadata;
     }
 
@@ -64,7 +63,12 @@ public class ViewDefinition
 
     public ViewDefinition copy()
     {
-        return new ViewDefinition(ksName, viewName, baseId, includeAll, metadata.copy());
+        return new ViewDefinition(ksName, viewName, baseTableId, includeAllColumns, metadata.copy());
+    }
+
+    public CFMetaData baseTableMetadata()
+    {
+        return Schema.instance.getCFMetaData(baseTableId);
     }
 
     @Override
@@ -79,8 +83,8 @@ public class ViewDefinition
         ViewDefinition other = (ViewDefinition) o;
         return Objects.equals(ksName, other.ksName)
                && Objects.equals(viewName, other.viewName)
-               && Objects.equals(baseId, other.baseId)
-               && Objects.equals(includeAll, other.includeAll)
+               && Objects.equals(baseTableId, other.baseTableId)
+               && Objects.equals(includeAllColumns, other.includeAllColumns)
                && Objects.equals(metadata, other.metadata);
     }
 
@@ -90,8 +94,8 @@ public class ViewDefinition
         return new HashCodeBuilder(29, 1597)
                .append(ksName)
                .append(viewName)
-               .append(baseId)
-               .append(includeAll)
+               .append(baseTableId)
+               .append(includeAllColumns)
                .append(metadata)
                .toHashCode();
     }
@@ -102,8 +106,8 @@ public class ViewDefinition
         return new ToStringBuilder(this)
                .append("ksName", ksName)
                .append("viewName", viewName)
-               .append("baseId", baseId)
-               .append("includeAll", includeAll)
+               .append("baseTableId", baseTableId)
+               .append("includeAllColumns", includeAllColumns)
                .append("metadata", metadata)
                .toString();
     }

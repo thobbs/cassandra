@@ -162,7 +162,7 @@ public class ThriftConversion
     public static KsDef toThrift(KeyspaceMetadata ksm)
     {
         List<CfDef> cfDefs = new ArrayList<>();
-        for (CFMetaData cfm : ksm.derived)
+        for (CFMetaData cfm : ksm.tables) // do not include views
             if (cfm.isThriftCompatible()) // Don't expose CF that cannot be correctly handle by thrift; see CASSANDRA-4377 for further details
                 cfDefs.add(toThrift(cfm));
 

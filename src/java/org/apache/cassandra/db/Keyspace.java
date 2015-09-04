@@ -307,7 +307,7 @@ public class Keyspace
 
         this.metric = new KeyspaceMetrics(this);
         this.viewManager = new ViewManager(this);
-        for (CFMetaData cfm : metadata.derived)
+        for (CFMetaData cfm : metadata.tablesAndViews())
         {
             logger.debug("Initializing {}.{}", getName(), cfm.cfName);
             initCf(cfm.cfId, cfm.cfName, loadSSTables);

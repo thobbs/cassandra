@@ -22,9 +22,12 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.google.common.base.Objects;
+import com.google.common.collect.Iterables;
 
+import org.apache.avro.reflect.Nullable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 /**
@@ -35,7 +38,6 @@ public final class KeyspaceMetadata
     public final String name;
     public final KeyspaceParams params;
     public final Tables tables;
-    public final Tables derived;
     public final Views views;
     public final Types types;
     public final Functions functions;
@@ -48,7 +50,6 @@ public final class KeyspaceMetadata
         this.views = views;
         this.types = types;
         this.functions = functions;
-        this.derived = Tables.builder().add(this.tables).add(this.views.metadatas()).build();
     }
 
     public static KeyspaceMetadata create(String name, KeyspaceParams params)
@@ -81,7 +82,6 @@ public final class KeyspaceMetadata
         return new KeyspaceMetadata(name, params, tables, views, types, functions);
     }
 
-
     public KeyspaceMetadata withSwapped(Types types)
     {
         return new KeyspaceMetadata(name, params, tables, views, types, functions);
@@ -90,6 +90,20 @@ public final class KeyspaceMetadata
     public KeyspaceMetadata withSwapped(Functions functions)
     {
         return new KeyspaceMetadata(name, params, tables, views, types, functions);
+    }
+
+    public Iterable<CFMetaData> tablesAndViews()
+    {
+        return Iterables.concat(tables, views.metadatas());
+    }
+
+    @Nullable
+    public CFMetaData getTableOrViewNullable(String tableOrViewName)
+    {
+        ViewDefinition view = views.getNullable(tableOrViewName);
+        return view == null
+             ? tables.getNullable(tableOrViewName)
+             : view.metadata;
     }
 
     public Set<String> existingIndexNames(String cfToExclude)
@@ -104,7 +118,7 @@ public final class KeyspaceMetadata
 
     public Optional<CFMetaData> findIndexedTable(String indexName)
     {
-        for (CFMetaData cfm : tables)
+        for (CFMetaData cfm : tablesAndViews())
             if (cfm.getIndexes().has(indexName))
                 return Optional.of(cfm);
 
@@ -156,7 +170,6 @@ public final class KeyspaceMetadata
                                                            + "or contain non-alphanumeric-underscore characters (got \"%s\")",
                                                            Schema.NAME_LENGTH,
                                                            name));
-        tables.forEach(CFMetaData::validate);
-        views.metadatas().forEach(CFMetaData::validate);
+        tablesAndViews().forEach(CFMetaData::validate);
     }
 }
