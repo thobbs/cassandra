@@ -161,6 +161,24 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
                 throw new InvalidRequestException(String.format("Cannot use Static column '%s' in PRIMARY KEY of materialized view", identifier));
         }
 
+        // check for query parameter markers
+        for (Relation relation : whereClause)
+        {
+            if (relation.isIN())
+            {
+                for (Term.Raw raw : relation.getInValues())
+                {
+                    if (!(raw instanceof Term.Literal))
+                        throw new InvalidRequestException("Cannot use query parameters in CREATE MATERIALIZED VIEW statements: " + relation);
+                }
+            }
+            else
+            {
+                if (!(relation.getValue() instanceof Term.Literal))
+                    throw new InvalidRequestException("Cannot use query parameters in CREATE MATERIALIZED VIEW statements: " + relation);
+            }
+        }
+
         // build the select statement
         Map<ColumnIdentifier.Raw, Boolean> orderings = Collections.emptyMap();
         SelectStatement.Parameters parameters = new SelectStatement.Parameters(orderings, false, true, false);
