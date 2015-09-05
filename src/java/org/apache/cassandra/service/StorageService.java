@@ -3164,7 +3164,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         if (ksMetaData == null)
             throw new IllegalArgumentException("Unknown keyspace '" + keyspaceName + "'");
 
-        CFMetaData cfMetaData = ksMetaData.tablesAndViews.getNullable(cf);
+        CFMetaData cfMetaData = ksMetaData.getTableOrViewNullable(cf);
         if (cfMetaData == null)
             throw new IllegalArgumentException("Unknown table '" + cf + "' in keyspace '" + keyspaceName + "'");
 

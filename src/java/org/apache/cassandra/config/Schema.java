@@ -225,8 +225,11 @@ public class Schema
     public CFMetaData getCFMetaData(String keyspaceName, String cfName)
     {
         assert keyspaceName != null;
+
         KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
-        return (ksm == null) ? null : ksm.tablesAndViews.getNullable(cfName);
+        return ksm == null
+             ? null
+             : ksm.getTableOrViewNullable(cfName);
     }
 
     /**
@@ -282,12 +285,12 @@ public class Schema
      *
      * @return metadata about ColumnFamilies the belong to the given keyspace
      */
-    public Tables getTablesAndViews(String keyspaceName)
+    public Iterable<CFMetaData> getTablesAndViews(String keyspaceName)
     {
         assert keyspaceName != null;
         KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
         assert ksm != null;
-        return ksm.tablesAndViews;
+        return ksm.tablesAndViews();
     }
 
     /**
@@ -505,13 +508,13 @@ public class Schema
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
         String snapshotName = Keyspace.getTimestampedSnapshotName(ksName);
 
-        CompactionManager.instance.interruptCompactionFor(ksm.tablesAndViews, true);
+        CompactionManager.instance.interruptCompactionFor(ksm.tablesAndViews(), true);
 
         Keyspace keyspace = Keyspace.open(ksm.name);
 
         // remove all cfs from the keyspace instance.
         List<UUID> droppedCfs = new ArrayList<>();
-        for (CFMetaData cfm : ksm.tablesAndViews)
+        for (CFMetaData cfm : ksm.tablesAndViews())
         {
             ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfm.cfName);
 
