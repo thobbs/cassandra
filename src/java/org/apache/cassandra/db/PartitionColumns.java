@@ -40,6 +40,7 @@ public class PartitionColumns implements Iterable<ColumnDefinition>
 
     public PartitionColumns(Columns statics, Columns regulars)
     {
+        assert statics != null && regulars != null;
         this.statics = statics;
         this.regulars = regulars;
     }
@@ -61,6 +62,19 @@ public class PartitionColumns implements Iterable<ColumnDefinition>
         return statics.isEmpty() ? this : new PartitionColumns(Columns.NONE, regulars);
     }
 
+    public PartitionColumns mergeTo(PartitionColumns that)
+    {
+        if (this == that)
+            return this;
+        Columns statics = this.statics.mergeTo(that.statics);
+        Columns regulars = this.regulars.mergeTo(that.regulars);
+        if (statics == this.statics && regulars == this.regulars)
+            return this;
+        if (statics == that.statics && regulars == that.regulars)
+            return that;
+        return new PartitionColumns(statics, regulars);
+    }
+
     public boolean isEmpty()
     {
         return statics.isEmpty() && regulars.isEmpty();
@@ -78,7 +92,7 @@ public class PartitionColumns implements Iterable<ColumnDefinition>
 
     public boolean includes(PartitionColumns columns)
     {
-        return statics.contains(columns.statics) && regulars.contains(columns.regulars);
+        return statics.containsAll(columns.statics) && regulars.containsAll(columns.regulars);
     }
 
     public Iterator<ColumnDefinition> iterator()
@@ -94,7 +108,7 @@ public class PartitionColumns implements Iterable<ColumnDefinition>
     /** * Returns the total number of static and regular columns. */
     public int size()
     {
-        return regulars.columnCount() + statics.columnCount();
+        return regulars.size() + statics.size();
     }
 
     @Override

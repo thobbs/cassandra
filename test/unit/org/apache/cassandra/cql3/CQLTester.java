@@ -316,7 +316,7 @@ public abstract class CQLTester
         StorageService.instance.initServer();
         SchemaLoader.startGossiper();
 
-        server = new org.apache.cassandra.transport.Server(nativeAddr, nativePort);
+        server = new Server.Builder().withHost(nativeAddr).withPort(nativePort).build();
         server.start();
 
         for (int version = 1; version <= maxProtocolVersion; version++)
@@ -547,13 +547,12 @@ public abstract class CQLTester
     {
         long start = System.currentTimeMillis();
         boolean indexCreated = false;
-        String indedName = String.format("%s.%s", table, index);
         while (!indexCreated)
         {
             Object[][] results = getRows(execute("select index_name from system.\"IndexInfo\" where table_name = ?", keyspace));
             for(int i = 0; i < results.length; i++)
             {
-                if (indedName.equals(results[i][0]))
+                if (index.equals(results[i][0]))
                 {
                     indexCreated = true;
                     break;

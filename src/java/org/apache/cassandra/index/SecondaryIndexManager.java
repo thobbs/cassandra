@@ -24,15 +24,19 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
 import com.google.common.primitives.Longs;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.MoreExecutors;
+
+import org.apache.commons.lang3.StringUtils;
+
+import org.apache.cassandra.db.Directories;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.concurrent.StageManager;
@@ -209,7 +213,7 @@ public class SecondaryIndexManager implements IndexRegistry
                                                .collect(Collectors.toSet());
         if (toRebuild.isEmpty())
         {
-            logger.info("No defined indexes with the supplied names");
+            logger.info("No defined indexes with the supplied names: {}", Joiner.on(',').join(indexNames));
             return;
         }
 
@@ -234,6 +238,77 @@ public class SecondaryIndexManager implements IndexRegistry
             buildIndexesBlocking(sstables, Collections.singleton(index));
             markIndexBuilt(index.getIndexName());
         }
+    }
+
+    /**
+     * Checks if the specified {@link ColumnFamilyStore} is a secondary index.
+     *
+     * @param cfs the <code>ColumnFamilyStore</code> to check.
+     * @return <code>true</code> if the specified <code>ColumnFamilyStore</code> is a secondary index,
+     * <code>false</code> otherwise.
+     */
+    public static boolean isIndexColumnFamilyStore(ColumnFamilyStore cfs)
+    {
+        return isIndexColumnFamily(cfs.name);
+    }
+
+    /**
+     * Checks if the specified {@link ColumnFamilyStore} is the one secondary index.
+     *
+     * @param cfs the name of the <code>ColumnFamilyStore</code> to check.
+     * @return <code>true</code> if the specified <code>ColumnFamilyStore</code> is a secondary index,
+     * <code>false</code> otherwise.
+     */
+    public static boolean isIndexColumnFamily(String cfName)
+    {
+        return cfName.contains(Directories.SECONDARY_INDEX_NAME_SEPARATOR);
+    }
+
+    /**
+     * Returns the parent of the specified {@link ColumnFamilyStore}.
+     *
+     * @param cfs the <code>ColumnFamilyStore</code>
+     * @return the parent of the specified <code>ColumnFamilyStore</code>
+     */
+    public static ColumnFamilyStore getParentCfs(ColumnFamilyStore cfs)
+    {
+        String parentCfs = getParentCfsName(cfs.name);
+        return cfs.keyspace.getColumnFamilyStore(parentCfs);
+    }
+
+    /**
+     * Returns the parent name of the specified {@link ColumnFamilyStore}.
+     *
+     * @param cfName the <code>ColumnFamilyStore</code> name
+     * @return the parent name of the specified <code>ColumnFamilyStore</code>
+     */
+    public static String getParentCfsName(String cfName)
+    {
+        assert isIndexColumnFamily(cfName);
+        return StringUtils.substringBefore(cfName, Directories.SECONDARY_INDEX_NAME_SEPARATOR);
+    }
+
+    /**
+     * Returns the index name
+     *
+     * @param cfName the <code>ColumnFamilyStore</code> name
+     * @return the index name
+     */
+    public static String getIndexName(ColumnFamilyStore cfs)
+    {
+        return getIndexName(cfs.name);
+    }
+
+    /**
+     * Returns the index name
+     *
+     * @param cfName the <code>ColumnFamilyStore</code> name
+     * @return the index name
+     */
+    public static String getIndexName(String cfName)
+    {
+        assert isIndexColumnFamily(cfName);
+        return StringUtils.substringAfter(cfName, Directories.SECONDARY_INDEX_NAME_SEPARATOR);
     }
 
     private void buildIndexesBlocking(Collection<SSTableReader> sstables, Set<Index> indexes)
@@ -642,17 +717,20 @@ public class SecondaryIndexManager implements IndexRegistry
 
         public void start()
         {
-            Arrays.stream(indexers).forEach(Index.Indexer::begin);
+            for (Index.Indexer indexer : indexers)
+                indexer.begin();
         }
 
         public void onPartitionDeletion(DeletionTime deletionTime)
         {
-            Arrays.stream(indexers).forEach(h -> h.partitionDelete(deletionTime));
+            for (Index.Indexer indexer : indexers)
+                indexer.partitionDelete(deletionTime);
         }
 
         public void onRangeTombstone(RangeTombstone tombstone)
         {
-            Arrays.stream(indexers) .forEach(h -> h.rangeTombstone(tombstone));
+            for (Index.Indexer indexer : indexers)
+                indexer.rangeTombstone(tombstone);
         }
 
         public void onInserted(Row row)
@@ -662,9 +740,9 @@ public class SecondaryIndexManager implements IndexRegistry
 
         public void onUpdated(Row existing, Row updated)
         {
-            final Row.Builder toRemove = BTreeRow.sortedBuilder(existing.columns());
+            final Row.Builder toRemove = BTreeRow.sortedBuilder();
             toRemove.newRow(existing.clustering());
-            final Row.Builder toInsert = BTreeRow.sortedBuilder(updated.columns());
+            final Row.Builder toInsert = BTreeRow.sortedBuilder();
             toInsert.newRow(updated.clustering());
             // diff listener collates the columns to be added & removed from the indexes
             RowDiffListener diffListener = new RowDiffListener()
@@ -693,15 +771,17 @@ public class SecondaryIndexManager implements IndexRegistry
 
                 }
             };
-            Rows.diff(diffListener, updated, updated.columns().mergeTo(existing.columns()), existing);
+            Rows.diff(diffListener, updated, existing);
             Row oldRow = toRemove.build();
             Row newRow = toInsert.build();
-            Arrays.stream(indexers).forEach(i -> i.updateRow(oldRow, newRow));
+            for (Index.Indexer indexer : indexers)
+                indexer.updateRow(oldRow, newRow);
         }
 
         public void commit()
         {
-            Arrays.stream(indexers).forEach(Index.Indexer::finish);
+            for (Index.Indexer indexer : indexers)
+                indexer.finish();
         }
 
         private boolean shouldCleanupOldValue(Cell oldCell, Cell newCell)
@@ -754,7 +834,7 @@ public class SecondaryIndexManager implements IndexRegistry
                 rows = new Row[versions];
         }
 
-        public void onRowMerge(Columns columns, Row merged, Row...versions)
+        public void onRowMerge(Row merged, Row...versions)
         {
             // Diff listener constructs rows representing deltas between the merged and original versions
             // These delta rows are then passed to registered indexes for removal processing
@@ -779,7 +859,7 @@ public class SecondaryIndexManager implements IndexRegistry
                     {
                         if (builders[i] == null)
                         {
-                            builders[i] = BTreeRow.sortedBuilder(columns);
+                            builders[i] = BTreeRow.sortedBuilder();
                             builders[i].newRow(clustering);
                         }
                         builders[i].addCell(original);
@@ -787,7 +867,7 @@ public class SecondaryIndexManager implements IndexRegistry
                 }
             };
 
-            Rows.diff(diffListener, merged, columns, versions);
+            Rows.diff(diffListener, merged, versions);
 
             for(int i = 0; i < builders.length; i++)
                 if (builders[i] != null)
@@ -801,17 +881,15 @@ public class SecondaryIndexManager implements IndexRegistry
 
             try (OpOrder.Group opGroup = Keyspace.writeOrder.start())
             {
-                Index.Indexer[] indexers = Arrays.stream(indexes)
-                                                 .map(i -> i.indexerFor(key, nowInSec, opGroup, Type.COMPACTION))
-                                                 .toArray(Index.Indexer[]::new);
-
-                Arrays.stream(indexers).forEach(Index.Indexer::begin);
-
-                for (Row row : rows)
-                    if (row != null)
-                        Arrays.stream(indexers).forEach(indexer -> indexer.removeRow(row));
-
-                Arrays.stream(indexers).forEach(Index.Indexer::finish);
+                for (Index index : indexes)
+                {
+                    Index.Indexer indexer = index.indexerFor(key, nowInSec, opGroup, Type.COMPACTION);
+                    indexer.begin();
+                    for (Row row : rows)
+                        if (row != null)
+                            indexer.removeRow(row);
+                    indexer.finish();
+                }
             }
         }
     }
@@ -864,19 +942,14 @@ public class SecondaryIndexManager implements IndexRegistry
 
             try (OpOrder.Group opGroup = Keyspace.writeOrder.start())
             {
-                Index.Indexer[] indexers = Arrays.stream(indexes)
-                                                 .map(i -> i.indexerFor(key, nowInSec, opGroup, Type.CLEANUP))
-                                                 .toArray(Index.Indexer[]::new);
-
-                Arrays.stream(indexers).forEach(Index.Indexer::begin);
-
-                if (partitionDelete != null)
-                    Arrays.stream(indexers).forEach(indexer -> indexer.partitionDelete(partitionDelete));
-
-                if (row != null)
-                    Arrays.stream(indexers).forEach(indexer -> indexer.removeRow(row));
-
-                Arrays.stream(indexers).forEach(Index.Indexer::finish);
+                for (Index index : indexes)
+                {
+                    Index.Indexer indexer = index.indexerFor(key, nowInSec, opGroup, Type.CLEANUP);
+                    indexer.begin();
+                    if (row != null)
+                        indexer.removeRow(row);
+                    indexer.finish();
+                }
             }
         }
     }

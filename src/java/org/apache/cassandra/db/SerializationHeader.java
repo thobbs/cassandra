@@ -23,7 +23,6 @@ import java.util.*;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.common.base.Function;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
@@ -54,9 +53,6 @@ public class SerializationHeader
 
     private final Map<ByteBuffer, AbstractType<?>> typeMap;
 
-    // Whether or not to store cell in a sparse or dense way. See UnfilteredSerializer for details.
-    private final boolean useSparseColumnLayout;
-
     private SerializationHeader(AbstractType<?> keyType,
                                 List<AbstractType<?>> clusteringTypes,
                                 PartitionColumns columns,
@@ -68,21 +64,6 @@ public class SerializationHeader
         this.columns = columns;
         this.stats = stats;
         this.typeMap = typeMap;
-
-        // For the dense layout, we have a 1 byte overhead for absent columns. For the sparse layout, it's a 1
-        // overhead for present columns (in fact we use a 2 byte id, but assuming vint encoding, we'll pay 2 bytes
-        // only for the columns after the 128th one and for simplicity we assume that once you have that many column,
-        // you'll tend towards a clearly dense or clearly sparse case so that the heurstic above shouldn't still be
-        // too inapropriate). So if on average more than half of our columns are set per row, we better go for sparse.
-        this.useSparseColumnLayout = stats.avgColumnSetPerRow <= (columns.regulars.columnCount()/ 2);
-    }
-
-    public boolean useSparseColumnLayout(boolean isStatic)
-    {
-        // We always use a dense layout for the static row. Having very many static columns with  only a few set at
-        // any given time doesn't feel very common at all (and we already optimize the case where no static at all
-        // are provided).
-        return !isStatic && useSparseColumnLayout;
     }
 
     public static SerializationHeader forKeyCache(CFMetaData metadata)
@@ -122,7 +103,6 @@ public class SerializationHeader
             stats.updateTimestamp(sstable.getMinTimestamp());
             stats.updateLocalDeletionTime(sstable.getMinLocalDeletionTime());
             stats.updateTTL(sstable.getMinTTL());
-            stats.updateColumnSetPerRow(sstable.getTotalColumnsSet(), sstable.getTotalRows());
             if (sstable.header == null)
                 columns.addAll(metadata.partitionColumns());
             else

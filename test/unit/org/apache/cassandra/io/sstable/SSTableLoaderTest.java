@@ -38,6 +38,7 @@ import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
@@ -80,7 +81,18 @@ public class SSTableLoaderTest
     @After
     public void cleanup()
     {
-        FileUtils.deleteRecursive(tmpdir);
+        try {
+            FileUtils.deleteRecursive(tmpdir);
+        } catch (FSWriteError e) {
+            /**
+             * Windows does not allow a mapped file to be deleted, so we probably forgot to clean the buffers somewhere.
+             * We force a GC here to force buffer deallocation, and then try deleting the directory again.
+             * For more information, see: http://bugs.java.com/bugdatabase/view_bug.do?bug_id=4715154
+             * If this is not the problem, the exception will be rethrown anyway.
+             */
+            System.gc();
+            FileUtils.deleteRecursive(tmpdir);
+        }
     }
 
     private static final class TestClient extends SSTableLoader.Client
@@ -155,7 +167,9 @@ public class SSTableLoaderTest
                                                   .withBufferSizeInMB(1)
                                                   .build();
 
-        for (int i = 0; i < 1000; i++) // make sure to write more than 1 MB
+        int NB_PARTITIONS = 5000; // Enough to write >1MB and get at least one completed sstable before we've closed the writer
+
+        for (int i = 0; i < NB_PARTITIONS; i++)
         {
             for (int j = 0; j < 100; j++)
                 writer.addRow(String.format("key%d", i), String.format("col%d", j), "100");
@@ -171,7 +185,7 @@ public class SSTableLoaderTest
 
         List<FilteredPartition> partitions = Util.getAll(Util.cmd(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2)).build());
 
-        assertTrue(partitions.size() > 0 && partitions.size() < 1000);
+        assertTrue(partitions.size() > 0 && partitions.size() < NB_PARTITIONS);
 
         // now we complete the write and the second loader should load the last sstable as well
         writer.close();
@@ -180,7 +194,7 @@ public class SSTableLoaderTest
         loader.stream(Collections.emptySet(), completionStreamListener(latch)).get();
 
         partitions = Util.getAll(Util.cmd(Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD2)).build());
-        assertEquals(1000, partitions.size());
+        assertEquals(NB_PARTITIONS, partitions.size());
 
         // The stream future is signalled when the work is complete but before releasing references. Wait for release
         // before cleanup (CASSANDRA-10118).

@@ -179,7 +179,7 @@ Function CalculateHeapSizes
 #-----------------------------------------------------------------------------
 Function SetJsr223Env
 {
-    $cp = """$env:CLASSPATH"""
+    $cp = $env:CLASSPATH
     foreach ($jsrDir in Get-ChildItem -Path "$env:CASSANDRA_HOME\lib\jsr223")
     {
         foreach ($file in Get-ChildItem -Path "$env:CASSANDRA_HOME\lib\jsr223\$jsrDir\*.jar")
@@ -301,7 +301,7 @@ Function SetCassandraEnvironment
 
     ParseJVMInfo
     # Add sigar env - see Cassandra-7838
-    $env:JVM_OPTS = "$env:JVM_OPTS -Djava.library.path=$env:CASSANDRA_HOME\lib\sigar-bin"
+    $env:JVM_OPTS = "$env:JVM_OPTS -Djava.library.path=""$env:CASSANDRA_HOME\lib\sigar-bin"""
 
     # Confirm we're on high performance power plan, warn if not
     # Change to $true to suppress this warning
@@ -346,8 +346,6 @@ Function SetCassandraEnvironment
 
     # store in env to check if it's avail in verification
     $env:JMX_PORT=$JMX_PORT
-
-    $env:JVM_OPTS = "$env:JVM_OPTS -Dlog4j.defaultInitOverride=true"
 
     # enable thread priorities, primarily so we can give periodic tasks
     # a lower priority to avoid interfering with client workload
@@ -453,8 +451,6 @@ Function SetCassandraEnvironment
     $env:JVM_OPTS="$env:JVM_OPTS -Dcassandra.jmx.local.port=$JMX_PORT -XX:+DisableExplicitGC"
 
     $env:JVM_OPTS="$env:JVM_OPTS $env:JVM_EXTRA_OPTS"
-
-    $env:JVM_OPTS = "$env:JVM_OPTS -Dlog4j.configuration=log4j-server.properties"
 
     #$env:JVM_OPTS="$env:JVM_OPTS -XX:+UnlockCommercialFeatures -XX:+FlightRecorder"
 }

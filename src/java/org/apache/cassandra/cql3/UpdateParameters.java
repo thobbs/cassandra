@@ -121,13 +121,13 @@ public class UpdateParameters
         if (clustering == Clustering.STATIC_CLUSTERING)
         {
             if (staticBuilder == null)
-                staticBuilder = BTreeRow.unsortedBuilder(updatedColumns.statics, nowInSec);
+                staticBuilder = BTreeRow.unsortedBuilder(nowInSec);
             builder = staticBuilder;
         }
         else
         {
             if (regularBuilder == null)
-                regularBuilder = BTreeRow.unsortedBuilder(updatedColumns.regulars, nowInSec);
+                regularBuilder = BTreeRow.unsortedBuilder(nowInSec);
             builder = regularBuilder;
         }
 
@@ -146,7 +146,14 @@ public class UpdateParameters
 
     public void addRowDeletion()
     {
-        builder.addRowDeletion(deletionTime);
+        // For compact tables, at the exclusion of the static row (of static compact tables), each row ever has a single column,
+        // the "compact" one. As such, deleting the row or deleting that single cell is equivalent. We favor the later however
+        // because that makes it easier when translating back to the old format layout (for thrift and pre-3.0 backward
+        // compatibility) as we don't have to special case for the row deletion. This is also in line with what we used to do pre-3.0.
+        if (metadata.isCompactTable() && builder.clustering() != Clustering.STATIC_CLUSTERING)
+            addTombstone(metadata.compactValueColumn());
+        else
+            builder.addRowDeletion(deletionTime);
     }
 
     public void addTombstone(ColumnDefinition column) throws InvalidRequestException
@@ -209,9 +216,14 @@ public class UpdateParameters
         return deletionTime;
     }
 
-    public RangeTombstone makeRangeTombstone(CBuilder cbuilder)
+    public RangeTombstone makeRangeTombstone(ClusteringComparator comparator, Clustering clustering)
     {
-        return new RangeTombstone(cbuilder.buildSlice(), deletionTime);
+        return makeRangeTombstone(Slice.make(comparator, clustering));
+    }
+
+    public RangeTombstone makeRangeTombstone(Slice slice)
+    {
+        return new RangeTombstone(slice, deletionTime);
     }
 
     public Row getPrefetchedRow(DecoratedKey key, Clustering clustering)

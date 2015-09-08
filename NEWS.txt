@@ -18,6 +18,13 @@ using the provided 'sstableupgrade' tool.
 
 New features
 ------------
+   - Support for IN restrictions on any partition key component or clustering key
+     as well as support for EQ and IN multicolumn restrictions has been added to
+     UPDATE and DELETE statement.
+   - Support for single-column and multi-colum slice restrictions (>, >=, <= and <)
+     has been added to DELETE statements
+   - nodetool rebuild_index accepts the index argument without
+     the redundant table name
    - Materialized Views, which allow for server-side denormalization, is now
      available. Materialized views provide an alternative to secondary indexes
      for non-primary key queries, and perform much better for indexing high
@@ -97,6 +104,17 @@ Upgrading
    - The secondary index API has been comprehensively reworked. This will be a breaking
      change for any custom index implementations, which should now look to implement
      the new org.apache.cassandra.index.Index interface.
+
+
+2.2.2
+=====
+
+Changed Defaults
+----------------
+   - commitlog_total_space_in_mb will use the smaller of 8192, and 1/4
+     of the total space of the commitlog volume. (Before: always used
+     8192)
+
 
 2.2.1
 =====

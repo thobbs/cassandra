@@ -21,6 +21,7 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.io.IOError;
 import java.nio.ByteBuffer;
+import java.security.MessageDigest;
 import java.util.*;
 
 import org.apache.cassandra.utils.AbstractIterator;
@@ -534,11 +535,11 @@ public abstract class LegacyLayout
             // TODO: there is in practice nothing to do here, but we need to handle the column_metadata for super columns somewhere else
             throw new UnsupportedOperationException();
 
-        Set<ByteBuffer> columnsToFetch = new HashSet<>(statics.columnCount());
+        Set<ByteBuffer> columnsToFetch = new HashSet<>(statics.size());
         for (ColumnDefinition column : statics)
             columnsToFetch.add(column.name.bytes);
 
-        Row.Builder builder = BTreeRow.unsortedBuilder(statics, FBUtilities.nowInSeconds());
+        Row.Builder builder = BTreeRow.unsortedBuilder(FBUtilities.nowInSeconds());
         builder.newRow(Clustering.STATIC_CLUSTERING);
 
         boolean foundOne = false;
@@ -852,6 +853,17 @@ public abstract class LegacyLayout
         };
     }
 
+    private static boolean equalValues(ClusteringPrefix c1, ClusteringPrefix c2, ClusteringComparator comparator)
+    {
+        assert c1.size() == c2.size();
+        for (int i = 0; i < c1.size(); i++)
+        {
+            if (comparator.compareComponent(i, c1.get(i), c2.get(i)) != 0)
+                return false;
+        }
+        return true;
+    }
+
     private static Comparator<LegacyAtom> legacyAtomComparator(CFMetaData metadata)
     {
         return (o1, o2) ->
@@ -863,7 +875,7 @@ public abstract class LegacyLayout
             ClusteringPrefix c2 = o2.clustering();
 
             int clusteringComparison;
-            if (c1.size() != c2.size() || (o1.isCell() == o2.isCell()))
+            if (c1.size() != c2.size() || (o1.isCell() == o2.isCell()) || !equalValues(c1, c2, metadata.comparator))
             {
                 clusteringComparison = metadata.comparator.compare(c1, c2);
             }
@@ -918,7 +930,6 @@ public abstract class LegacyLayout
             }
         };
     }
-
 
     public static LegacyAtom readLegacyAtom(CFMetaData metadata, DataInputPlus in, boolean readAllAsDynamic) throws IOException
     {
@@ -1058,7 +1069,7 @@ public abstract class LegacyLayout
             // We cannot use a sorted builder because we don't have exactly the same ordering in 3.0 and pre-3.0. More precisely, within a row, we
             // store all simple columns before the complex ones in 3.0, which we use to sort everything sorted by the column name before. Note however
             // that the unsorted builder won't have to reconcile cells, so the exact value we pass for nowInSec doesn't matter.
-            this.builder = BTreeRow.unsortedBuilder(isStatic ? metadata.partitionColumns().statics : metadata.partitionColumns().regulars, FBUtilities.nowInSeconds());
+            this.builder = BTreeRow.unsortedBuilder(FBUtilities.nowInSeconds());
         }
 
         public static CellGrouper staticGrouper(CFMetaData metadata, SerializationHelper helper)
@@ -1187,8 +1198,40 @@ public abstract class LegacyLayout
             this.rangeTombstones = rangeTombstones;
             this.cells = cells;
         }
-    }
 
+        public void digest(CFMetaData metadata, MessageDigest digest)
+        {
+            for (LegacyCell cell : cells)
+            {
+                digest.update(cell.name.encode(metadata).duplicate());
+
+                if (cell.isCounter())
+                    CounterContext.instance().updateDigest(digest, cell.value);
+                else
+                    digest.update(cell.value.duplicate());
+
+                FBUtilities.updateWithLong(digest, cell.timestamp);
+                FBUtilities.updateWithByte(digest, cell.serializationFlags());
+
+                if (cell.isExpiring())
+                    FBUtilities.updateWithInt(digest, cell.ttl);
+
+                if (cell.isCounter())
+                {
+                    // Counters used to have the timestampOfLastDelete field, which we stopped using long ago and has been hard-coded
+                    // to Long.MIN_VALUE but was still taken into account in 2.2 counter digests (to maintain backward compatibility
+                    // in the first place).
+                    FBUtilities.updateWithLong(digest, Long.MIN_VALUE);
+                }
+            }
+
+            if (partitionDeletion.markedForDeleteAt() != Long.MIN_VALUE)
+                digest.update(ByteBufferUtil.bytes(partitionDeletion.markedForDeleteAt()));
+
+            if (!rangeTombstones.isEmpty())
+                rangeTombstones.updateDigest(digest);
+        }
+    }
 
     public static class LegacyCellName
     {
@@ -1285,6 +1328,12 @@ public abstract class LegacyLayout
      */
     public static class LegacyCell implements LegacyAtom
     {
+        private final static int DELETION_MASK        = 0x01;
+        private final static int EXPIRATION_MASK      = 0x02;
+        private final static int COUNTER_MASK         = 0x04;
+        private final static int COUNTER_UPDATE_MASK  = 0x08;
+        private final static int RANGE_TOMBSTONE_MASK = 0x10;
+
         public enum Kind { REGULAR, EXPIRING, DELETED, COUNTER }
 
         public final Kind kind;
@@ -1335,6 +1384,17 @@ public abstract class LegacyLayout
         public static LegacyCell counter(LegacyCellName name, ByteBuffer value)
         {
             return new LegacyCell(Kind.COUNTER, name, value, FBUtilities.timestampMicros(), Cell.NO_DELETION_TIME, Cell.NO_TTL);
+        }
+
+        public byte serializationFlags()
+        {
+            if (isExpiring())
+                return EXPIRATION_MASK;
+            if (isTombstone())
+                return DELETION_MASK;
+            if (isCounter())
+                return COUNTER_MASK;
+            return 0;
         }
 
         public ClusteringPrefix clustering()
@@ -1971,6 +2031,25 @@ public abstract class LegacyLayout
             ends[i] = end;
             markedAts[i] = markedAt;
             delTimes[i] = delTime;
+        }
+
+        public void updateDigest(MessageDigest digest)
+        {
+            ByteBuffer longBuffer = ByteBuffer.allocate(8);
+            for (int i = 0; i < size; i++)
+            {
+                for (int j = 0; j < starts[i].bound.size(); j++)
+                    digest.update(starts[i].bound.get(j).duplicate());
+                if (starts[i].collectionName != null)
+                    digest.update(starts[i].collectionName.name.bytes.duplicate());
+                for (int j = 0; j < ends[i].bound.size(); j++)
+                    digest.update(ends[i].bound.get(j).duplicate());
+                if (ends[i].collectionName != null)
+                    digest.update(ends[i].collectionName.name.bytes.duplicate());
+
+                longBuffer.putLong(0, markedAts[i]);
+                digest.update(longBuffer.array(), 0, 8);
+            }
         }
 
         public void serialize(DataOutputPlus out, CFMetaData metadata) throws IOException

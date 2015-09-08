@@ -1,4 +1,25 @@
+3.0.0-rc1
+ * Small optimizations of sstable index serialization (CASSANDRA-10232)
+ * Support for both encrypted and unencrypted native transport connections (CASSANDRA-9590)
+Merged from 2.2:
+ * Handle missing RoleManager in config after upgrade to 2.2 (CASSANDRA-10209)
+Merged from 2.1:
+ * Scrub, Cleanup and Upgrade do not unmark compacting until all operations
+   have completed, regardless of the occurence of exceptions (CASSANDRA-10274)
+
+
 3.0.0-beta2
+ * Fix columns returned by AbstractBtreePartitions (CASSANDRA-10220)
+ * Fix backward compatibility issue due to AbstractBounds serialization bug (CASSANDRA-9857)
+ * Fix startup error when upgrading nodes (CASSANDRA-10136)
+ * Base table PRIMARY KEY can be assumed to be NOT NULL in MV creation (CASSANDRA-10147)
+ * Improve batchlog write patch (CASSANDRA-9673)
+ * Re-apply MaterializedView updates on commitlog replay (CASSANDRA-10164)
+ * Require AbstractType.isByteOrderComparable declaration in constructor (CASSANDRA-9901)
+ * Avoid digest mismatch on upgrade to 3.0 (CASSANDRA-9554)
+ * Fix Materialized View builder when adding multiple MVs (CASSANDRA-10156)
+ * Choose better poolingOptions for protocol v4 in cassandra-stress (CASSANDRA-10182)
+ * Fix LWW bug affecting Materialized Views (CASSANDRA-10197)
  * Ensures frozen sets and maps are always sorted (CASSANDRA-10162)
  * Don't deadlock when flushing CFS backed custom indexes (CASSANDRA-10181)
  * Fix double flushing of secondary index tables (CASSANDRA-10180)
@@ -8,6 +29,23 @@
  * Validate gc_grace_seconds for batchlog writes and MVs (CASSANDRA-9917)
  * Fix sstablerepairedset (CASSANDRA-10132)
 Merged from 2.2:
+ * Retry snapshot deletion after compaction and gc on Windows (CASSANDRA-10222)
+ * Fix failure to start with space in directory path on Windows (CASSANDRA-10239)
+ * Fix repair hang when snapshot failed (CASSANDRA-10057)
+ * Fall back to 1/4 commitlog volume for commitlog_total_space on small disks
+   (CASSANDRA-10199)
+Merged from 2.1:
+ * Fix handling of streaming EOF (CASSANDRA-10206)
+ * Only check KeyCache when it is enabled
+ * Change streaming_socket_timeout_in_ms default to 1 hour (CASSANDRA-8611)
+ * (cqlsh) update list of CQL keywords (CASSANDRA-9232)
+ * Add nodetool gettraceprobability command (CASSANDRA-10234)
+Merged from 2.0:
+ * Disallow decommission when node is in drained state (CASSANDRA-8741)
+
+
+2.2.1
+ * Fix race during construction of commit log (CASSANDRA-10049)
  * Fix LeveledCompactionStrategyTest (CASSANDRA-9757)
  * Fix broken UnbufferedDataOutputStreamPlus.writeUTF (CASSANDRA-10203)
  * (cqlsh) default load-from-file encoding to utf-8 (CASSANDRA-9898)
@@ -15,6 +53,7 @@ Merged from 2.2:
  * (cqlsh) add CLEAR command (CASSANDRA-10086)
  * Support string literals as Role names for compatibility (CASSANDRA-10135)
 Merged from 2.1:
+ * Only check KeyCache when it is enabled
  * Change streaming_socket_timeout_in_ms default to 1 hour (CASSANDRA-8611)
  * (cqlsh) update list of CQL keywords (CASSANDRA-9232)
 

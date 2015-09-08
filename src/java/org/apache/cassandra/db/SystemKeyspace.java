@@ -113,7 +113,7 @@ public final class SystemKeyspace
                 "batches awaiting replay",
                 "CREATE TABLE %s ("
                 + "id timeuuid,"
-                + "data blob,"
+                + "mutations list<blob>,"
                 + "version int,"
                 + "PRIMARY KEY ((id)))")
                 .copy(new LocalPartitioner(TimeUUIDType.instance))
@@ -676,7 +676,7 @@ public final class SystemKeyspace
     {
         try
         {
-            NIODataInputStream in = new DataInputBuffer(bytes, true);
+            RebufferingInputStream in = new DataInputBuffer(bytes, true);
             return Pair.create(ReplayPosition.serializer.deserialize(in), in.available() > 0 ? in.readLong() : Long.MIN_VALUE);
         }
         catch (IOException e)

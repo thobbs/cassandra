@@ -22,9 +22,6 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -214,7 +211,7 @@ abstract class AbstractSSTableIterator implements SliceableUnfilteredRowIterator
     {
         // We could return sstable.header.stats(), but this may not be as accurate than the actual sstable stats (see
         // SerializationHeader.make() for details) so we use the latter instead.
-        return new EncodingStats(sstable.getMinTimestamp(), sstable.getMinLocalDeletionTime(), sstable.getMinTTL(), sstable.getAvgColumnSetPerRow());
+        return new EncodingStats(sstable.getMinTimestamp(), sstable.getMinLocalDeletionTime(), sstable.getMinTTL());
     }
 
     public boolean hasNext()
@@ -415,6 +412,7 @@ abstract class AbstractSSTableIterator implements SliceableUnfilteredRowIterator
 
         private final RowIndexEntry indexEntry;
         private final List<IndexHelper.IndexInfo> indexes;
+        private final long[] blockOffsets;
         private final boolean reversed;
 
         private int currentIndexIdx;
@@ -430,6 +428,14 @@ abstract class AbstractSSTableIterator implements SliceableUnfilteredRowIterator
             this.indexes = indexEntry.columnsIndex();
             this.reversed = reversed;
             this.currentIndexIdx = reversed ? indexEntry.columnsIndex().size() : -1;
+
+            this.blockOffsets = new long[indexes.size()];
+            long offset = indexEntry.position + indexEntry.headerLength();
+            for (int i = 0; i < blockOffsets.length; i++)
+            {
+                blockOffsets[i] = offset;
+                offset += indexes.get(i).width;
+            }
         }
 
         public boolean isDone()
@@ -441,7 +447,7 @@ abstract class AbstractSSTableIterator implements SliceableUnfilteredRowIterator
         public void setToBlock(int blockIdx) throws IOException
         {
             if (blockIdx >= 0 && blockIdx < indexes.size())
-                reader.seekToPosition(indexEntry.position + indexes.get(blockIdx).offset);
+                reader.seekToPosition(blockOffsets[blockIdx]);
 
             currentIndexIdx = blockIdx;
             reader.openMarker = blockIdx > 0 ? indexes.get(blockIdx - 1).endOpenMarker : null;
@@ -451,6 +457,32 @@ abstract class AbstractSSTableIterator implements SliceableUnfilteredRowIterator
         public int blocksCount()
         {
             return indexes.size();
+        }
+
+        // Update the block idx based on the current reader position if we're past the current block.
+        public void updateBlock() throws IOException
+        {
+            assert currentIndexIdx >= 0;
+            while (currentIndexIdx + 1 < indexes.size() && isPastCurrentBlock())
+            {
+                reader.openMarker = currentIndex().endOpenMarker;
+                ++currentIndexIdx;
+
+                // We have to set the mark, and we have to set it at the beginning of the block. So if we're not at the beginning of the block, this forces us to a weird seek dance.
+                // This can only happen when reading old file however.
+                long startOfBlock = blockOffsets[currentIndexIdx];
+                long currentFilePointer = reader.file.getFilePointer();
+                if (startOfBlock == currentFilePointer)
+                {
+                    mark = reader.file.mark();
+                }
+                else
+                {
+                    reader.seekToPosition(startOfBlock);
+                    mark = reader.file.mark();
+                    reader.seekToPosition(currentFilePointer);
+                }
+            }
         }
 
         // Check if we've crossed an index boundary (based on the mark on the beginning of the index block).
@@ -466,7 +498,12 @@ abstract class AbstractSSTableIterator implements SliceableUnfilteredRowIterator
 
         public IndexHelper.IndexInfo currentIndex()
         {
-            return indexes.get(currentIndexIdx);
+            return index(currentIndexIdx);
+        }
+
+        public IndexHelper.IndexInfo index(int i)
+        {
+            return indexes.get(i);
         }
 
         // Finds the index of the first block containing the provided bound, starting at the provided index.

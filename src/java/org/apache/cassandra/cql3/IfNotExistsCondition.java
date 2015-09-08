@@ -15,24 +15,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.db;
+package org.apache.cassandra.cql3;
 
-public interface BatchlogManagerMBean
+import org.apache.cassandra.cql3.statements.CQL3CasRequest;
+import org.apache.cassandra.db.Clustering;
+
+final class IfNotExistsCondition extends AbstractConditions
 {
-    /**
-     * Counts all batches currently in the batchlog.
-     *
-     * @return total batch count
-     */
-    public int countAllBatches();
+    @Override
+    public void addConditionsTo(CQL3CasRequest request, Clustering clustering, QueryOptions options)
+    {
+        request.addNotExist(clustering);
+    }
 
-    /**
-     * @return total count of batches replayed since node start
-     */
-    public long getTotalBatchesReplayed();
-
-    /**
-     * Forces batchlog replay. Returns immediately if replay is already in progress.
-     */
-    public void forceBatchlogReplay() throws Exception;
+    @Override
+    public boolean isIfNotExists()
+    {
+        return true;
+    }
 }

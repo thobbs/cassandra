@@ -293,8 +293,14 @@ public class CreateMaterializedViewStatement extends SchemaAlteringStatement
                                                             "materialized view primary key unless the partition keys match", identifier));
         }
 
-        if (!allowedPKColumns.contains(identifier))
+        // We don't need to include the "IS NOT NULL" filter on a non-composite partition key
+        // because we will never allow a single partition key to be NULL
+        boolean isSinglePartitionKey = cfm.getColumnDefinition(identifier).isPartitionKey()
+                                       && cfm.partitionKeyColumns().size() == 1;
+        if (!allowedPKColumns.remove(identifier) && !isSinglePartitionKey)
+        {
             throw new InvalidRequestException(String.format("Primary key column '%s' is required to be filtered by 'IS NOT NULL'", identifier));
+        }
 
         columns.add(identifier);
         return !isPk;
