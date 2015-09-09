@@ -753,7 +753,7 @@ public class SecondaryIndexManager implements IndexRegistry
                         toInsert.addPrimaryKeyLivenessInfo(merged);
                 }
 
-                public void onDeletion(int i, Clustering clustering, DeletionTime merged, DeletionTime original)
+                public void onDeletion(int i, Clustering clustering, Row.Deletion merged, Row.Deletion original)
                 {
                 }
 
@@ -845,7 +845,7 @@ public class SecondaryIndexManager implements IndexRegistry
                 {
                 }
 
-                public void onDeletion(int i, Clustering clustering, DeletionTime merged, DeletionTime original)
+                public void onDeletion(int i, Clustering clustering, Row.Deletion merged, Row.Deletion original)
                 {
                 }
 
