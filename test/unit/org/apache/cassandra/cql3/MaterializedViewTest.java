@@ -378,7 +378,7 @@ public class MaterializedViewTest extends CQLTester
         if (flush)
             FBUtilities.waitOnFutures(ks.flush());
 
-        //change c's value and TS=3, tombstones c=1 and adds c=0 record
+            //change c's value and TS=3, tombstones c=1 and adds c=0 record
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET c = ? WHERE a = ? and b = ? ", 0, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0));
 
@@ -419,6 +419,17 @@ public class MaterializedViewTest extends CQLTester
         //Change d value @ TS=3
         executeNet(protocolVersion, "UPDATE %s USING TIMESTAMP 3 SET d = ? WHERE a = ? and b = ? ", 1, 0, 0);
         assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(1));
+
+
+        //Tombstone c
+        executeNet(protocolVersion, "DELETE FROM %s WHERE a = ? and b = ?", 0, 0);
+        assertRows(execute("SELECT d from mv"));
+
+        //Add back without D
+        executeNet(protocolVersion, "INSERT INTO %s (a, b, c) VALUES (0, 0, 1)");
+
+        //Make sure D doesn't pop back in.
+        assertRows(execute("SELECT d from mv WHERE c = ? and a = ? and b = ?", 1, 0, 0), row(null));
     }
 
     @Test

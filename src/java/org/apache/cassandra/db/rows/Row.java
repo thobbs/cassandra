@@ -223,30 +223,30 @@ public interface Row extends Unfiltered, Collection<ColumnData>
     /**
      * A row deletion/tombstone.
      * <p>
-     * A row deletion mostly consists of the time of said deletion, but there is 2 variants: weak
+     * A row deletion mostly consists of the time of said deletion, but there is 2 variants: shadowable
      * and regular row deletion.
      * <p>
-     * A weak row deletion only exists if the row timestamp ({@code primaryKeyLivenessInfo().timestamp()})
-     * is lower than the deletion timestamp. That is, if a row has a weak deletion of timestamp A and an update is made
-     * to that row with a timestamp B such that B > A, then the weak deletion is removed by that update. A concrete
+     * A shadowable row deletion only exists if the row timestamp ({@code primaryKeyLivenessInfo().timestamp()})
+     * is lower than the deletion timestamp. That is, if a row has a shadowable deletion with timestamp A and an update is made
+     * to that row with a timestamp B such that B > A, then the shadowable deletion is 'shadowed' by that update. A concrete
      * consequence is that if said update has cells with timestamp lower than A, then those cells are preserved
-     * (since the deletion is removed), and this contrarily to a normal (non-weak) deletion where the deletion is preserved
+     * (since the deletion is removed), and this contrarily to a normal (regular) deletion where the deletion is preserved
      * and such cells are removed.
      * <p>
-     * Currently, the only use of weak row deletions is Materialized Views, see CASSANDRA-10261.
+     * Currently, the only use of shadowable row deletions is Materialized Views, see CASSANDRA-10261.
      */
     public static class Deletion
     {
         public static final Deletion LIVE = new Deletion(DeletionTime.LIVE, false);
 
         private final DeletionTime time;
-        private final boolean isWeak;
+        private final boolean isShadowable;
 
-        public Deletion(DeletionTime time, boolean isWeak)
+        public Deletion(DeletionTime time, boolean isShadowable)
         {
-            assert !time.isLive() || !isWeak;
+            assert !time.isLive() || !isShadowable;
             this.time = time;
-            this.isWeak = isWeak;
+            this.isShadowable = isShadowable;
         }
 
         public static Deletion regular(DeletionTime time)
@@ -254,7 +254,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
             return time.isLive() ? LIVE : new Deletion(time, false);
         }
 
-        public static Deletion weak(DeletionTime time)
+        public static Deletion shadowable(DeletionTime time)
         {
             return new Deletion(time, true);
         }
@@ -270,14 +270,14 @@ public interface Row extends Unfiltered, Collection<ColumnData>
         }
 
         /**
-         * Whether the deletion is a weak one or not.
+         * Whether the deletion is a shadowable one or not.
          *
-         * @return whether the deletion is a weak one. Note that if {@code isLive()}, then this is
+         * @return whether the deletion is a shadowable one. Note that if {@code isLive()}, then this is
          * guarantee to return {@code false}.
          */
-        public boolean isWeak()
+        public boolean isShadowable()
         {
-            return isWeak;
+            return isShadowable;
         }
 
         /**
@@ -303,7 +303,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
 
         public boolean isShadowedBy(LivenessInfo primaryKeyLivenessInfo)
         {
-            return isWeak && primaryKeyLivenessInfo.timestamp() > time.markedForDeleteAt();
+            return isShadowable && primaryKeyLivenessInfo.timestamp() > time.markedForDeleteAt();
         }
 
         public boolean deletes(LivenessInfo info)
@@ -314,7 +314,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
         public void digest(MessageDigest digest)
         {
             time.digest(digest);
-            FBUtilities.updateWithBoolean(digest, isWeak);
+            FBUtilities.updateWithBoolean(digest, isShadowable);
         }
 
         public int dataSize()
@@ -328,19 +328,19 @@ public interface Row extends Unfiltered, Collection<ColumnData>
             if(!(o instanceof Deletion))
                 return false;
             Deletion that = (Deletion)o;
-            return this.time.equals(that.time) && this.isWeak == that.isWeak;
+            return this.time.equals(that.time) && this.isShadowable == that.isShadowable;
         }
 
         @Override
         public final int hashCode()
         {
-            return Objects.hash(time, isWeak);
+            return Objects.hash(time, isShadowable);
         }
 
         @Override
         public String toString()
         {
-            return String.format("%s%s", time, isWeak ? "(weak)" : "");
+            return String.format("%s%s", time, isShadowable ? "(shadowable)" : "");
         }
     }
 

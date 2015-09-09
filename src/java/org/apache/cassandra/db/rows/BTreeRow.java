@@ -313,11 +313,11 @@ public class BTreeRow extends AbstractRow
     public Row updateAllTimestamp(long newTimestamp)
     {
         LivenessInfo newInfo = primaryKeyLivenessInfo.isEmpty() ? primaryKeyLivenessInfo : primaryKeyLivenessInfo.withUpdatedTimestamp(newTimestamp);
-        // If the deletion is a weak and the row has a timestamp, we'll forced the deletion timestamp to be less than the row one, so we
+        // If the deletion is shadowable and the row has a timestamp, we'll forced the deletion timestamp to be less than the row one, so we
         // should get rid of said weak deletion.
-        Deletion newDeletion = deletion.isLive() || (deletion.isWeak() && !primaryKeyLivenessInfo.isEmpty())
+        Deletion newDeletion = deletion.isLive() || (deletion.isShadowable() && !primaryKeyLivenessInfo.isEmpty())
                              ? Deletion.LIVE
-                             : new Deletion(new DeletionTime(newTimestamp - 1, deletion.time().localDeletionTime()), deletion.isWeak());
+                             : new Deletion(new DeletionTime(newTimestamp - 1, deletion.time().localDeletionTime()), deletion.isShadowable());
 
         return transformAndFilter(newInfo, newDeletion, (cd) -> cd.updateAllTimestamp(newTimestamp));
     }
