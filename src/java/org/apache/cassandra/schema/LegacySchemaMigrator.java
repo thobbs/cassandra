@@ -703,7 +703,7 @@ public final class LegacySchemaMigrator
         try (OpOrder.Group op = store.readOrdering.start();
              RowIterator partition = UnfilteredRowIterators.filter(command.queryMemtableAndDisk(store, op), nowInSec))
         {
-            return partition.next().primaryKeyLivenessInfo().timestamp();
+            return partition.next().primaryKeyLivenessInfo().getTimestamps();
         }
     }
 

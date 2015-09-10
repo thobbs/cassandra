@@ -123,7 +123,7 @@ public class BTreeRow extends AbstractRow
 
     private static int minDeletionTime(LivenessInfo info)
     {
-        return info.isExpiring() ? info.localExpirationTime() : Integer.MAX_VALUE;
+        return info.isExpiring() ? info.getLocalExpirationTimes() : Integer.MAX_VALUE;
     }
 
     private static int minDeletionTime(DeletionTime dt)
@@ -246,7 +246,7 @@ public class BTreeRow extends AbstractRow
         Deletion newDeletion = deletion;
         if (mayHaveShadowed)
         {
-            if (activeDeletion.deletes(newInfo.timestamp()))
+            if (activeDeletion.deletes(newInfo.getTimestamps()))
                 newInfo = LivenessInfo.EMPTY;
             // note that mayHaveShadowed means the activeDeletion shadows the row deletion. So if don't have setActiveDeletionToRow,
             // the row deletion is shadowed and we shouldn't return it.

@@ -235,7 +235,7 @@ public abstract class Rows
         LivenessInfo updateInfo = update.primaryKeyLivenessInfo();
         LivenessInfo mergedInfo = existingInfo.supersedes(updateInfo) ? existingInfo : updateInfo;
 
-        long timeDelta = Math.abs(existingInfo.timestamp() - mergedInfo.timestamp());
+        long timeDelta = Math.abs(existingInfo.getTimestamps() - mergedInfo.getTimestamps());
 
         Row.Deletion rowDeletion = existing.deletion().supersedes(update.deletion()) ? existing.deletion() : update.deletion();
 

@@ -453,7 +453,7 @@ public class PartitionUpdate extends AbstractBTreePartition
         long maxTimestamp = deletionInfo.maxTimestamp();
         for (Row row : this)
         {
-            maxTimestamp = Math.max(maxTimestamp, row.primaryKeyLivenessInfo().timestamp());
+            maxTimestamp = Math.max(maxTimestamp, row.primaryKeyLivenessInfo().getTimestamps());
             for (ColumnData cd : row)
             {
                 if (cd.column().isSimple())

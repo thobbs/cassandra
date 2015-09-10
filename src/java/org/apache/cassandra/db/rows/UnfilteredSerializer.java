@@ -149,11 +149,11 @@ public class UnfilteredSerializer
             Clustering.serializer.serialize(row.clustering(), out, version, header.clusteringTypes());
 
         if ((flags & HAS_TIMESTAMP) != 0)
-            header.writeTimestamp(pkLiveness.timestamp(), out);
+            header.writeTimestamp(pkLiveness.getTimestamps(), out);
         if ((flags & HAS_TTL) != 0)
         {
-            header.writeTTL(pkLiveness.ttl(), out);
-            header.writeLocalDeletionTime(pkLiveness.localExpirationTime(), out);
+            header.writeTTL(pkLiveness.getTTLs(), out);
+            header.writeLocalDeletionTime(pkLiveness.getLocalExpirationTimes(), out);
         }
         if ((flags & HAS_DELETION) != 0)
             header.writeDeletionTime(deletion.time(), out);
@@ -224,11 +224,11 @@ public class UnfilteredSerializer
             size += Clustering.serializer.serializedSize(row.clustering(), version, header.clusteringTypes());
 
         if (!pkLiveness.isEmpty())
-            size += header.timestampSerializedSize(pkLiveness.timestamp());
+            size += header.timestampSerializedSize(pkLiveness.getTimestamps());
         if (pkLiveness.isExpiring())
         {
-            size += header.ttlSerializedSize(pkLiveness.ttl());
-            size += header.localDeletionTimeSerializedSize(pkLiveness.localExpirationTime());
+            size += header.ttlSerializedSize(pkLiveness.getTTLs());
+            size += header.localDeletionTimeSerializedSize(pkLiveness.getLocalExpirationTimes());
         }
         if (!deletion.isLive())
             size += header.deletionTimeSerializedSize(deletion.time());

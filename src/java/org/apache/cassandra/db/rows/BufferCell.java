@@ -230,8 +230,8 @@ public class BufferCell extends AbstractCell
             boolean hasValue = cell.value().hasRemaining();
             boolean isDeleted = cell.isTombstone();
             boolean isExpiring = cell.isExpiring();
-            boolean useRowTimestamp = !rowLiveness.isEmpty() && cell.timestamp() == rowLiveness.timestamp();
-            boolean useRowTTL = isExpiring && rowLiveness.isExpiring() && cell.ttl() == rowLiveness.ttl() && cell.localDeletionTime() == rowLiveness.localExpirationTime();
+            boolean useRowTimestamp = !rowLiveness.isEmpty() && cell.timestamp() == rowLiveness.getTimestamps();
+            boolean useRowTTL = isExpiring && rowLiveness.isExpiring() && cell.ttl() == rowLiveness.getTTLs() && cell.localDeletionTime() == rowLiveness.getLocalExpirationTimes();
             int flags = 0;
             if (!hasValue)
                 flags |= HAS_EMPTY_VALUE_MASK;
@@ -272,13 +272,13 @@ public class BufferCell extends AbstractCell
             boolean useRowTimestamp = (flags & USE_ROW_TIMESTAMP_MASK) != 0;
             boolean useRowTTL = (flags & USE_ROW_TTL_MASK) != 0;
 
-            long timestamp = useRowTimestamp ? rowLiveness.timestamp() : header.readTimestamp(in);
+            long timestamp = useRowTimestamp ? rowLiveness.getTimestamps() : header.readTimestamp(in);
 
             int localDeletionTime = useRowTTL
-                                  ? rowLiveness.localExpirationTime()
+                                  ? rowLiveness.getLocalExpirationTimes()
                                   : (isDeleted || isExpiring ? header.readLocalDeletionTime(in) : NO_DELETION_TIME);
 
-            int ttl = useRowTTL ? rowLiveness.ttl() : (isExpiring ? header.readTTL(in) : NO_TTL);
+            int ttl = useRowTTL ? rowLiveness.getTTLs() : (isExpiring ? header.readTTL(in) : NO_TTL);
 
             CellPath path = column.isComplex()
                           ? column.cellPathSerializer().deserialize(in)
@@ -310,8 +310,8 @@ public class BufferCell extends AbstractCell
             boolean hasValue = cell.value().hasRemaining();
             boolean isDeleted = cell.isTombstone();
             boolean isExpiring = cell.isExpiring();
-            boolean useRowTimestamp = !rowLiveness.isEmpty() && cell.timestamp() == rowLiveness.timestamp();
-            boolean useRowTTL = isExpiring && rowLiveness.isExpiring() && cell.ttl() == rowLiveness.ttl() && cell.localDeletionTime() == rowLiveness.localExpirationTime();
+            boolean useRowTimestamp = !rowLiveness.isEmpty() && cell.timestamp() == rowLiveness.getTimestamps();
+            boolean useRowTTL = isExpiring && rowLiveness.isExpiring() && cell.ttl() == rowLiveness.getTTLs() && cell.localDeletionTime() == rowLiveness.getLocalExpirationTimes();
 
             if (!useRowTimestamp)
                 size += header.timestampSerializedSize(cell.timestamp());

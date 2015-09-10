@@ -257,8 +257,8 @@ public class TemporalRow
 
         LivenessInfo liveness = row.primaryKeyLivenessInfo();
         this.viewClusteringLocalDeletionTime = minValueIfSet(viewClusteringLocalDeletionTime, row.deletion().time().localDeletionTime(), NO_DELETION_TIME);
-        this.viewClusteringTimestamp = minValueIfSet(viewClusteringTimestamp, liveness.timestamp(), NO_TIMESTAMP);
-        this.viewClusteringTtl = minValueIfSet(viewClusteringTtl, liveness.ttl(), NO_TTL);
+        this.viewClusteringTimestamp = minValueIfSet(viewClusteringTimestamp, liveness.getTimestamps(), NO_TIMESTAMP);
+        this.viewClusteringTtl = minValueIfSet(viewClusteringTtl, liveness.getTTLs(), NO_TTL);
 
         List<ColumnDefinition> clusteringDefs = baseCfs.metadata.clusteringColumns();
         clusteringColumns = new HashMap<>();

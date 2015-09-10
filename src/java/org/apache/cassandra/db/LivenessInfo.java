@@ -17,8 +17,10 @@
  */
 package org.apache.cassandra.db;
 
+import java.util.Arrays;
 import java.util.Objects;
 import java.security.MessageDigest;
+import java.util.StringJoiner;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.serializers.MarshalException;
@@ -89,9 +91,9 @@ public class LivenessInfo
      *
      * @return the liveness info timestamp (or {@link #NO_TIMESTAMP} if the info is empty).
      */
-    public long timestamp()
+    public long[] getTimestamps()
     {
-        return timestamp;
+        return new long[]{timestamp};
     }
 
     /**
@@ -109,7 +111,7 @@ public class LivenessInfo
      * Please note that this value is the TTL that was set originally and is thus not
      * changing.
      */
-    public int ttl()
+    public int[] getTTLs()
     {
         return NO_TTL;
     }
@@ -118,7 +120,7 @@ public class LivenessInfo
      * The expiration time (in seconds) if the info is expiring ({@link #NO_EXPIRATION_TIME} otherwise).
      *
      */
-    public int localExpirationTime()
+    public int[] getLocalExpirationTimes()
     {
         return NO_EXPIRATION_TIME;
     }
@@ -144,7 +146,7 @@ public class LivenessInfo
      */
     public void digest(MessageDigest digest)
     {
-        FBUtilities.updateWithLong(digest, timestamp());
+        FBUtilities.updateWithLong(digest, getTimestamps());
     }
 
     /**
@@ -163,7 +165,7 @@ public class LivenessInfo
      */
     public int dataSize()
     {
-        return TypeSizes.sizeof(timestamp());
+        return TypeSizes.sizeof(getTimestamps());
     }
 
     /**
@@ -205,15 +207,80 @@ public class LivenessInfo
             return false;
 
         LivenessInfo that = (LivenessInfo)other;
-        return this.timestamp() == that.timestamp()
-            && this.ttl() == that.ttl()
-            && this.localExpirationTime() == that.localExpirationTime();
+        return this.getTimestamps() == that.getTimestamps()
+            && this.getTTLs() == that.getTTLs()
+            && this.getLocalExpirationTimes() == that.getLocalExpirationTimes();
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(timestamp(), ttl(), localExpirationTime());
+        return Objects.hash(getTimestamps(), getTTLs(), getLocalExpirationTimes());
+    }
+
+    private static class MultiTimestampLivenessInfo extends LivenessInfo
+    {
+        protected final long[] timestamps;
+
+        private MultiTimestampLivenessInfo(long[] timestamps)
+        {
+            super(NO_TIMESTAMP);
+            this.timestamps = timestamps;
+            assert timestamps.length > 0;
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            for (long timestamp : timestamps)
+                if (timestamp == NO_TIMESTAMP)
+                    return true;
+            return false;
+        }
+
+        @Override
+        public void digest(MessageDigest digest)
+        {
+            for (long timestamp : timestamps)
+                FBUtilities.updateWithLong(digest, timestamp);
+        }
+
+        @Override
+        public int dataSize()
+        {
+            return timestamps.length * TypeSizes.sizeof(timestamps[0]);
+        }
+
+        @Override
+        public String toString()
+        {
+            StringJoiner joiner = new StringJoiner(", ");
+            for (Long timestamp : timestamps)
+                joiner.add(timestamp.toString());
+            return String.format("[ts=[%s]]", joiner);
+        }
+
+        @Override
+        public boolean equals(Object other)
+        {
+            if(!(other instanceof MultiTimestampLivenessInfo))
+                return false;
+
+            MultiTimestampLivenessInfo that = (MultiTimestampLivenessInfo)other;
+            if (timestamps.length != that.timestamps.length)
+                return false;
+
+            for (int i = 0; i < timestamps.length; i++)
+                if (timestamps[i] != that.timestamps[i])
+                    return false;
+            return true;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Arrays.hashCode(timestamps);
+        }
     }
 
     private static class ExpiringLivenessInfo extends LivenessInfo
@@ -230,13 +297,13 @@ public class LivenessInfo
         }
 
         @Override
-        public int ttl()
+        public int[] getTTLs()
         {
             return ttl;
         }
 
         @Override
-        public int localExpirationTime()
+        public int[] getLocalExpirationTimes()
         {
             return localExpirationTime;
         }
@@ -289,6 +356,129 @@ public class LivenessInfo
         public String toString()
         {
             return String.format("[ts=%d ttl=%d, let=%d]", timestamp, ttl, localExpirationTime);
+        }
+    }
+
+    private static class ExpiringMultiTimestampLivenessInfo extends MultiTimestampLivenessInfo
+    {
+        private final int[] ttls;
+        private final int[] localExpirationTimes;
+
+        private ExpiringMultiTimestampLivenessInfo(long[] timestamps, int[] ttls, int[] localExpirationTimes)
+        {
+            super(timestamps);
+            this.ttls = ttls;
+            this.localExpirationTimes = localExpirationTimes;
+            assert timestamps.length == ttls.length && timestamps.length == localExpirationTimes.length;
+        }
+
+        @Override
+        public int[] getTTLs()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public int[] getTTLs()
+        {
+            return ttls;
+        }
+
+        @Override
+        public int[] getLocalExpirationTimes()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        public int[] getLocalExpirationTimes()
+        {
+            return localExpirationTimes;
+        }
+
+        @Override
+        public boolean isExpiring()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean isLive(int nowInSec)
+        {
+            for (int localExpirationTime : localExpirationTimes)
+                if (nowInSec >= localExpirationTime)
+                    return false;
+            return true;
+        }
+
+        @Override
+        public void digest(MessageDigest digest)
+        {
+            super.digest(digest);
+            for (int localExpirationTime : localExpirationTimes)
+                FBUtilities.updateWithInt(digest, localExpirationTime);
+            for (int ttl : ttls)
+                FBUtilities.updateWithInt(digest, ttl);
+        }
+
+        @Override
+        public void validate()
+        {
+            for (int ttl : ttls)
+            {
+                if (ttl < 0)
+                    throw new MarshalException("A TTL should not be negative");
+            }
+
+            for (int localExpirationTime : localExpirationTimes)
+            {
+                if (localExpirationTime < 0)
+                    throw new MarshalException("A local expiration time should not be negative");
+            }
+        }
+
+        @Override
+        public int dataSize()
+        {
+            int numItems = timestamps.length;
+            return super.dataSize()
+                 + (numItems * TypeSizes.sizeof(ttls[0]))
+                 + (numItems * TypeSizes.sizeof(localExpirationTimes[0]));
+
+        }
+
+        @Override
+        public String toString()
+        {
+            StringJoiner timestampJoiner = new StringJoiner(", ");
+            StringJoiner ttlJoiner = new StringJoiner(", ");
+            StringJoiner expirationJoiner = new StringJoiner(", ");
+            for (int i = 0; i < timestamps.length; i++)
+            {
+                timestampJoiner.add(String.valueOf(timestamps[i]);
+                ttlJoiner.add(String.valueOf(ttls[i]);
+                expirationJoiner.add(String.valueOf(localExpirationTimes[i]);
+            }
+            return String.format("[ts=[%s] ttls=[%s] lets=[%s]]", timestampJoiner, ttlJoiner, expirationJoiner);
+        }
+
+        public boolean equals(Object other)
+        {
+            if(!(other instanceof ExpiringMultiTimestampLivenessInfo))
+                return false;
+
+            ExpiringMultiTimestampLivenessInfo that = (ExpiringMultiTimestampLivenessInfo)other;
+            if (timestamps.length != that.timestamps.length)
+                return false;
+
+            for (int i = 0; i < timestamps.length; i++)
+                if (timestamps[i] != that.timestamps[i] || ttls[i] != that.ttls[i] || localExpirationTimes[i] != that.localExpirationTimes[i])
+                    return false;
+            return true;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(Arrays.hashCode(timestamps), Arrays.hashCode(ttls), Arrays.hashCode(localExpirationTimes));
         }
     }
 }

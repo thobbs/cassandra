@@ -148,12 +148,12 @@ public class EncodingStats
             if (info.isEmpty())
                 return;
 
-            updateTimestamp(info.timestamp());
+            updateTimestamp(info.getTimestamps());
 
             if (info.isExpiring())
             {
-                updateTTL(info.ttl());
-                updateLocalDeletionTime(info.localExpirationTime());
+                updateTTL(info.getTTLs());
+                updateLocalDeletionTime(info.getLocalExpirationTimes());
             }
         }
 

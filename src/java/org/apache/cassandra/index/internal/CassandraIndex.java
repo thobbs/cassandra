@@ -413,7 +413,7 @@ public abstract class CassandraIndex implements Index
                                          final LivenessInfo liveness,
                                          final Row.Deletion deletion)
             {
-                if (liveness.timestamp() != LivenessInfo.NO_TIMESTAMP)
+                if (liveness.getTimestamps() != LivenessInfo.NO_TIMESTAMP)
                     insert(key.getKey(), clustering, null, liveness, opGroup);
 
                 if (!deletion.isLive())
@@ -422,8 +422,8 @@ public abstract class CassandraIndex implements Index
 
             private LivenessInfo getPrimaryKeyIndexLiveness(Row row)
             {
-                long timestamp = row.primaryKeyLivenessInfo().timestamp();
-                int ttl = row.primaryKeyLivenessInfo().ttl();
+                long timestamp = row.primaryKeyLivenessInfo().getTimestamps();
+                int ttl = row.primaryKeyLivenessInfo().getTTLs();
                 for (Cell cell : row.cells())
                 {
                     long cellTimestamp = cell.timestamp();

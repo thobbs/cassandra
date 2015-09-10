@@ -83,7 +83,7 @@ public class PartitionKeyIndex extends CassandraIndex
 
         return new IndexEntry(indexedValue,
                               clustering,
-                              indexEntry.primaryKeyLivenessInfo().timestamp(),
+                              indexEntry.primaryKeyLivenessInfo().getTimestamps(),
                               clustering.get(0),
                               builder.build());
     }

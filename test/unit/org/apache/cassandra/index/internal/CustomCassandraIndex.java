@@ -30,8 +30,6 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexBuilder;
-import org.apache.cassandra.index.internal.composites.CompositesSearcher;
-import org.apache.cassandra.index.internal.keys.KeysSearcher;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
@@ -397,7 +395,7 @@ public class CustomCassandraIndex implements Index
                                          final LivenessInfo liveness,
                                          final Row.Deletion deletion)
             {
-                if (liveness.timestamp() != LivenessInfo.NO_TIMESTAMP)
+                if (liveness.getTimestamps() != LivenessInfo.NO_TIMESTAMP)
                     insert(key.getKey(), clustering, null, liveness, opGroup);
 
                 if (!deletion.isLive())
@@ -406,8 +404,8 @@ public class CustomCassandraIndex implements Index
 
             private LivenessInfo getPrimaryKeyIndexLiveness(Row row)
             {
-                long timestamp = row.primaryKeyLivenessInfo().timestamp();
-                int ttl = row.primaryKeyLivenessInfo().ttl();
+                long timestamp = row.primaryKeyLivenessInfo().getTimestamps();
+                int ttl = row.primaryKeyLivenessInfo().getTTLs();
                 for (Cell cell : row.cells())
                 {
                     long cellTimestamp = cell.timestamp();

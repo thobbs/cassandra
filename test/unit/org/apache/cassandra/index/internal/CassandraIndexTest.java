@@ -437,7 +437,7 @@ public class CassandraIndexTest extends CQLTester
                 Unfiltered unfiltered = iter.next();
                 assert (unfiltered.isRow());
                 Row indexRow = (Row) unfiltered;
-                assertEquals(ttl, indexRow.primaryKeyLivenessInfo().ttl());
+                assertEquals(ttl, indexRow.primaryKeyLivenessInfo().getTTLs());
             }
         }
     }

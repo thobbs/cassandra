@@ -724,7 +724,11 @@ public abstract class LegacyLayout
                     {
                         LegacyCellName cellName = new LegacyCellName(row.clustering(), null, null);
                         LivenessInfo info = row.primaryKeyLivenessInfo();
-                        return new LegacyCell(info.isExpiring() ? LegacyCell.Kind.EXPIRING : LegacyCell.Kind.REGULAR, cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER, info.timestamp(), info.localExpirationTime(), info.ttl());
+
+                        long[] timestamps = info.getTimestamps();
+                        assert timestamps.length == 1;
+
+                        return new LegacyCell(info.isExpiring() ? LegacyCell.Kind.EXPIRING : LegacyCell.Kind.REGULAR, cellName, ByteBufferUtil.EMPTY_BYTE_BUFFER, timestamps[0], info.getLocalExpirationTimes()[0], info.getTTLs()[0]);
                     }
                 }
 

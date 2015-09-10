@@ -30,6 +30,14 @@ public interface DeletionPurger
 
     public default boolean shouldPurge(LivenessInfo liveness, int nowInSec)
     {
-        return !liveness.isLive(nowInSec) && shouldPurge(liveness.timestamp(), liveness.localExpirationTime());
+        if (liveness.isLive(nowInSec))
+            return false;
+
+        long[] timestamps = liveness.getTimestamps();
+        int[] expirationTimes = liveness.getLocalExpirationTimes();
+        for (int i = 0; i < timestamps.length; i++)
+            if (!shouldPurge(timestamps[i], expirationTimes[i]))
+                return false;
+        return true;
     }
 }

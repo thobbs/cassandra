@@ -303,7 +303,7 @@ public interface Row extends Unfiltered, Collection<ColumnData>
 
         public boolean isShadowedBy(LivenessInfo primaryKeyLivenessInfo)
         {
-            return isShadowable && primaryKeyLivenessInfo.timestamp() > time.markedForDeleteAt();
+            return isShadowable && primaryKeyLivenessInfo.getTimestamps() > time.markedForDeleteAt();
         }
 
         public boolean deletes(LivenessInfo info)
