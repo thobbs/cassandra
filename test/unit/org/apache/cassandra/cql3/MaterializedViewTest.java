@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -684,6 +683,35 @@ public class MaterializedViewTest extends CQLTester
         // delete the entire partition
         updateMV("DELETE FROM %s WHERE a = ? AND b = ?", 0, 0);
         assertEmpty(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0));
+
+        // reset the rows
+        updateMV("INSERT INTO %s (a, b, c, d, e, f) VALUES (?, ?, ?, ?, ?, ?)", 0, 0, 0, 0, 0, 0);
+        updateMV("INSERT INTO %s (a, b, c, d, e, f) VALUES (?, ?, ?, ?, ?, ?)", 0, 0, 1, 0, 0, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 0, 0),
+                row(0, 0, 0, 0, 1, 0)
+        );
+
+        // separately update d and e to be null
+        updateMV("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", null, 0, 0, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 1, 0)
+        );
+
+        updateMV("UPDATE %s SET e = ? WHERE a = ? AND b = ? AND c = ?", null, 0, 0, 1);
+        assertEmpty(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0));
+
+        // separately update d and e to be non-null
+        updateMV("UPDATE %s SET d = ? WHERE a = ? AND b = ? AND c = ?", 0, 0, 0, 0);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 0, 0)
+        );
+
+        updateMV("UPDATE %s SET e = ? WHERE a = ? AND b = ? AND c = ?", 0, 0, 0, 1);
+        assertRows(execute("SELECT * FROM mv WHERE a = ? AND b = ?", 0, 0),
+                row(0, 0, 0, 0, 0, 0),
+                row(0, 0, 0, 0, 1, 0)
+        );
     }
 
     @Test

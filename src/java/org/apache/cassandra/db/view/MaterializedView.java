@@ -323,9 +323,9 @@ public class MaterializedView
 
         boolean hasUpdate = false;
         List<ColumnDefinition> primaryKeyDefs = this.columns.primaryKeyDefs;
-        for (ColumnDefinition viewPartitionKeys : primaryKeyDefs)
+        for (ColumnDefinition viewPrimaryKey : primaryKeyDefs)
         {
-            if (!viewPartitionKeys.isPrimaryKeyColumn() && temporalRow.clusteringValue(viewPartitionKeys, TemporalRow.oldValueIfUpdated) != null)
+            if (!viewPrimaryKey.isPrimaryKeyColumn() && temporalRow.clusteringValue(viewPrimaryKey, TemporalRow.oldValueIfUpdated) != null)
                 hasUpdate = true;
         }
 
@@ -361,7 +361,11 @@ public class MaterializedView
         CBuilder clustering = CBuilder.create(viewCfs.getComparator());
         for (int i = 0; i < viewCfs.metadata.clusteringColumns().size(); i++)
         {
-            clustering.add(temporalRow.clusteringValue(viewCfs.metadata.clusteringColumns().get(i), resolver));
+            ByteBuffer value = temporalRow.clusteringValue(viewCfs.metadata.clusteringColumns().get(i), resolver);
+            // we don't allow nulls in the view primary key right now
+            if (!value.hasRemaining())
+                return null;
+            clustering.add(value);
         }
         regularBuilder.newRow(clustering.build());
         regularBuilder.addPrimaryKeyLivenessInfo(LivenessInfo.create(viewCfs.metadata,
