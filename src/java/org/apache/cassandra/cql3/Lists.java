@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.functions.Function;
@@ -55,7 +56,7 @@ public abstract class Lists
         return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((ListType)column.type).getElementsType());
     }
 
-    public static class Literal implements Term.Raw
+    public static class Literal implements Term.Raw, Term.Literal
     {
         private final List<Term.Raw> elements;
 
@@ -111,6 +112,11 @@ public abstract class Lists
 
             ColumnSpecification valueSpec = Lists.valueSpecOf(receiver);
             return AssignmentTestable.TestResult.testAll(keyspace, valueSpec, elements);
+        }
+
+        public String getRawText()
+        {
+            return elements.stream().map(raw -> ((Term.Literal) raw).getRawText()).collect(Collectors.joining(", ", "[", "]"));
         }
 
         @Override
