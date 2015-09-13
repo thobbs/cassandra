@@ -22,11 +22,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.HashSet;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.After;
@@ -89,6 +85,45 @@ public class ViewTest extends CQLTester
                  && ((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getActiveCount() == 0))
         {
             Thread.sleep(1);
+        }
+    }
+
+    @Test
+    public void testCaseSensitivity() throws Throwable
+    {
+        createTable("CREATE TABLE %s (\"theKey\" int, \"theClustering\" int, \"theValue\" int, PRIMARY KEY (\"theKey\", \"theClustering\"))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"theValue\") VALUES (?, ?, ?)", 0, 0, 0);
+
+        createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s " +
+                "WHERE \"theKey\" IS NOT NULL AND \"theClustering\" IS NOT NULL AND \"theValue\" IS NOT NULL " +
+                "PRIMARY KEY (\"theKey\", \"theClustering\")");
+
+        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+            Thread.sleep(10);
+        createView("mv_test2", "CREATE MATERIALIZED VIEW %s AS SELECT \"theKey\", \"theClustering\", \"theValue\" FROM %%s " +
+                "WHERE \"theKey\" IS NOT NULL AND \"theClustering\" IS NOT NULL AND \"theValue\" IS NOT NULL " +
+                "PRIMARY KEY (\"theKey\", \"theClustering\")");
+        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test2"))
+            Thread.sleep(10);
+
+        for (String mvname : Arrays.asList("mv_test", "mv_test2"))
+        {
+            assertRows(execute("SELECT \"theKey\", \"theClustering\", \"theValue\" FROM " + mvname),
+                    row(0, 0, 0)
+            );
+        }
+
+        executeNet(protocolVersion, "ALTER TABLE %s RENAME \"theClustering\" TO \"Col\"");
+
+        for (String mvname : Arrays.asList("mv_test", "mv_test2"))
+        {
+            assertRows(execute("SELECT \"theKey\", \"Col\", \"theValue\" FROM " + mvname),
+                    row(1, 1, 0)
+            );
         }
     }
 
