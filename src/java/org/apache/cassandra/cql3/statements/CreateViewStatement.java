@@ -18,10 +18,8 @@
 
 package org.apache.cassandra.cql3.statements;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
 
@@ -32,6 +30,9 @@ import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.ViewDefinition;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.Relation;
+import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -51,7 +52,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
 {
     private final CFName baseName;
     private final List<RawSelector> selectClause;
-    private final List<ColumnIdentifier.Raw> notNullWhereClause;
+    private final List<Relation> whereClause;
     private final List<ColumnIdentifier.Raw> partitionKeys;
     private final List<ColumnIdentifier.Raw> clusteringKeys;
     public final CFProperties properties = new CFProperties();
@@ -60,7 +61,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
     public CreateViewStatement(CFName viewName,
                                CFName baseName,
                                List<RawSelector> selectClause,
-                               List<ColumnIdentifier.Raw> notNullWhereClause,
+                               List<Relation> whereClause,
                                List<ColumnIdentifier.Raw> partitionKeys,
                                List<ColumnIdentifier.Raw> clusteringKeys,
                                boolean ifNotExists)
@@ -68,7 +69,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         super(viewName);
         this.baseName = baseName;
         this.selectClause = selectClause;
-        this.notNullWhereClause = notNullWhereClause;
+        this.whereClause = whereClause;
         this.partitionKeys = partitionKeys;
         this.clusteringKeys = clusteringKeys;
         this.ifNotExists = ifNotExists;
@@ -179,34 +180,65 @@ public class CreateViewStatement extends SchemaAlteringStatement
                 throw new InvalidRequestException(String.format("Cannot use Static column '%s' in PRIMARY KEY of materialized view", identifier));
         }
 
+        // check for query parameter markers
+        for (Relation relation : whereClause)
+        {
+            if (relation.isIN())
+            {
+                for (Term.Raw raw : relation.getInValues())
+                {
+                    if (!(raw instanceof Term.Literal))
+                        throw new InvalidRequestException("Cannot use query parameters in CREATE MATERIALIZED VIEW statements: " + relation);
+                }
+            }
+            else
+            {
+                if (!(relation.getValue() instanceof Term.Literal))
+                    throw new InvalidRequestException("Cannot use query parameters in CREATE MATERIALIZED VIEW statements: " + relation);
+            }
+        }
+
+        // build the select statement
+        Map<ColumnIdentifier.Raw, Boolean> orderings = Collections.emptyMap();
+        SelectStatement.Parameters parameters = new SelectStatement.Parameters(orderings, false, true, false);
+        SelectStatement.RawStatement rawSelect = new SelectStatement.RawStatement(baseName, parameters, selectClause, whereClause, null);
+
+        ClientState state = ClientState.forInternalCalls();
+        state.setKeyspace(keyspace());
+
+        rawSelect.prepareKeyspace(state);
+        rawSelect.setBoundVariables(Collections.emptyList());
+
+        ParsedStatement.Prepared prepared = rawSelect.prepare(true);
+        SelectStatement select = (SelectStatement) prepared.statement;
+        StatementRestrictions restrictions = select.getRestrictions();
+
+        if (!restrictions.nonPKRestrictedColumns().isEmpty())
+        {
+            throw new InvalidRequestException(String.format(
+                    "Non-primary key columns cannot be restricted in the SELECT statement used for materialized view " +
+                    "creation (got restrictions on: %s)",
+                    ColumnDefinition.toIdentifiers(new ArrayList<>(restrictions.nonPKRestrictedColumns()))));
+        }
+
+        String whereClauseText = View.relationsToWhereClause(whereClause);
+
         Set<ColumnIdentifier> basePrimaryKeyCols = new HashSet<>();
         for (ColumnDefinition definition : Iterables.concat(cfm.partitionKeyColumns(), cfm.clusteringColumns()))
             basePrimaryKeyCols.add(definition.name);
 
         List<ColumnIdentifier> targetClusteringColumns = new ArrayList<>();
         List<ColumnIdentifier> targetPartitionKeys = new ArrayList<>();
-        Set<ColumnIdentifier> notNullColumns = new HashSet<>();
-        if (notNullWhereClause != null)
-        {
-            for (ColumnIdentifier.Raw raw : notNullWhereClause)
-            {
-                notNullColumns.add(raw.prepare(cfm));
-            }
-        }
 
         // This is only used as an intermediate state; this is to catch whether multiple non-PK columns are used
         boolean hasNonPKColumn = false;
         for (ColumnIdentifier.Raw raw : partitionKeys)
-        {
-            hasNonPKColumn = getColumnIdentifier(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetPartitionKeys, notNullColumns);
-        }
+            hasNonPKColumn = getColumnIdentifier(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetPartitionKeys, restrictions);
 
         for (ColumnIdentifier.Raw raw : clusteringKeys)
-        {
-            hasNonPKColumn = getColumnIdentifier(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetClusteringColumns, notNullColumns);
-        }
+            hasNonPKColumn = getColumnIdentifier(cfm, basePrimaryKeyCols, hasNonPKColumn, raw, targetClusteringColumns, restrictions);
 
-        // We need to include all of the primary key colums from the base table in order to make sure that we do not
+        // We need to include all of the primary key columns from the base table in order to make sure that we do not
         // overwrite values in the view. We cannot support "collapsing" the base table into a smaller number of rows in
         // the view because if we need to generate a tombstone, we have no way of knowing which value is currently being
         // used in the view and whether or not to generate a tombstone. In order to not surprise our users, we require
@@ -254,7 +286,10 @@ public class CreateViewStatement extends SchemaAlteringStatement
         ViewDefinition definition = new ViewDefinition(keyspace(),
                                                        columnFamily(),
                                                        Schema.instance.getId(keyspace(), baseName.getColumnFamily()),
+                                                       baseName.getColumnFamily(),
                                                        included.isEmpty(),
+                                                       rawSelect,
+                                                       whereClauseText,
                                                        viewCfm);
 
         try
@@ -276,24 +311,21 @@ public class CreateViewStatement extends SchemaAlteringStatement
                                                boolean hasNonPKColumn,
                                                ColumnIdentifier.Raw raw,
                                                List<ColumnIdentifier> columns,
-                                               Set<ColumnIdentifier> allowedPKColumns)
+                                               StatementRestrictions restrictions)
     {
         ColumnIdentifier identifier = raw.prepare(cfm);
+        ColumnDefinition def = cfm.getColumnDefinition(identifier);
 
         boolean isPk = basePK.contains(identifier);
         if (!isPk && hasNonPKColumn)
-        {
             throw new InvalidRequestException(String.format("Cannot include more than one non-primary key column '%s' in materialized view partition key", identifier));
-        }
 
         // We don't need to include the "IS NOT NULL" filter on a non-composite partition key
         // because we will never allow a single partition key to be NULL
         boolean isSinglePartitionKey = cfm.getColumnDefinition(identifier).isPartitionKey()
                                        && cfm.partitionKeyColumns().size() == 1;
-        if (!allowedPKColumns.remove(identifier) && !isSinglePartitionKey)
-        {
+        if (!restrictions.notNullColumns().contains(identifier) && !isSinglePartitionKey && !restrictions.isRestricted(def))
             throw new InvalidRequestException(String.format("Primary key column '%s' is required to be filtered by 'IS NOT NULL'", identifier));
-        }
 
         columns.add(identifier);
         return !isPk;

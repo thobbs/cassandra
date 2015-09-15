@@ -96,6 +96,11 @@ public interface Term
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException;
     }
 
+    public interface Literal
+    {
+        public String getRawText();
+    }
+
     public interface MultiColumnRaw extends Raw
     {
         public Term prepare(String keyspace, List<? extends ColumnSpecification> receiver) throws InvalidRequestException;

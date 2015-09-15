@@ -18,50 +18,28 @@
 package org.apache.cassandra.db.view;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.config.ColumnDefinition;
-import org.apache.cassandra.config.ViewDefinition;
-import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.config.*;
+import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.AbstractReadCommandBuilder.SinglePartitionSliceBuilder;
-import org.apache.cassandra.db.CBuilder;
-import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionInfo;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.LivenessInfo;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.RangeTombstone;
-import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadOrderGroup;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.partitions.AbstractBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.db.rows.BTreeRow;
-import org.apache.cassandra.db.rows.Cell;
-import org.apache.cassandra.db.rows.ColumnData;
-import org.apache.cassandra.db.rows.ComplexColumnData;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * A View copies data from a base table into a view table which can be queried independently from the
@@ -108,6 +86,12 @@ public class View
     private final boolean includeAllColumns;
     private ViewBuilder builder;
 
+    // only the raw statement can be final, because the statement cannot always be prepared when the MV is initialized;
+    // sometimes the keyspace does not yet exist or an alter to the base table has not been comitted yet
+    private final SelectStatement.RawStatement rawSelect;
+    private SelectStatement select;
+    private ReadQuery query;
+
     public View(ViewDefinition definition,
                 ColumnFamilyStore baseCfs)
     {
@@ -117,6 +101,7 @@ public class View
         includeAllColumns = definition.includeAllColumns;
 
         viewHasAllPrimaryKeys = updateDefinition(definition);
+        this.rawSelect = definition.select;
     }
 
     public ViewDefinition getDefinition()
@@ -202,9 +187,9 @@ public class View
      */
     public boolean updateAffectsView(AbstractBTreePartition partition)
     {
-        // If we are including all of the columns, then any update will be included
-        if (includeAllColumns)
-            return true;
+        ReadQuery selectQuery = getReadQuery();
+        if (!selectQuery.selectsKey(partition.partitionKey()))
+            return false;
 
         // If there are range tombstones, tombstones will also need to be generated for the view
         // This requires a query of the base rows and generating tombstones for all of those values
@@ -214,9 +199,10 @@ public class View
         // Check each row for deletion or update
         for (Row row : partition)
         {
-            if (row.hasComplexDeletion())
-                return true;
-            if (!row.deletion().isLive())
+            if (!selectQuery.selectsClustering(partition.partitionKey(), row.clustering()))
+                continue;
+
+            if (includeAllColumns || viewHasAllPrimaryKeys || row.hasComplexDeletion() || !row.deletion().isLive())
                 return true;
 
             for (ColumnData data : row)
@@ -449,17 +435,21 @@ public class View
             }
             else
             {
-                command = SinglePartitionReadCommand.fullPartitionRead(baseCfs.metadata, rowSet.nowInSec, dk);
+                command = getSelectStatement().internalReadForView(dk, rowSet.nowInSec);
             }
         }
 
         if (command == null)
         {
+            ReadQuery selectQuery = getReadQuery();
             SinglePartitionSliceBuilder builder = null;
             for (Row row : partition)
             {
                 if (!row.deletion().isLive())
                 {
+                    if (!selectQuery.selectsClustering(rowSet.dk, row.clustering()))
+                        continue;
+
                     if (builder == null)
                         builder = new SinglePartitionSliceBuilder(baseCfs, rowSet.dk);
                     builder.addSlice(Slice.make(row.clustering()));
@@ -472,10 +462,10 @@ public class View
 
         if (command != null)
         {
+            ReadQuery selectQuery = getReadQuery();
+            assert query.selectsKey(rowSet.dk);
 
-            //We may have already done this work for
-            //another MV update so check
-
+            // We may have already done this work for another MV update so check
             if (!rowSet.hasTombstonedExisting())
             {
                 QueryPager pager = command.getPager(null);
@@ -494,7 +484,8 @@ public class View
                             while (rowIterator.hasNext())
                             {
                                 Row row = rowIterator.next();
-                                rowSet.addRow(row, false);
+                                if (selectQuery.selectsClustering(rowSet.dk, row.clustering()))
+                                    rowSet.addRow(row, false);
                             }
                         }
                     }
@@ -605,6 +596,34 @@ public class View
         return rowSet;
     }
 
+    /**
+     * Returns the SelectStatement used to populate and filter this view.  Internal users should access the select
+     * statement this way to ensure it has been prepared.
+     */
+    public SelectStatement getSelectStatement()
+    {
+        if (select == null)
+        {
+            ClientState state = ClientState.forInternalCalls();
+            state.setKeyspace(baseCfs.keyspace.getName());
+            rawSelect.prepareKeyspace(state);
+            ParsedStatement.Prepared prepared = rawSelect.prepare(true);
+            select = (SelectStatement) prepared.statement;
+        }
+
+        return select;
+    }
+
+    /**
+     * Returns the ReadQuery used to filter this view.  Internal users should access the query this way to ensure it
+     * has been prepared.
+     */
+    public ReadQuery getReadQuery()
+    {
+        if (query == null)
+            query = getSelectStatement().getQuery(QueryOptions.forInternalCalls(Collections.emptyList()), FBUtilities.nowInSeconds());
+        return query;
+    }
 
     /**
      * @param isBuilding If the view is currently being built, we do not query the values which are already stored,
@@ -678,5 +697,56 @@ public class View
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(keyspace);
         final UUID baseId = Schema.instance.getId(keyspace, baseTable);
         return Iterables.filter(ksm.views, view -> view.baseTableId.equals(baseId));
+    }
+
+    /**
+     * Builds the string text for a materialized view's SELECT statement.
+     */
+    public static String buildSelectStatement(String cfName, Collection<ColumnDefinition> includedColumns, String whereClause)
+    {
+         StringBuilder rawSelect = new StringBuilder("SELECT ");
+        if (includedColumns == null || includedColumns.isEmpty())
+            rawSelect.append("*");
+        else
+            rawSelect.append(includedColumns.stream().map(id -> String.format("\"%s\"", id.name.toString())).collect(Collectors.joining(", ")));
+        rawSelect.append(" FROM \"").append(cfName).append("\" WHERE ") .append(whereClause).append(" ALLOW FILTERING");
+        return rawSelect.toString();
+    }
+
+    public static String relationsToWhereClause(List<Relation> whereClause)
+    {
+        List<String> expressions = new ArrayList<>(whereClause.size());
+        for (Relation rel : whereClause)
+        {
+            StringBuilder sb = new StringBuilder();
+
+            if (rel.isMultiColumn())
+            {
+                sb.append(((MultiColumnRelation) rel).getEntities().stream()
+                        .map(ColumnIdentifier.Raw::toString)
+                        .collect(Collectors.joining("\", \"", "(\"", "\")")));
+            }
+            else
+            {
+                sb.append('"').append(((SingleColumnRelation) rel).getEntity()).append('"');
+            }
+
+            sb.append(" ").append(rel.operator()).append(" ");
+
+            if (rel.isIN())
+            {
+                sb.append(rel.getInValues().stream()
+                        .map(rawTerm -> ((Term.Literal) rawTerm).getRawText())
+                        .collect(Collectors.joining(", ", "(", ")")));
+            }
+            else
+            {
+                sb.append(((Term.Literal) rel.getValue()).getRawText());
+            }
+
+            expressions.add(sb.toString());
+        }
+
+        return expressions.stream().collect(Collectors.joining(" AND "));
     }
 }

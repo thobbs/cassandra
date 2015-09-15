@@ -108,6 +108,40 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
     public abstract UnfilteredPartitionIterator filter(UnfilteredPartitionIterator iter, int nowInSec);
 
     /**
+     * Returns true if all of the expressions within this filter that apply to the partition key are satisfied by
+     * the given key, false otherwise.
+     */
+    public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key)
+    {
+        for (Expression e : expressions)
+        {
+            if (!e.column.isPartitionKey())
+                continue;
+
+            if (!e.operator().isSatisfiedBy(e.column.type, key.getKey(), e.value))
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Returns true if all of the expressions within this filter that apply to the clustering key are satisfied by
+     * the given Clustering, false otherwise.
+     */
+    public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering clustering)
+    {
+        for (Expression e : expressions)
+        {
+            if (!e.column.isClusteringColumn())
+                continue;
+
+            if (!e.operator().isSatisfiedBy(e.column.type, clustering.get(e.column.position()), e.value))
+                return false;
+        }
+        return true;
+    }
+
+    /**
      * Returns this filter but without the provided expression. This method
      * *assumes* that the filter contains the provided expression.
      */
