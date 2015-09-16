@@ -87,6 +87,14 @@ public enum Operator
         {
             return "!=";
         }
+    },
+    IS_NOT(9)
+    {
+        @Override
+        public String toString()
+        {
+            return "IS NOT";
+        }
     };
 
     /**
@@ -112,6 +120,20 @@ public enum Operator
     public void writeTo(DataOutput output) throws IOException
     {
         output.writeInt(b);
+    }
+
+    public int getValue()
+    {
+        return b;
+    }
+
+    public static Operator fromValue(int b)
+    {
+          for (Operator operator : values())
+              if (operator.b == b)
+                  return operator;
+
+        throw new RuntimeException(String.format("Cannot resolve Operator from binary representation: %s", b));
     }
 
     /**
@@ -154,7 +176,7 @@ public enum Operator
             case NEQ:
                 return comparison != 0;
             default:
-                // we shouldn't get IN, CONTAINS, or CONTAINS KEY here
+                // we shouldn't get IN, CONTAINS, CONTAINS KEY, or IS NOT here
                 throw new AssertionError();
         }
     }

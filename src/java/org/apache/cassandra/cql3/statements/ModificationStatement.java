@@ -845,7 +845,7 @@ public abstract class ModificationStatement implements CQLStatement
                                                                Conditions conditions)
         {
             boolean applyOnlyToStaticColumns = appliesOnlyToStaticColumns(operations, conditions);
-            return new StatementRestrictions(type, cfm, relations, boundNames, applyOnlyToStaticColumns, false, false);
+            return new StatementRestrictions(type, cfm, relations, boundNames, applyOnlyToStaticColumns, false, false, false);
         }
 
         /**
