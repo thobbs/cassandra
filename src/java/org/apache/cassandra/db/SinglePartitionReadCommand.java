@@ -191,20 +191,9 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
         return DatabaseDescriptor.getReadRpcTimeout();
     }
 
-    public boolean selects(DecoratedKey partitionKey, Clustering clustering)
-    {
-        if (!partitionKey().equals(partitionKey))
-            return false;
-
-        if (clustering == Clustering.STATIC_CLUSTERING)
-            return !columnFilter().fetchedColumns().statics.isEmpty();
-
-        return clusteringIndexFilter().selects(clustering);
-    }
-
     public boolean selectsKey(DecoratedKey key)
     {
-        return this.partitionKey().equals(key);
+        return this.partitionKey().equals(key) && rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key);
     }
 
     public boolean selectsClustering(DecoratedKey key, Clustering clustering)
@@ -212,7 +201,7 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
         if (clustering == Clustering.STATIC_CLUSTERING)
             return !columnFilter().fetchedColumns().statics.isEmpty();
 
-        return clusteringIndexFilter().selects(clustering);
+        return clusteringIndexFilter().selects(clustering) && rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
     /**

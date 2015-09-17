@@ -140,17 +140,6 @@ public class PartitionRangeReadCommand extends ReadCommand
         return DatabaseDescriptor.getRangeRpcTimeout();
     }
 
-    public boolean selects(DecoratedKey partitionKey, Clustering clustering)
-    {
-        if (!dataRange().contains(partitionKey))
-            return false;
-
-        if (clustering == Clustering.STATIC_CLUSTERING)
-            return !columnFilter().fetchedColumns().statics.isEmpty();
-
-        return dataRange().clusteringIndexFilter(partitionKey).selects(clustering);
-    }
-
     public boolean selectsKey(DecoratedKey key)
     {
         return dataRange().contains(key) && rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key);
