@@ -127,15 +127,6 @@ public enum Operator
         return b;
     }
 
-    public static Operator fromValue(int b)
-    {
-          for (Operator operator : values())
-              if (operator.b == b)
-                  return operator;
-
-        throw new RuntimeException(String.format("Cannot resolve Operator from binary representation: %s", b));
-    }
-
     /**
      * Deserializes a <code>Operator</code> instance from the specified input.
      *
