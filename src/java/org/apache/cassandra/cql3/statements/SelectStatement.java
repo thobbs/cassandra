@@ -144,7 +144,7 @@ public class SelectStatement implements CQLStatement
             if (!def.isPrimaryKeyColumn())
                 builder.add(def);
         // as well as any restricted column (so we can actually apply the restriction)
-        builder.addAll(restrictions.nonPKRestrictedColumns());
+        builder.addAll(restrictions.nonPKRestrictedColumns(true));
         return builder.build();
     }
 

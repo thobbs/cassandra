@@ -74,7 +74,7 @@ public final class StatementRestrictions
      */
     private RestrictionSet nonPrimaryKeyRestrictions;
 
-    private Set<ColumnIdentifier> notNullColumns;
+    private Set<ColumnDefinition> notNullColumns;
 
     /**
      * The restrictions used to build the row filter
@@ -141,7 +141,7 @@ public final class StatementRestrictions
                     throw new InvalidRequestException("Unsupported restriction: " + relation);
 
                 for (ColumnDefinition def : relation.toRestriction(cfm, boundNames).getColumnDefs())
-                    this.notNullColumns.add(def.name);
+                    this.notNullColumns.add(def);
             }
             else
             {
@@ -254,24 +254,38 @@ public final class StatementRestrictions
     }
 
     /**
-     * Returns the non-PK column that are restricted.
+     * Returns the non-PK column that are restricted.  If includeNotNullRestrictions is true, columns that are restricted
+     * by an IS NOT NULL restriction will be included, otherwise they will not be included (unless another restriction
+     * applies to them).
      */
-    public Set<ColumnDefinition> nonPKRestrictedColumns()
+    public Set<ColumnDefinition> nonPKRestrictedColumns(boolean includeNotNullRestrictions)
     {
         Set<ColumnDefinition> columns = new HashSet<>();
         for (Restrictions r : indexRestrictions)
+        {
             for (ColumnDefinition def : r.getColumnDefs())
                 if (!def.isPrimaryKeyColumn())
                     columns.add(def);
+        }
+
+        if (includeNotNullRestrictions)
+        {
+            for (ColumnDefinition def : notNullColumns)
+            {
+                if (!def.isPrimaryKeyColumn())
+                    columns.add(def);
+            }
+        }
+
         return columns;
     }
 
     /**
      * @return the set of columns that have an IS NOT NULL restriction on them
      */
-    public Set<ColumnIdentifier> notNullColumns()
+    public Set<ColumnDefinition> notNullColumns()
     {
-        return this.notNullColumns;
+        return notNullColumns;
     }
 
     /**
@@ -279,7 +293,9 @@ public final class StatementRestrictions
      */
     public boolean isRestricted(ColumnDefinition column)
     {
-        if (column.isPartitionKey())
+        if (notNullColumns.contains(column))
+            return true;
+        else if (column.isPartitionKey())
             return partitionKeyRestrictions.getColumnDefs().contains(column);
         else if (column.isClusteringColumn())
             return clusteringColumnsRestrictions.getColumnDefs().contains(column);

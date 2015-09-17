@@ -213,12 +213,12 @@ public class CreateViewStatement extends SchemaAlteringStatement
         if (!prepared.boundNames.isEmpty())
             throw new InvalidRequestException("Cannot use query parameters in CREATE MATERIALIZED VIEW statements");
 
-        if (!restrictions.nonPKRestrictedColumns().isEmpty())
+        if (!restrictions.nonPKRestrictedColumns(false).isEmpty())
         {
             throw new InvalidRequestException(String.format(
                     "Non-primary key columns cannot be restricted in the SELECT statement used for materialized view " +
                     "creation (got restrictions on: %s)",
-                    ColumnDefinition.toIdentifiers(new ArrayList<>(restrictions.nonPKRestrictedColumns()))));
+                    restrictions.nonPKRestrictedColumns(false).stream().map(def -> def.name.toString()).collect(Collectors.joining(", "))));
         }
 
         String whereClauseText = View.relationsToWhereClause(whereClause);
@@ -324,7 +324,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         // because we will never allow a single partition key to be NULL
         boolean isSinglePartitionKey = cfm.getColumnDefinition(identifier).isPartitionKey()
                                        && cfm.partitionKeyColumns().size() == 1;
-        if (!restrictions.notNullColumns().contains(identifier) && !isSinglePartitionKey && !restrictions.isRestricted(def))
+        if (!isSinglePartitionKey && !restrictions.isRestricted(def))
             throw new InvalidRequestException(String.format("Primary key column '%s' is required to be filtered by 'IS NOT NULL'", identifier));
 
         columns.add(identifier);
