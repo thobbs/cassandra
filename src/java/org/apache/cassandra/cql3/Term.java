@@ -94,11 +94,19 @@ public interface Term
          * @return the prepared term.
          */
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException;
+
+        /**
+         * @return a String representation of the raw term that can be used when reconstructing a CQL query string.
+         */
+        public String getText();
     }
 
-    public interface Literal
+    public abstract class Literal implements Term.Raw
     {
-        public String getRawText();
+        public String toString()
+        {
+            return getText();
+        }
     }
 
     public interface MultiColumnRaw extends Raw

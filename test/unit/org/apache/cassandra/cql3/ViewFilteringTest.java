@@ -81,7 +81,8 @@ public class ViewFilteringTest extends CQLTester
                 "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND c IS NOT NULL AND d is NOT NULL PRIMARY KEY ((a, b), c, d)",
                 "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND d is NOT NULL PRIMARY KEY ((a, b), c, d)",
                 "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL AND c is NOT NULL PRIMARY KEY ((a, b), c, d)",
-                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = ? AND b IS NOT NULL AND c is NOT NULL PRIMARY KEY ((a, b), c, d)"
+                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = ? AND b IS NOT NULL AND c is NOT NULL PRIMARY KEY ((a, b), c, d)",
+                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = blobAsInt(?) AND b IS NOT NULL AND c is NOT NULL PRIMARY KEY ((a, b), c, d)"
         );
 
         for (String badStatement : badStatements)
@@ -103,7 +104,9 @@ public class ViewFilteringTest extends CQLTester
                 "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b = 1 AND c = 1 AND d IN (1, 2, 3) PRIMARY KEY ((a, b), c, d)",
                 "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b = 1 AND (c, d) = (1, 1) PRIMARY KEY ((a, b), c, d)",
                 "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b = 1 AND (c, d) > (1, 1) PRIMARY KEY ((a, b), c, d)",
-                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b = 1 AND (c, d) IN ((1, 1), (2, 2)) PRIMARY KEY ((a, b), c, d)"
+                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = 1 AND b = 1 AND (c, d) IN ((1, 1), (2, 2)) PRIMARY KEY ((a, b), c, d)",
+                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = (int) 1 AND b = 1 AND c = 1 AND d = 1 PRIMARY KEY ((a, b), c, d)",
+                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE a = blobAsInt(intAsBlob(1)) AND b = 1 AND c = 1 AND d = 1 PRIMARY KEY ((a, b), c, d)"
         );
 
         for (int i = 0; i < goodStatements.size(); i++)
@@ -175,6 +178,72 @@ public class ViewFilteringTest extends CQLTester
                     row(1, 1, 0)
             );
         }
+    }
+
+    @Test
+    public void testFilterWithFunction() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 1, 1);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 0, 2);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 1, 3);
+
+        createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s " +
+                "WHERE a = blobAsInt(intAsBlob(1)) AND b IS NOT NULL " +
+                "PRIMARY KEY (a, b)");
+
+        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+            Thread.sleep(10);
+
+        assertRows(execute("SELECT a, b, c FROM mv_test"),
+                row(1, 0, 2),
+                row(1, 1, 3)
+        );
+
+        executeNet(protocolVersion, "ALTER TABLE %s RENAME a TO foo");
+
+        assertRows(execute("SELECT foo, b, c FROM mv_test"),
+                row(1, 0, 2),
+                row(1, 1, 3)
+        );
+    }
+
+    @Test
+    public void testFilterWithTypecast() throws Throwable
+    {
+        createTable("CREATE TABLE %s (a int, b int, c int, PRIMARY KEY (a, b))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 1, 1);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 0, 2);
+        execute("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 1, 1, 3);
+
+        createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s " +
+                "WHERE a = (int) 1 AND b IS NOT NULL " +
+                "PRIMARY KEY (a, b)");
+
+        while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
+            Thread.sleep(10);
+
+        assertRows(execute("SELECT a, b, c FROM mv_test"),
+                row(1, 0, 2),
+                row(1, 1, 3)
+        );
+
+        executeNet(protocolVersion, "ALTER TABLE %s RENAME a TO foo");
+
+        assertRows(execute("SELECT foo, b, c FROM mv_test"),
+                row(1, 0, 2),
+                row(1, 1, 3)
+        );
     }
 
     @Test
@@ -1105,4 +1174,117 @@ public class ViewFilteringTest extends CQLTester
             dropTable("DROP TABLE %s");
         }
     }
+
+    @Test
+    public void testAllTypes() throws Throwable
+    {
+        String myType = createType("CREATE TYPE %s (a int, b uuid, c set<text>)");
+        String columnNames = "asciival, " +
+                             "bigintval, " +
+                             "blobval, " +
+                             "booleanval, " +
+                             "dateval, " +
+                             "decimalval, " +
+                             "doubleval, " +
+                             "floatval, " +
+                             "inetval, " +
+                             "intval, " +
+                             "textval, " +
+                             "timeval, " +
+                             "timestampval, " +
+                             "timeuuidval, " +
+                             "uuidval," +
+                             "varcharval, " +
+                             "varintval, " +
+                             "frozenlistval, " +
+                             "frozensetval, " +
+                             "frozenmapval, " +
+                             "tupleval, " +
+                             "udtval";
+
+        createTable(
+                "CREATE TABLE %s (" +
+                        "asciival ascii, " +
+                        "bigintval bigint, " +
+                        "blobval blob, " +
+                        "booleanval boolean, " +
+                        "dateval date, " +
+                        "decimalval decimal, " +
+                        "doubleval double, " +
+                        "floatval float, " +
+                        "inetval inet, " +
+                        "intval int, " +
+                        "textval text, " +
+                        "timeval time, " +
+                        "timestampval timestamp, " +
+                        "timeuuidval timeuuid, " +
+                        "uuidval uuid," +
+                        "varcharval varchar, " +
+                        "varintval varint, " +
+                        "frozenlistval frozen<list<int>>, " +
+                        "frozensetval frozen<set<uuid>>, " +
+                        "frozenmapval frozen<map<ascii, int>>," +
+                        "tupleval frozen<tuple<int, ascii, uuid>>," +
+                        "udtval frozen<" + myType + ">, " +
+                        "PRIMARY KEY (" + columnNames + "))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+
+        createView(
+                "mv_test",
+                "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s WHERE " +
+                        "asciival = 'abc' AND " +
+                        "bigintval = 123 AND " +
+                        "blobval = 0xfeed AND " +
+                        "booleanval = true AND " +
+                        "dateval = '1987-03-23' AND " +
+                        "decimalval = 123.123 AND " +
+                        "doubleval = 123.123 AND " +
+                        "floatval = 123.123 AND " +
+                        "inetval = '127.0.0.1' AND " +
+                        "intval = 123 AND " +
+                        "textval = 'abc' AND " +
+                        "timeval = '07:35:07.000111222' AND " +
+                        "timestampval = 123123123 AND " +
+                        "timeuuidval = 6BDDC89A-5644-11E4-97FC-56847AFE9799 AND " +
+                        "uuidval = 6BDDC89A-5644-11E4-97FC-56847AFE9799 AND " +
+                        "varcharval = 'abc' AND " +
+                        "varintval = 123123123 AND " +
+                        "frozenlistval = [1, 2, 3] AND " +
+                        "frozensetval = {6BDDC89A-5644-11E4-97FC-56847AFE9799} AND " +
+                        "frozenmapval = {'a': 1, 'b': 2} AND " +
+                        "tupleval = (1, 'foobar', 6BDDC89A-5644-11E4-97FC-56847AFE9799) AND " +
+                        "udtval = {a: 1, b: 6BDDC89A-5644-11E4-97FC-56847AFE9799, c: {'foo', 'bar'}} " +
+                        "PRIMARY KEY (" + columnNames + ")");
+
+        execute("INSERT INTO %s (" + columnNames + ") VALUES (" +
+                "'abc'," +
+                "123," +
+                "0xfeed," +
+                "true," +
+                "'1987-03-23'," +
+                "123.123," +
+                "123.123," +
+                "123.123," +
+                "'127.0.0.1'," +
+                "123," +
+                "'abc'," +
+                "'07:35:07.000111222'," +
+                "123123123," +
+                "6BDDC89A-5644-11E4-97FC-56847AFE9799," +
+                "6BDDC89A-5644-11E4-97FC-56847AFE9799," +
+                "'abc'," +
+                "123123123," +
+                "[1, 2, 3]," +
+                "{6BDDC89A-5644-11E4-97FC-56847AFE9799}," +
+                "{'a': 1, 'b': 2}," +
+                "(1, 'foobar', 6BDDC89A-5644-11E4-97FC-56847AFE9799)," +
+                "{a: 1, b: 6BDDC89A-5644-11E4-97FC-56847AFE9799, c: {'foo', 'bar'}})");
+
+        UntypedResultSet results = execute("SELECT * FROM mv_test");
+        assert !results.isEmpty();
+    }
+
 }

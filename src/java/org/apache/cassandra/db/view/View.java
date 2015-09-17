@@ -736,12 +736,12 @@ public class View
             if (rel.isIN())
             {
                 sb.append(rel.getInValues().stream()
-                        .map(rawTerm -> ((Term.Literal) rawTerm).getRawText())
+                        .map(Term.Raw::getText)
                         .collect(Collectors.joining(", ", "(", ")")));
             }
             else
             {
-                sb.append(((Term.Literal) rel.getValue()).getRawText());
+                sb.append(rel.getValue().getText());
             }
 
             expressions.add(sb.toString());

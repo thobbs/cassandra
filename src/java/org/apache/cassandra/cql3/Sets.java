@@ -49,7 +49,7 @@ public abstract class Sets
         return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((SetType)column.type).getElementsType());
     }
 
-    public static class Literal implements Term.Raw, Term.Literal
+    public static class Literal extends Term.Literal
     {
         private final List<Term.Raw> elements;
 
@@ -125,15 +125,9 @@ public abstract class Sets
             return AssignmentTestable.TestResult.testAll(keyspace, valueSpec, elements);
         }
 
-        public String getRawText()
+        public String getText()
         {
-            return elements.stream().map(raw -> ((Term.Literal) raw).getRawText()).collect(Collectors.joining(", ", "{", "}"));
-        }
-
-        @Override
-        public String toString()
-        {
-            return "{" + Joiner.on(", ").join(elements) + "}";
+            return elements.stream().map(Term.Raw::getText).collect(Collectors.joining(", ", "{", "}"));
         }
     }
 

@@ -193,6 +193,11 @@ public class Json
         {
             return TestResult.NOT_ASSIGNABLE;
         }
+
+        public String getText()
+        {
+            return term.toString();
+        }
     }
 
     /**
@@ -247,6 +252,11 @@ public class Json
         public Iterable<Function> getFunctions()
         {
             return Collections.emptyList();
+        }
+
+        public String getText()
+        {
+            return marker.toString();
         }
     }
 

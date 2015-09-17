@@ -58,8 +58,7 @@ public class TypeCast implements Term.Raw
             return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
     }
 
-    @Override
-    public String toString()
+    public String getText()
     {
         return "(" + type + ")" + term;
     }

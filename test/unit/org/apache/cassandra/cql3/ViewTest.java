@@ -88,7 +88,6 @@ public class ViewTest extends CQLTester
         }
     }
 
-    /*
     @Test
     public void testCaseSensitivity() throws Throwable
     {
@@ -127,7 +126,6 @@ public class ViewTest extends CQLTester
             );
         }
     }
-    */
 
     @Test
     public void testPartitionTombstone() throws Throwable

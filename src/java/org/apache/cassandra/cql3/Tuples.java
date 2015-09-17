@@ -54,7 +54,7 @@ public class Tuples
      * A raw, literal tuple.  When prepared, this will become a Tuples.Value or Tuples.DelayedValue, depending
      * on whether the tuple holds NonTerminals.
      */
-    public static class Literal implements Term.MultiColumnRaw, Term.Literal
+    public static class Literal extends Term.Literal implements Term.MultiColumnRaw
     {
         private final List<Term.Raw> elements;
 
@@ -134,15 +134,9 @@ public class Tuples
             }
         }
 
-        public String getRawText()
+        public String getText()
         {
-            return elements.stream().map(raw -> ((Term.Literal) raw).getRawText()).collect(Collectors.joining(", ", "(", ")"));
-        }
-
-        @Override
-        public String toString()
-        {
-            return tupleToString(elements);
+            return elements.stream().map(Term.Raw::getText).collect(Collectors.joining(", ", "(", ")"));
         }
     }
 
@@ -329,6 +323,11 @@ public class Tuples
         {
             throw new AssertionError("Tuples.Raw.prepare() requires a list of receivers");
         }
+
+        public String getText()
+        {
+            return "?";
+        }
     }
 
     /**
@@ -373,6 +372,11 @@ public class Tuples
         public AbstractMarker prepare(String keyspace, ColumnSpecification receiver)
         {
             throw new AssertionError("Tuples.INRaw.prepare() requires a list of receivers");
+        }
+
+        public String getText()
+        {
+            return "?";
         }
     }
 

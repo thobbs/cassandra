@@ -85,7 +85,7 @@ public abstract class AbstractMarker extends Term.NonTerminal
         }
 
         @Override
-        public String toString()
+        public String getText()
         {
             return "?";
         }

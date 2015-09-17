@@ -42,7 +42,7 @@ public abstract class UserTypes
                                        ut.fieldType(field));
     }
 
-    public static class Literal implements Term.Raw, Term.Literal
+    public static class Literal extends Term.Literal
     {
         public final Map<ColumnIdentifier, Term.Raw> entries;
 
@@ -118,7 +118,7 @@ public abstract class UserTypes
             }
         }
 
-        public String getRawText()
+        public String getText()
         {
             StringBuilder sb = new StringBuilder();
             sb.append("{");
@@ -126,24 +126,7 @@ public abstract class UserTypes
             while (iter.hasNext())
             {
                 Map.Entry<ColumnIdentifier, Term.Raw> entry = iter.next();
-                sb.append(entry.getKey()).append(":").append(((Term.Literal) entry.getValue()).getRawText());
-                if (iter.hasNext())
-                    sb.append(", ");
-            }
-            sb.append("}");
-            return sb.toString();
-        }
-
-        @Override
-        public String toString()
-        {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{");
-            Iterator<Map.Entry<ColumnIdentifier, Term.Raw>> iter = entries.entrySet().iterator();
-            while (iter.hasNext())
-            {
-                Map.Entry<ColumnIdentifier, Term.Raw> entry = iter.next();
-                sb.append(entry.getKey()).append(":").append(entry.getValue());
+                sb.append(entry.getKey()).append(": ").append(entry.getValue().getText());
                 if (iter.hasNext())
                     sb.append(", ");
             }

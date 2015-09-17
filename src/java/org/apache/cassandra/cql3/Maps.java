@@ -55,7 +55,7 @@ public abstract class Maps
         return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((MapType)column.type).getValuesType());
     }
 
-    public static class Literal implements Term.Raw, Term.Literal
+    public static class Literal extends Term.Literal
     {
         public final List<Pair<Term.Raw, Term.Raw>> entries;
 
@@ -130,25 +130,11 @@ public abstract class Maps
             return res;
         }
 
-        public String getRawText()
+        public String getText()
         {
             return entries.stream()
-                    .map(entry -> String.format("%s: %s", ((Term.Literal) entry.left).getRawText(), ((Term.Literal) entry.right).getRawText()))
+                    .map(entry -> String.format("%s: %s", entry.left.getText(), entry.right.getText()))
                     .collect(Collectors.joining(", ", "{", "}"));
-        }
-
-        @Override
-        public String toString()
-        {
-            StringBuilder sb = new StringBuilder();
-            sb.append("{");
-            for (int i = 0; i < entries.size(); i++)
-            {
-                if (i > 0) sb.append(", ");
-                sb.append(entries.get(i).left).append(":").append(entries.get(i).right);
-            }
-            sb.append("}");
-            return sb.toString();
         }
     }
 
