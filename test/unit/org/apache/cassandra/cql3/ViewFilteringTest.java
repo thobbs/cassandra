@@ -1283,8 +1283,10 @@ public class ViewFilteringTest extends CQLTester
                 "(1, 'foobar', 6BDDC89A-5644-11E4-97FC-56847AFE9799)," +
                 "{a: 1, b: 6BDDC89A-5644-11E4-97FC-56847AFE9799, c: {'foo', 'bar'}})");
 
-        UntypedResultSet results = execute("SELECT * FROM mv_test");
-        assert !results.isEmpty();
+        assert !execute("SELECT * FROM mv_test").isEmpty();
+
+        executeNet(protocolVersion, "ALTER TABLE %s RENAME inetval TO foo");
+        assert !execute("SELECT * FROM mv_test").isEmpty();
     }
 
 }
