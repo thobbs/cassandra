@@ -86,8 +86,9 @@ public class View
     private final boolean includeAllColumns;
     private ViewBuilder builder;
 
-    // only the raw statement can be final, because the statement cannot always be prepared when the MV is initialized;
-    // sometimes the keyspace does not yet exist or an alter to the base table has not been comitted yet
+    // Only the raw statement can be final, because the statement cannot always be prepared when the MV is initialized.
+    // For example, during startup, this view will be initialized as part of the Keyspace.open() work; preparing a statement
+    // also requires the keyspace to be open, so this results in double-initialization problems.
     private final SelectStatement.RawStatement rawSelect;
     private SelectStatement select;
     private ReadQuery query;
@@ -463,7 +464,7 @@ public class View
         if (command != null)
         {
             ReadQuery selectQuery = getReadQuery();
-            assert query.selectsKey(rowSet.dk);
+            assert selectQuery.selectsKey(rowSet.dk);
 
             // We may have already done this work for another MV update so check
             if (!rowSet.hasTombstonedExisting())
