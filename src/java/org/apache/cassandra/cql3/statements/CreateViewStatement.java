@@ -59,7 +59,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
     public CreateViewStatement(CFName viewName,
                                CFName baseName,
                                List<RawSelector> selectClause,
-                               WhereClause.Builder whereClause,
+                               WhereClause whereClause,
                                List<ColumnIdentifier.Raw> partitionKeys,
                                List<ColumnIdentifier.Raw> clusteringKeys,
                                boolean ifNotExists)
@@ -67,7 +67,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         super(viewName);
         this.baseName = baseName;
         this.selectClause = selectClause;
-        this.whereClause = whereClause.build();
+        this.whereClause = whereClause;
         this.partitionKeys = partitionKeys;
         this.clusteringKeys = clusteringKeys;
         this.ifNotExists = ifNotExists;

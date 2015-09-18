@@ -767,7 +767,10 @@ createMaterializedViewStatement returns [CreateViewStatement expr]
         '(' '(' k1=cident { partitionKeys.add(k1); } ( ',' kn=cident { partitionKeys.add(kn); } )* ')' ( ',' c1=cident { compositeKeys.add(c1); } )* ')'
     |   '(' k1=cident { partitionKeys.add(k1); } ( ',' cn=cident { compositeKeys.add(cn); } )* ')'
         )
-        { $expr = new CreateViewStatement(cf, basecf, sclause, wclause, partitionKeys, compositeKeys, ifNotExists); }
+        {
+             WhereClause where = wclause == null ? WhereClause.empty() : wclause.build();
+             $expr = new CreateViewStatement(cf, basecf, sclause, where, partitionKeys, compositeKeys, ifNotExists);
+        }
         ( K_WITH cfamProperty[expr.properties] ( K_AND cfamProperty[expr.properties] )*)?
     ;
 
