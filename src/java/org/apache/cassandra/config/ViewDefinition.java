@@ -162,7 +162,7 @@ public class ViewDefinition
 
         try
         {
-            List<Relation> relations = parser.whereClause();
+            List<Relation> relations = parser.whereClause().build().relations;
 
             // The errorCollector has queued up any errors that the lexer and parser may have encountered
             // along the way, if necessary, we turn the last error into exceptions here.

@@ -25,11 +25,12 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.config.*;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.*;
+import org.apache.cassandra.config.*;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.AbstractReadCommandBuilder.SinglePartitionSliceBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.partitions.AbstractBTreePartition;
@@ -39,6 +40,7 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.pager.QueryPager;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -203,7 +205,10 @@ public class View
             if (!selectQuery.selectsClustering(partition.partitionKey(), row.clustering()))
                 continue;
 
-            if (includeAllColumns || viewHasAllPrimaryKeys || row.hasComplexDeletion() || !row.deletion().isLive())
+            if (includeAllColumns || viewHasAllPrimaryKeys || !row.deletion().isLive())
+                return true;
+
+            if (row.primaryKeyLivenessInfo().isLive(FBUtilities.nowInSeconds()))
                 return true;
 
             for (ColumnData data : row)
@@ -421,7 +426,11 @@ public class View
             // entire partition of data which is not distributed on a single partition node.
             DecoratedKey dk = rowSet.dk;
 
-            if (deletionInfo.hasRanges())
+            if (!deletionInfo.getPartitionDeletion().isLive())
+            {
+                command = getSelectStatement().internalReadForView(dk, rowSet.nowInSec);
+            }
+            else
             {
                 SinglePartitionSliceBuilder builder = new SinglePartitionSliceBuilder(baseCfs, dk);
                 Iterator<RangeTombstone> tombstones = deletionInfo.rangeIterator(false);
@@ -433,10 +442,6 @@ public class View
                 }
 
                 command = builder.build();
-            }
-            else
-            {
-                command = getSelectStatement().internalReadForView(dk, rowSet.nowInSec);
             }
         }
 
@@ -469,7 +474,7 @@ public class View
             // We may have already done this work for another MV update so check
             if (!rowSet.hasTombstonedExisting())
             {
-                QueryPager pager = command.getPager(null);
+                QueryPager pager = command.getPager(null, Server.CURRENT_VERSION);
 
                 // Add all of the rows which were recovered from the query to the row set
                 while (!pager.isExhausted())
@@ -527,7 +532,7 @@ public class View
         for (TemporalRow temporalRow : rowSet)
             builder.addSlice(temporalRow.baseSlice());
 
-        QueryPager pager = builder.build().getPager(null);
+        QueryPager pager = builder.build().getPager(null, Server.CURRENT_VERSION);
 
         while (!pager.isExhausted())
         {

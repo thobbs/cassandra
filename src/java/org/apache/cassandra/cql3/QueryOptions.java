@@ -23,8 +23,9 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 
-import io.netty.buffer.ByteBuf;
+import com.google.common.collect.ImmutableList;
 
+import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.PagingState;
@@ -72,9 +73,42 @@ public abstract class QueryOptions
         return new DefaultQueryOptions(consistency, values, skipMetadata, new SpecificOptions(pageSize, pagingState, serialConsistency, -1L), 0);
     }
 
+    public static QueryOptions addColumnSpecifications(QueryOptions options, List<ColumnSpecification> columnSpecs)
+    {
+        return new OptionsWithColumnSpecifications(options, columnSpecs);
+    }
+
     public abstract ConsistencyLevel getConsistency();
     public abstract List<ByteBuffer> getValues();
     public abstract boolean skipMetadata();
+
+    /**
+     * Tells whether or not this <code>QueryOptions</code> contains the column specifications for the bound variables.
+     * <p>The column specifications will be present only for prepared statements.</p>
+     * @return <code>true</code> this <code>QueryOptions</code> contains the column specifications for the bound
+     * variables, <code>false</code> otherwise.
+     */
+    public boolean hasColumnSpecifications()
+    {
+        return false;
+    }
+
+    /**
+     * Returns the column specifications for the bound variables (<i>optional operation</i>).
+     *
+     * <p>The column specifications will be present only for prepared statements.</p>
+     *
+     * <p>Invoke the {@link hasColumnSpecifications} method before invoking this method in order to ensure that this
+     * <code>QueryOptions</code> contains the column specifications.</p>
+     *
+     * @return the option names
+     * @throws UnsupportedOperationException If this <code>QueryOptions</code> does not contains the column
+     * specifications.
+     */
+    public ImmutableList<ColumnSpecification> getColumnSpecifications()
+    {
+        throw new UnsupportedOperationException();
+    }
 
     /**  The pageSize for this query. Will be <= 0 if not relevant for the query.  */
     public int getPageSize()
@@ -159,13 +193,18 @@ public abstract class QueryOptions
         }
     }
 
-    static abstract class QueryOptionsWrapper extends QueryOptions
+    static class QueryOptionsWrapper extends QueryOptions
     {
         protected final QueryOptions wrapped;
 
         QueryOptionsWrapper(QueryOptions wrapped)
         {
             this.wrapped = wrapped;
+        }
+
+        public List<ByteBuffer> getValues()
+        {
+            return this.wrapped.getValues();
         }
 
         public ConsistencyLevel getConsistency()
@@ -193,6 +232,32 @@ public abstract class QueryOptions
         {
             wrapped.prepare(specs);
             return this;
+        }
+    }
+
+    /**
+     * <code>QueryOptions</code> decorator that provides access to the column specifications.
+     */
+    static class OptionsWithColumnSpecifications extends QueryOptionsWrapper
+    {
+        private final ImmutableList<ColumnSpecification> columnSpecs;
+
+        OptionsWithColumnSpecifications(QueryOptions wrapped, List<ColumnSpecification> columnSpecs)
+        {
+            super(wrapped);
+            this.columnSpecs = ImmutableList.copyOf(columnSpecs);
+        }
+
+        @Override
+        public boolean hasColumnSpecifications()
+        {
+            return true;
+        }
+
+        @Override
+        public ImmutableList<ColumnSpecification> getColumnSpecifications()
+        {
+            return columnSpecs;
         }
     }
 
@@ -228,6 +293,7 @@ public abstract class QueryOptions
             return this;
         }
 
+        @Override
         public List<ByteBuffer> getValues()
         {
             assert orderedValues != null; // We should have called prepare first!
@@ -318,7 +384,7 @@ public abstract class QueryOptions
             if (!flags.isEmpty())
             {
                 int pageSize = flags.contains(Flag.PAGE_SIZE) ? body.readInt() : -1;
-                PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValue(body)) : null;
+                PagingState pagingState = flags.contains(Flag.PAGING_STATE) ? PagingState.deserialize(CBUtil.readValue(body), version) : null;
                 ConsistencyLevel serialConsistency = flags.contains(Flag.SERIAL_CONSISTENCY) ? CBUtil.readConsistencyLevel(body) : ConsistencyLevel.SERIAL;
                 long timestamp = Long.MIN_VALUE;
                 if (flags.contains(Flag.TIMESTAMP))
@@ -347,7 +413,7 @@ public abstract class QueryOptions
             if (flags.contains(Flag.PAGE_SIZE))
                 dest.writeInt(options.getPageSize());
             if (flags.contains(Flag.PAGING_STATE))
-                CBUtil.writeValue(options.getPagingState().serialize(), dest);
+                CBUtil.writeValue(options.getPagingState().serialize(version), dest);
             if (flags.contains(Flag.SERIAL_CONSISTENCY))
                 CBUtil.writeConsistencyLevel(options.getSerialConsistency(), dest);
             if (flags.contains(Flag.TIMESTAMP))
@@ -372,7 +438,7 @@ public abstract class QueryOptions
             if (flags.contains(Flag.PAGE_SIZE))
                 size += 4;
             if (flags.contains(Flag.PAGING_STATE))
-                size += CBUtil.sizeOfValue(options.getPagingState().serialize());
+                size += CBUtil.sizeOfValue(options.getPagingState().serializedSize(version));
             if (flags.contains(Flag.SERIAL_CONSISTENCY))
                 size += CBUtil.sizeOfConsistencyLevel(options.getSerialConsistency());
             if (flags.contains(Flag.TIMESTAMP))

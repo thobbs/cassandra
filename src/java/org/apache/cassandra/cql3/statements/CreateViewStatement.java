@@ -28,10 +28,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.config.ViewDefinition;
-import org.apache.cassandra.cql3.CFName;
-import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.Relation;
-import org.apache.cassandra.cql3.Term;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.selection.RawSelector;
 import org.apache.cassandra.cql3.selection.Selectable;
@@ -53,7 +50,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
 {
     private final CFName baseName;
     private final List<RawSelector> selectClause;
-    private final List<Relation> whereClause;
+    private final WhereClause whereClause;
     private final List<ColumnIdentifier.Raw> partitionKeys;
     private final List<ColumnIdentifier.Raw> clusteringKeys;
     public final CFProperties properties = new CFProperties();
@@ -62,7 +59,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
     public CreateViewStatement(CFName viewName,
                                CFName baseName,
                                List<RawSelector> selectClause,
-                               List<Relation> whereClause,
+                               WhereClause.Builder whereClause,
                                List<ColumnIdentifier.Raw> partitionKeys,
                                List<ColumnIdentifier.Raw> clusteringKeys,
                                boolean ifNotExists)
@@ -70,7 +67,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         super(viewName);
         this.baseName = baseName;
         this.selectClause = selectClause;
-        this.whereClause = whereClause;
+        this.whereClause = whereClause.build();
         this.partitionKeys = partitionKeys;
         this.clusteringKeys = clusteringKeys;
         this.ifNotExists = ifNotExists;
@@ -221,7 +218,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
                     restrictions.nonPKRestrictedColumns(false).stream().map(def -> def.name.toString()).collect(Collectors.joining(", "))));
         }
 
-        String whereClauseText = View.relationsToWhereClause(whereClause);
+        String whereClauseText = View.relationsToWhereClause(whereClause.relations);
 
         Set<ColumnIdentifier> basePrimaryKeyCols = new HashSet<>();
         for (ColumnDefinition definition : Iterables.concat(cfm.partitionKeyColumns(), cfm.clusteringColumns()))

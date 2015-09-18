@@ -34,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
+import org.apache.cassandra.config.ColumnDefinition.ClusteringOrder;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.cql3.functions.*;
 import org.apache.cassandra.cql3.statements.SelectStatement;
@@ -44,7 +45,6 @@ import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -119,6 +119,7 @@ public final class SchemaKeyspace
                 + "keyspace_name text,"
                 + "table_name text,"
                 + "column_name text,"
+                + "clustering_order text,"
                 + "column_name_bytes blob,"
                 + "kind text,"
                 + "position int,"
@@ -1166,10 +1167,15 @@ public final class SchemaKeyspace
     {
         RowUpdateBuilder adder = new RowUpdateBuilder(Columns, timestamp, mutation).clustering(table.cfName, column.name.toString());
 
+        AbstractType<?> type = column.type;
+        if (type instanceof ReversedType)
+            type = ((ReversedType) type).baseType;
+
         adder.add("column_name_bytes", column.name.bytes)
              .add("kind", column.kind.toString().toLowerCase())
              .add("position", column.isOnAllComponents() ? ColumnDefinition.NO_POSITION : column.position())
-             .add("type", column.type.toString())
+             .add("clustering_order", column.clusteringOrder().toString().toLowerCase())
+             .add("type", type.toString())
              .build();
     }
 
@@ -1196,8 +1202,11 @@ public final class SchemaKeyspace
         ColumnDefinition.Kind kind = ColumnDefinition.Kind.valueOf(row.getString("kind").toUpperCase());
 
         int position = row.getInt("position");
+        ClusteringOrder order = ClusteringOrder.valueOf(row.getString("clustering_order").toUpperCase());
 
         AbstractType<?> type = parseType(row.getString("type"));
+        if (order == ClusteringOrder.DESC)
+            type = ReversedType.getInstance(type);
 
         return new ColumnDefinition(keyspace, table, name, type, position, kind);
     }
