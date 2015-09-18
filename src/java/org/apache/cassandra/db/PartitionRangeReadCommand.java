@@ -140,17 +140,22 @@ public class PartitionRangeReadCommand extends ReadCommand
         return DatabaseDescriptor.getRangeRpcTimeout();
     }
 
-    public boolean selectsKey(DecoratedKey key)
+    public boolean selectsKey(DecoratedKey key, boolean checkRowFilter)
     {
-        return dataRange().contains(key) && rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key);
+        if (!dataRange().contains(key))
+            return false;
+
+        return !checkRowFilter || rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().getKeyValidator());
     }
 
-    public boolean selectsClustering(DecoratedKey key, Clustering clustering)
+    public boolean selectsClustering(DecoratedKey key, Clustering clustering, boolean checkRowFilter)
     {
         if (clustering == Clustering.STATIC_CLUSTERING)
             return !columnFilter().fetchedColumns().statics.isEmpty();
 
-        return dataRange().clusteringIndexFilter(key).selects(clustering) && rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
+        if (!dataRange().clusteringIndexFilter(key).selects(clustering))
+            return false;
+        return !checkRowFilter || rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
     public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState) throws RequestExecutionException

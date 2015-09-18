@@ -70,7 +70,7 @@ public class ViewBuilder extends CompactionInfo.Holder
     private void buildKey(DecoratedKey key)
     {
         ReadQuery selectQuery = view.getReadQuery();
-        if (!selectQuery.selectsKey(key))
+        if (!selectQuery.selectsKey(key, true))
             return;
 
         QueryPager pager = view.getSelectStatement().internalReadForView(key, FBUtilities.nowInSeconds()).getPager(null);

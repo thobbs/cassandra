@@ -189,7 +189,7 @@ public class View
     public boolean updateAffectsView(AbstractBTreePartition partition)
     {
         ReadQuery selectQuery = getReadQuery();
-        if (!selectQuery.selectsKey(partition.partitionKey()))
+        if (!selectQuery.selectsKey(partition.partitionKey(), true))
             return false;
 
         // If there are range tombstones, tombstones will also need to be generated for the view
@@ -200,7 +200,7 @@ public class View
         // Check each row for deletion or update
         for (Row row : partition)
         {
-            if (!selectQuery.selectsClustering(partition.partitionKey(), row.clustering()))
+            if (!selectQuery.selectsClustering(partition.partitionKey(), row.clustering(), true))
                 continue;
 
             if (includeAllColumns || viewHasAllPrimaryKeys || row.hasComplexDeletion() || !row.deletion().isLive())
@@ -448,7 +448,7 @@ public class View
             {
                 if (!row.deletion().isLive())
                 {
-                    if (!selectQuery.selectsClustering(rowSet.dk, row.clustering()))
+                    if (!selectQuery.selectsClustering(rowSet.dk, row.clustering(), true))
                         continue;
 
                     if (builder == null)
@@ -464,7 +464,7 @@ public class View
         if (command != null)
         {
             ReadQuery selectQuery = getReadQuery();
-            assert selectQuery.selectsKey(rowSet.dk);
+            assert selectQuery.selectsKey(rowSet.dk, true);
 
             // We may have already done this work for another MV update so check
             if (!rowSet.hasTombstonedExisting())
@@ -485,7 +485,7 @@ public class View
                             while (rowIterator.hasNext())
                             {
                                 Row row = rowIterator.next();
-                                if (selectQuery.selectsClustering(rowSet.dk, row.clustering()))
+                                if (selectQuery.selectsClustering(rowSet.dk, row.clustering(), true))
                                     rowSet.addRow(row, false);
                             }
                         }

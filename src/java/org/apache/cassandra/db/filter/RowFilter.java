@@ -111,14 +111,17 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
      * Returns true if all of the expressions within this filter that apply to the partition key are satisfied by
      * the given key, false otherwise.
      */
-    public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key)
+    public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
         for (Expression e : expressions)
         {
             if (!e.column.isPartitionKey())
                 continue;
 
-            if (!e.operator().isSatisfiedBy(e.column.type, key.getKey(), e.value))
+            ByteBuffer value = keyValidator instanceof CompositeType
+                             ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
+                             : key.getKey();
+            if (!e.operator().isSatisfiedBy(e.column.type, value, e.value))
                 return false;
         }
         return true;
@@ -136,7 +139,9 @@ public abstract class RowFilter implements Iterable<RowFilter.Expression>
                 continue;
 
             if (!e.operator().isSatisfiedBy(e.column.type, clustering.get(e.column.position()), e.value))
+            {
                 return false;
+            }
         }
         return true;
     }
