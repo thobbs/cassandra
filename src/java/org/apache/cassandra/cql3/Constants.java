@@ -46,7 +46,7 @@ public abstract class Constants
 
     public static final Value UNSET_VALUE = new Value(ByteBufferUtil.UNSET_BYTE_BUFFER);
 
-    private static class NullLiteral extends Term.Literal
+    private static class NullLiteral extends Term.Raw
     {
         public Term prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
@@ -87,7 +87,7 @@ public abstract class Constants
         }
     };
 
-    public static class Literal extends Term.Literal
+    public static class Literal extends Term.Raw
     {
         private final Type type;
         private final String text;

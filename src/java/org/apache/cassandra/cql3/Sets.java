@@ -49,7 +49,7 @@ public abstract class Sets
         return new ColumnSpecification(column.ksName, column.cfName, new ColumnIdentifier("value(" + column.name + ")", true), ((SetType)column.type).getElementsType());
     }
 
-    public static class Literal extends Term.Literal
+    public static class Literal extends Term.Raw
     {
         private final List<Term.Raw> elements;
 

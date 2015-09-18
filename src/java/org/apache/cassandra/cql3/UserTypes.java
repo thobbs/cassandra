@@ -42,7 +42,7 @@ public abstract class UserTypes
                                        ut.fieldType(field));
     }
 
-    public static class Literal extends Term.Literal
+    public static class Literal extends Term.Raw
     {
         public final Map<ColumnIdentifier, Term.Raw> entries;
 

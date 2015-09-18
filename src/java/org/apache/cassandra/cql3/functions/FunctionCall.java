@@ -111,7 +111,7 @@ public class FunctionCall extends Term.NonTerminal
         throw new AssertionError();
     }
 
-    public static class Raw implements Term.Raw
+    public static class Raw extends Term.Raw
     {
         private FunctionName name;
         private final List<Term.Raw> terms;
