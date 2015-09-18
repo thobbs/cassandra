@@ -714,7 +714,7 @@ public class View
         if (includedColumns == null || includedColumns.isEmpty())
             rawSelect.append("*");
         else
-            rawSelect.append(includedColumns.stream().map(id -> String.format("\"%s\"", id.name.toString())).collect(Collectors.joining(", ")));
+            rawSelect.append(includedColumns.stream().map(id -> id.name.toCQLString()).collect(Collectors.joining(", ")));
         rawSelect.append(" FROM \"").append(cfName).append("\" WHERE ") .append(whereClause).append(" ALLOW FILTERING");
         return rawSelect.toString();
     }
@@ -729,12 +729,12 @@ public class View
             if (rel.isMultiColumn())
             {
                 sb.append(((MultiColumnRelation) rel).getEntities().stream()
-                        .map(ColumnIdentifier.Raw::toString)
-                        .collect(Collectors.joining("\", \"", "(\"", "\")")));
+                        .map(ColumnIdentifier.Raw::toCQLString)
+                        .collect(Collectors.joining(", ", "(", ")")));
             }
             else
             {
-                sb.append('"').append(((SingleColumnRelation) rel).getEntity()).append('"');
+                sb.append(((SingleColumnRelation) rel).getEntity().toCQLString());
             }
 
             sb.append(" ").append(rel.operator()).append(" ");

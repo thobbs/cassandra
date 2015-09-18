@@ -142,31 +142,31 @@ public class ViewFilteringTest extends CQLTester
     @Test
     public void testCaseSensitivity() throws Throwable
     {
-        createTable("CREATE TABLE %s (\"theKey\" int, \"theClustering\" int, \"theValue\" int, PRIMARY KEY (\"theKey\", \"theClustering\"))");
+        createTable("CREATE TABLE %s (\"theKey\" int, \"theClustering\" int, \"the\"\"Value\" int, PRIMARY KEY (\"theKey\", \"theClustering\"))");
 
         execute("USE " + keyspace());
         executeNet(protocolVersion, "USE " + keyspace());
 
-        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"theValue\") VALUES (?, ?, ?)", 0, 0, 0);
-        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"theValue\") VALUES (?, ?, ?)", 0, 1, 0);
-        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"theValue\") VALUES (?, ?, ?)", 1, 0, 0);
-        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"theValue\") VALUES (?, ?, ?)", 1, 1, 0);
+        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"the\"\"Value\") VALUES (?, ?, ?)", 0, 0, 0);
+        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"the\"\"Value\") VALUES (?, ?, ?)", 0, 1, 0);
+        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"the\"\"Value\") VALUES (?, ?, ?)", 1, 0, 0);
+        execute("INSERT INTO %s (\"theKey\", \"theClustering\", \"the\"\"Value\") VALUES (?, ?, ?)", 1, 1, 0);
 
         createView("mv_test", "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %%s " +
-                "WHERE \"theKey\" = 1 AND \"theClustering\" = 1 AND \"theValue\" IS NOT NULL " +
+                "WHERE \"theKey\" = 1 AND \"theClustering\" = 1 AND \"the\"\"Value\" IS NOT NULL " +
                 "PRIMARY KEY (\"theKey\", \"theClustering\")");
 
         while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test"))
             Thread.sleep(10);
-        createView("mv_test2", "CREATE MATERIALIZED VIEW %s AS SELECT \"theKey\", \"theClustering\", \"theValue\" FROM %%s " +
-                "WHERE \"theKey\" = 1 AND \"theClustering\" = 1 AND \"theValue\" IS NOT NULL " +
+        createView("mv_test2", "CREATE MATERIALIZED VIEW %s AS SELECT \"theKey\", \"theClustering\", \"the\"\"Value\" FROM %%s " +
+                "WHERE \"theKey\" = 1 AND \"theClustering\" = 1 AND \"the\"\"Value\" IS NOT NULL " +
                 "PRIMARY KEY (\"theKey\", \"theClustering\")");
         while (!SystemKeyspace.isViewBuilt(keyspace(), "mv_test2"))
             Thread.sleep(10);
 
         for (String mvname : Arrays.asList("mv_test", "mv_test2"))
         {
-            assertRowsIgnoringOrder(execute("SELECT \"theKey\", \"theClustering\", \"theValue\" FROM " + mvname),
+            assertRowsIgnoringOrder(execute("SELECT \"theKey\", \"theClustering\", \"the\"\"Value\" FROM " + mvname),
                     row(1, 1, 0)
             );
         }
@@ -175,7 +175,7 @@ public class ViewFilteringTest extends CQLTester
 
         for (String mvname : Arrays.asList("mv_test", "mv_test2"))
         {
-            assertRowsIgnoringOrder(execute("SELECT \"theKey\", \"Col\", \"theValue\" FROM " + mvname),
+            assertRowsIgnoringOrder(execute("SELECT \"theKey\", \"Col\", \"the\"\"Value\" FROM " + mvname),
                     row(1, 1, 0)
             );
         }
