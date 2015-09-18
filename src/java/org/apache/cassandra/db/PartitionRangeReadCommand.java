@@ -31,7 +31,6 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
-import org.apache.cassandra.db.view.TemporalRow;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.index.Index;
@@ -140,22 +139,22 @@ public class PartitionRangeReadCommand extends ReadCommand
         return DatabaseDescriptor.getRangeRpcTimeout();
     }
 
-    public boolean selectsKey(DecoratedKey key, boolean checkRowFilter)
+    public boolean selectsKey(DecoratedKey key)
     {
         if (!dataRange().contains(key))
             return false;
 
-        return !checkRowFilter || rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().getKeyValidator());
+        return rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().getKeyValidator());
     }
 
-    public boolean selectsClustering(DecoratedKey key, Clustering clustering, boolean checkRowFilter)
+    public boolean selectsClustering(DecoratedKey key, Clustering clustering)
     {
         if (clustering == Clustering.STATIC_CLUSTERING)
             return !columnFilter().fetchedColumns().statics.isEmpty();
 
         if (!dataRange().clusteringIndexFilter(key).selects(clustering))
             return false;
-        return !checkRowFilter || rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
+        return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
     public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState) throws RequestExecutionException

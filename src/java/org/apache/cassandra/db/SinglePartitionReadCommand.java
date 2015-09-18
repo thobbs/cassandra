@@ -29,7 +29,6 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
@@ -192,15 +191,15 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
         return DatabaseDescriptor.getReadRpcTimeout();
     }
 
-    public boolean selectsKey(DecoratedKey key, boolean checkRowFilter)
+    public boolean selectsKey(DecoratedKey key)
     {
         if (!this.partitionKey().equals(key))
             return false;
 
-        return !checkRowFilter || rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().getKeyValidator());
+        return rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().getKeyValidator());
     }
 
-    public boolean selectsClustering(DecoratedKey key, Clustering clustering, boolean checkRowFilter)
+    public boolean selectsClustering(DecoratedKey key, Clustering clustering)
     {
         if (clustering == Clustering.STATIC_CLUSTERING)
             return !columnFilter().fetchedColumns().statics.isEmpty();
@@ -208,7 +207,7 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
         if (!clusteringIndexFilter().selects(clustering))
             return false;
 
-        return !checkRowFilter || rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
+        return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
     }
 
     /**
@@ -513,14 +512,14 @@ public abstract class SinglePartitionReadCommand<F extends ClusteringIndexFilter
             return new MultiPartitionPager(this, pagingState);
         }
 
-        public boolean selectsKey(DecoratedKey key, boolean checkRowFilter)
+        public boolean selectsKey(DecoratedKey key)
         {
-            return Iterables.any(commands, c -> c.selectsKey(key, checkRowFilter));
+            return Iterables.any(commands, c -> c.selectsKey(key));
         }
 
-        public boolean selectsClustering(DecoratedKey key, Clustering clustering, boolean checkRowFilter)
+        public boolean selectsClustering(DecoratedKey key, Clustering clustering)
         {
-            return Iterables.any(commands, c -> c.selectsClustering(key, clustering, checkRowFilter));
+            return Iterables.any(commands, c -> c.selectsClustering(key, clustering));
         }
 
         @Override

@@ -68,12 +68,12 @@ public interface ReadQuery
             return QueryPager.EMPTY;
         }
 
-        public boolean selectsKey(DecoratedKey key, boolean checkRowFilter)
+        public boolean selectsKey(DecoratedKey key)
         {
             return false;
         }
 
-        public boolean selectsClustering(DecoratedKey key, Clustering clustering, boolean checkRowFilter)
+        public boolean selectsClustering(DecoratedKey key, Clustering clustering)
         {
             return false;
         }
@@ -130,11 +130,11 @@ public interface ReadQuery
      * @return true if the read query would select the given key, including checks against the row filter, if
      * checkRowFilter is true
      */
-    public boolean selectsKey(DecoratedKey key, boolean checkRowFilter);
+    public boolean selectsKey(DecoratedKey key);
 
     /**
      * @return true if the read query would select the given clustering, including checks against the row filter, if
      * checkRowFilter is true
      */
-    public boolean selectsClustering(DecoratedKey key, Clustering clustering, boolean checkRowFilter);
+    public boolean selectsClustering(DecoratedKey key, Clustering clustering);
 }
