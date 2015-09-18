@@ -64,7 +64,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
                              "SELECT * FROM %s WHERE c = 0 AND b IN (?)", set(0));
         assertInvalidMessage("Unsupported \"!=\" relation: b != 5",
                 "SELECT * FROM %s WHERE c = 0 AND b != 5");
-        assertInvalidMessage("Unsupported restriction: b IS NOT null",
+        assertInvalidMessage("Unsupported restriction: b IS NOT NULL",
                 "SELECT * FROM %s WHERE c = 0 AND b IS NOT NULL");
     }
 
