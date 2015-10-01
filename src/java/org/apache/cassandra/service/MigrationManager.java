@@ -53,8 +53,6 @@ public class MigrationManager
 {
     private static final Logger logger = LoggerFactory.getLogger(MigrationManager.class);
 
-    private static final boolean FLUSH_LOCAL_CHANGES = Boolean.valueOf(System.getProperty("cassandra.test.flush_local_schema_changes", "true"));
-
     public static final MigrationManager instance = new MigrationManager();
 
     private static final RuntimeMXBean runtimeMXBean = ManagementFactory.getRuntimeMXBean();
@@ -473,7 +471,7 @@ public class MigrationManager
         {
             try
             {
-                SchemaKeyspace.mergeSchema(Collections.singletonList(schema), FLUSH_LOCAL_CHANGES);
+                SchemaKeyspace.mergeSchema(Collections.singletonList(schema));
             }
             catch (IOException e)
             {
@@ -501,7 +499,7 @@ public class MigrationManager
         {
             protected void runMayThrow() throws IOException, ConfigurationException
             {
-                SchemaKeyspace.mergeSchema(schema);
+                SchemaKeyspace.mergeSchemaAndAnnounceVersion(schema);
             }
         });
 
