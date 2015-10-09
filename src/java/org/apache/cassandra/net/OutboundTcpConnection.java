@@ -61,6 +61,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import javax.net.ssl.SSLHandshakeException;
+
 public class OutboundTcpConnection extends Thread
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundTcpConnection.class);
@@ -468,6 +470,13 @@ public class OutboundTcpConnection extends Thread
                 }
 
                 return true;
+            }
+            catch (SSLHandshakeException e)
+            {
+                socket = null;
+                if (logger.isWarnEnabled())
+                    logger.warn("Failed to complete SSL handshake for remote socket: " + poolReference.endPoint(), e);
+                Uninterruptibles.sleepUninterruptibly(OPEN_RETRY_DELAY, TimeUnit.MILLISECONDS);
             }
             catch (IOException e)
             {
