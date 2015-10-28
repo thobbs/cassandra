@@ -1,4 +1,6 @@
 3.0
+ * Fix AssertionError while flushing memtable due to materialized views
+   incorrectly inserting empty rows (CASSANDRA-10614)
  * Fix thrift get() queries with defined columns (CASSANDRA-10586)
  * Fix marking of indexes as built and removed (CASSANDRA-10601)
  * Skip initialization of non-registered 2i instances, remove Index::getIndexName (CASSANDRA-10595)

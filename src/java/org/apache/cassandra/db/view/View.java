@@ -85,7 +85,7 @@ public class View
 
     private Columns columns;
 
-    private final boolean viewHasAllPrimaryKeys;
+    private final boolean viewPKIncludesOnlyBasePKColumns;
     private final boolean includeAllColumns;
     private ViewBuilder builder;
 
@@ -104,7 +104,7 @@ public class View
         name = definition.viewName;
         includeAllColumns = definition.includeAllColumns;
 
-        viewHasAllPrimaryKeys = updateDefinition(definition);
+        viewPKIncludesOnlyBasePKColumns = updateDefinition(definition);
         this.rawSelect = definition.select;
     }
 
@@ -210,7 +210,7 @@ public class View
             if (!selectQuery.selectsClustering(partition.partitionKey(), row.clustering()))
                 continue;
 
-            if (includeAllColumns || viewHasAllPrimaryKeys || !row.deletion().isLive())
+            if (includeAllColumns || !row.deletion().isLive())
                 return true;
 
             if (row.primaryKeyLivenessInfo().isLive(FBUtilities.nowInSeconds()))
@@ -313,7 +313,7 @@ public class View
     private PartitionUpdate createRangeTombstoneForRow(TemporalRow temporalRow)
     {
         // Primary Key and Clustering columns do not generate tombstones
-        if (viewHasAllPrimaryKeys)
+        if (viewPKIncludesOnlyBasePKColumns)
             return null;
 
         boolean hasUpdate = false;
