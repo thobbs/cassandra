@@ -811,6 +811,31 @@ public class ViewTest extends CQLTester
     }
 
     @Test
+    public void testIgnoreUpdate() throws Throwable
+    {
+        createTable("CREATE TABLE %s (" +
+                    "a int, " +
+                    "b int, " +
+                    "c int, " +
+                    "d int, " +
+                    "PRIMARY KEY (a, b))");
+
+        execute("USE " + keyspace());
+        executeNet(protocolVersion, "USE " + keyspace());
+
+        createView("mv", "CREATE MATERIALIZED VIEW %s AS SELECT a, b, c FROM %%s WHERE a IS NOT NULL AND b IS NOT NULL PRIMARY KEY (b, a)");
+
+        updateView("INSERT INTO %s (a, b, c) VALUES (?, ?, ?)", 0, 0, 0);
+        assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 0), row(0, 0, 0));
+
+        updateView("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 0, 0, 0);
+        assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 0), row(0, 0, 0));
+
+        // regression test for CASSANDRA-10614
+        Keyspace.open(keyspace()).getColumnFamilyStore("mv").forceBlockingFlush();
+    }
+
+    @Test
     public void testTwoTablesOneView() throws Throwable
     {
         execute("USE " + keyspace());
