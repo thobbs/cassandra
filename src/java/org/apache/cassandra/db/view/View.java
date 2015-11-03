@@ -375,7 +375,14 @@ public class View
             }
         }
 
-        return PartitionUpdate.singleRowUpdate(viewCfm, partitionKey, regularBuilder.build());
+        Row row = regularBuilder.build();
+
+        // although we check for empty rows in updateAppliesToView(), if there are any good rows in the PartitionUpdate,
+        // all rows in the partition will be processed, and we need to handle empty/non-live rows here (CASSANDRA-10614)
+        if (row.isEmpty())
+            return null;
+
+        return PartitionUpdate.singleRowUpdate(viewCfm, partitionKey, row);
     }
 
     /**
@@ -650,9 +657,13 @@ public class View
         if (!updateAffectsView(partition))
             return null;
 
+        ReadQuery selectQuery = getReadQuery();
         Collection<Mutation> mutations = null;
         for (TemporalRow temporalRow : rowSet)
         {
+            if (!selectQuery.selectsClustering(partition.partitionKey(), temporalRow.baseClustering()))
+                continue;
+
             // If we are building, there is no need to check for partition tombstones; those values will not be present
             // in the partition data
             if (!isBuilding)

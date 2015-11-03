@@ -38,6 +38,7 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.serializers.SimpleDateSerializer;
@@ -813,6 +814,8 @@ public class ViewTest extends CQLTester
     @Test
     public void testIgnoreUpdate() throws Throwable
     {
+        // regression test for CASSANDRA-10614
+
         createTable("CREATE TABLE %s (" +
                     "a int, " +
                     "b int, " +
@@ -831,8 +834,22 @@ public class ViewTest extends CQLTester
         updateView("UPDATE %s SET d = ? WHERE a = ? AND b = ?", 0, 0, 0);
         assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 0), row(0, 0, 0));
 
-        // regression test for CASSANDRA-10614
-        Keyspace.open(keyspace()).getColumnFamilyStore("mv").forceBlockingFlush();
+        // Note: errors here may result in the test hanging when the memtables are flushed as part of the table drop,
+        // because empty rows in the memtable will cause the flush to fail.  This will result in a test timeout that
+        // should not be ignored.
+        String table = KEYSPACE + "." + currentTable();
+        updateView("BEGIN BATCH " +
+                "INSERT INTO " + table + " (a, b, c, d) VALUES (?, ?, ?, ?); " + // should be accepted
+                "UPDATE " + table + " SET d = ? WHERE a = ? AND b = ?; " +  // should be ignored
+                "APPLY BATCH",
+                0, 0, 0, 0,
+                1, 0, 1);
+        assertRows(execute("SELECT a, b, c from mv WHERE b = ?", 0), row(0, 0, 0));
+        assertEmpty(execute("SELECT a, b, c from mv WHERE b = ?", 1));
+
+        ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore("mv");
+        cfs.forceBlockingFlush();
+        Assert.assertEquals(1, cfs.getLiveSSTables().size());
     }
 
     @Test
