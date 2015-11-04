@@ -661,7 +661,10 @@ public class View
         Collection<Mutation> mutations = null;
         for (TemporalRow temporalRow : rowSet)
         {
-            if (!selectQuery.selectsClustering(partition.partitionKey(), temporalRow.baseClustering()))
+            // In updateAffectsView, we check the partition to see if there is at least one row that matches the
+            // filters and is live.  If there is more than one row in the partition, we need to re-check each one
+            // invididually.
+            if (partition.rowCount() != 1 && !selectQuery.selectsClustering(partition.partitionKey(), temporalRow.baseClustering()))
                 continue;
 
             // If we are building, there is no need to check for partition tombstones; those values will not be present
