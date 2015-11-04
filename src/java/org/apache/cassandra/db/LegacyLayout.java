@@ -157,13 +157,16 @@ public abstract class LegacyLayout
             return new LegacyCellName(clustering, null, null);
 
         ColumnDefinition def = metadata.getColumnDefinition(column);
-        if (def == null)
+        if ((def == null) || def.isPrimaryKeyColumn())
         {
             // If it's a compact table, it means the column is in fact a "dynamic" one
             if (metadata.isCompactTable())
                 return new LegacyCellName(new Clustering(column), metadata.compactValueColumn(), null);
 
-            throw new UnknownColumnException(metadata, column);
+            if (def == null)
+                throw new UnknownColumnException(metadata, column);
+            else
+                throw new IllegalArgumentException("Cannot add primary key column to partition update");
         }
 
         ByteBuffer collectionElement = metadata.isCompound() ? CompositeType.extractComponent(cellname, metadata.comparator.size() + 1) : null;
@@ -367,29 +370,29 @@ public abstract class LegacyLayout
         for (LegacyLayout.LegacyCell cell : legacyPartition.cells)
         {
             ByteBufferUtil.writeWithShortLength(cell.name.encode(partition.metadata()), out);
-            if (cell.kind == LegacyLayout.LegacyCell.Kind.EXPIRING)
+            out.writeByte(cell.serializationFlags());
+            if (cell.isExpiring())
             {
-                out.writeByte(LegacyLayout.EXPIRATION_MASK);  // serialization flags
                 out.writeInt(cell.ttl);
                 out.writeInt(cell.localDeletionTime);
             }
-            else if (cell.kind == LegacyLayout.LegacyCell.Kind.DELETED)
+            else if (cell.isTombstone())
             {
-                out.writeByte(LegacyLayout.DELETION_MASK);  // serialization flags
                 out.writeLong(cell.timestamp);
                 out.writeInt(TypeSizes.sizeof(cell.localDeletionTime));
                 out.writeInt(cell.localDeletionTime);
                 continue;
             }
-            else if (cell.kind == LegacyLayout.LegacyCell.Kind.COUNTER)
+            else if (cell.isCounterUpdate())
             {
-                out.writeByte(LegacyLayout.COUNTER_MASK);  // serialization flags
-                out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete (not used, and MIN_VALUE is the default)
+                out.writeLong(cell.timestamp);
+                long count = CounterContext.instance().getLocalCount(cell.value);
+                ByteBufferUtil.writeWithLength(ByteBufferUtil.bytes(count), out);
+                continue;
             }
-            else
+            else if (cell.isCounter())
             {
-                // normal cell
-                out.writeByte(0);  // serialization flags
+                out.writeLong(Long.MIN_VALUE);  // timestampOfLastDelete (not used, and MIN_VALUE is the default)
             }
 
             out.writeLong(cell.timestamp);
@@ -1401,9 +1404,17 @@ public abstract class LegacyLayout
                 return EXPIRATION_MASK;
             if (isTombstone())
                 return DELETION_MASK;
+            if (isCounterUpdate())
+                return COUNTER_UPDATE_MASK;
             if (isCounter())
                 return COUNTER_MASK;
             return 0;
+        }
+
+        private boolean isCounterUpdate()
+        {
+            // See UpdateParameters.addCounter() for more details on this
+            return isCounter() && CounterContext.instance().isLocal(value);
         }
 
         public ClusteringPrefix clustering()
@@ -1690,9 +1701,25 @@ public abstract class LegacyLayout
 
         public int compare(LegacyBound a, LegacyBound b)
         {
+            // In the legacy sorting, BOTTOM comes before anything else
+            if (a == LegacyBound.BOTTOM)
+                return b == LegacyBound.BOTTOM ? 0 : -1;
+            if (b == LegacyBound.BOTTOM)
+                return 1;
+
+            // Excluding BOTTOM, statics are always before anything else.
+            if (a.isStatic != b.isStatic)
+                return a.isStatic ? -1 : 1;
+
             int result = this.clusteringComparator.compare(a.bound, b.bound);
             if (result != 0)
                 return result;
+
+            // If both have equal "bound" but one is a collection tombstone and not the other, then the other comes before as it points to the beginning of the row.
+            if (a.collectionName == null)
+                return b.collectionName == null ? 0 : 1;
+            if (b.collectionName == null)
+                return -1;
 
             return UTF8Type.instance.compare(a.collectionName.name.bytes, b.collectionName.name.bytes);
         }

@@ -85,7 +85,7 @@ public class CassandraServer implements Cassandra.Iface
         return ThriftSessionManager.instance.currentSession();
     }
 
-    protected PartitionIterator read(List<SinglePartitionReadCommand<?>> commands, org.apache.cassandra.db.ConsistencyLevel consistency_level, ClientState cState)
+    protected PartitionIterator read(List<SinglePartitionReadCommand> commands, org.apache.cassandra.db.ConsistencyLevel consistency_level, ClientState cState)
     throws org.apache.cassandra.exceptions.InvalidRequestException, UnavailableException, TimedOutException
     {
         try
@@ -257,7 +257,7 @@ public class CassandraServer implements Cassandra.Iface
              : result;
     }
 
-    private Map<ByteBuffer, List<ColumnOrSuperColumn>> getSlice(List<SinglePartitionReadCommand<?>> commands, boolean subColumnsOnly, int cellLimit, org.apache.cassandra.db.ConsistencyLevel consistency_level, ClientState cState)
+    private Map<ByteBuffer, List<ColumnOrSuperColumn>> getSlice(List<SinglePartitionReadCommand> commands, boolean subColumnsOnly, int cellLimit, org.apache.cassandra.db.ConsistencyLevel consistency_level, ClientState cState)
     throws org.apache.cassandra.exceptions.InvalidRequestException, UnavailableException, TimedOutException
     {
         try (PartitionIterator results = read(commands, consistency_level, cState))
@@ -551,7 +551,7 @@ public class CassandraServer implements Cassandra.Iface
         org.apache.cassandra.db.ConsistencyLevel consistencyLevel = ThriftConversion.fromThrift(consistency_level);
         consistencyLevel.validateForRead(keyspace);
 
-        List<SinglePartitionReadCommand<?>> commands = new ArrayList<>(keys.size());
+        List<SinglePartitionReadCommand> commands = new ArrayList<>(keys.size());
         ColumnFilter columnFilter = makeColumnFilter(metadata, column_parent, predicate);
         ClusteringIndexFilter filter = toInternalFilter(metadata, column_parent, predicate);
         DataLimits limits = getLimits(1, metadata.isSuper() && !column_parent.isSetSuper_column(), predicate);
@@ -641,7 +641,7 @@ public class CassandraServer implements Cassandra.Iface
             }
 
             DecoratedKey dk = metadata.decorateKey(key);
-            SinglePartitionReadCommand<?> command = SinglePartitionReadCommand.create(true, metadata, FBUtilities.nowInSeconds(), columns, RowFilter.NONE, DataLimits.NONE, dk, filter);
+            SinglePartitionReadCommand command = SinglePartitionReadCommand.create(true, metadata, FBUtilities.nowInSeconds(), columns, RowFilter.NONE, DataLimits.NONE, dk, filter);
 
             try (RowIterator result = PartitionIterators.getOnlyElement(read(Arrays.asList(command), consistencyLevel, cState), command))
             {
@@ -945,15 +945,11 @@ public class CassandraServer implements Cassandra.Iface
             // Indexed column values cannot be larger than 64K.  See CASSANDRA-3057/4240 for more details
             Keyspace.open(metadata.ksName).getColumnFamilyStore(metadata.cfName).indexManager.validate(partitionUpdates);
 
-            FilteredPartition partitionExpected = null;
-            if (!expected.isEmpty())
-                partitionExpected = FilteredPartition.create(LegacyLayout.toRowIterator(metadata, dk, toLegacyCells(metadata, expected, nowInSec).iterator(), nowInSec));
-
             schedule(DatabaseDescriptor.getWriteRpcTimeout());
             try (RowIterator result = StorageProxy.cas(cState.getKeyspace(),
                                                        column_family,
                                                        dk,
-                                                       new ThriftCASRequest(partitionExpected, partitionUpdates),
+                                                       new ThriftCASRequest(toLegacyCells(metadata, expected, nowInSec), partitionUpdates, nowInSec),
                                                        ThriftConversion.fromThrift(serial_consistency_level),
                                                        ThriftConversion.fromThrift(commit_consistency_level),
                                                        cState))
@@ -2441,8 +2437,8 @@ public class CassandraServer implements Cassandra.Iface
 
             ThriftValidation.validateKey(metadata, request.key);
             DecoratedKey dk = metadata.decorateKey(request.key);
-            SinglePartitionReadCommand<?> cmd = SinglePartitionReadCommand.create(true, metadata, FBUtilities.nowInSeconds(), columns, RowFilter.NONE, limits, dk, filter);
-            return getSlice(Collections.<SinglePartitionReadCommand<?>>singletonList(cmd),
+            SinglePartitionReadCommand cmd = SinglePartitionReadCommand.create(true, metadata, FBUtilities.nowInSeconds(), columns, RowFilter.NONE, limits, dk, filter);
+            return getSlice(Collections.<SinglePartitionReadCommand>singletonList(cmd),
                             false,
                             limits.perPartitionCount(),
                             consistencyLevel,
@@ -2509,33 +2505,38 @@ public class CassandraServer implements Cassandra.Iface
     {
         private final CFMetaData metadata;
         private final DecoratedKey key;
-
-        private final FilteredPartition expected;
+        private final List<LegacyLayout.LegacyCell> expected;
         private final PartitionUpdate updates;
+        private final int nowInSec;
 
-        private ThriftCASRequest(FilteredPartition expected, PartitionUpdate updates)
+        private ThriftCASRequest(List<LegacyLayout.LegacyCell> expected, PartitionUpdate updates, int nowInSec)
         {
             this.metadata = updates.metadata();
             this.key = updates.partitionKey();
             this.expected = expected;
             this.updates = updates;
+            this.nowInSec = nowInSec;
         }
 
         public SinglePartitionReadCommand readCommand(int nowInSec)
         {
-            if (expected == null || expected.isEmpty())
+            if (expected.isEmpty())
             {
                 // We want to know if the partition exists, so just fetch a single cell.
                 ClusteringIndexSliceFilter filter = new ClusteringIndexSliceFilter(Slices.ALL, false);
                 DataLimits limits = DataLimits.thriftLimits(1, 1);
-                return new SinglePartitionSliceCommand(false, 0, true, metadata, nowInSec, ColumnFilter.all(metadata), RowFilter.NONE, limits, key, filter);
+                return new SinglePartitionReadCommand(false, 0, true, metadata, nowInSec, ColumnFilter.all(metadata), RowFilter.NONE, limits, key, filter);
             }
 
             // Gather the clustering for the expected values and query those.
             BTreeSet.Builder<Clustering> clusterings = BTreeSet.builder(metadata.comparator);
-            for (Row row : expected)
+            FilteredPartition expectedPartition =
+                FilteredPartition.create(LegacyLayout.toRowIterator(metadata, key, expected.iterator(), nowInSec));
+
+            for (Row row : expectedPartition)
                 clusterings.add(row.clustering());
-            PartitionColumns columns = expected.staticRow().isEmpty()
+
+            PartitionColumns columns = expectedPartition.staticRow().isEmpty()
                                      ? metadata.partitionColumns().withoutStatics()
                                      : metadata.partitionColumns();
             ClusteringIndexNamesFilter filter = new ClusteringIndexNamesFilter(clusterings.build(), false);
@@ -2544,13 +2545,21 @@ public class CassandraServer implements Cassandra.Iface
 
         public boolean appliesTo(FilteredPartition current)
         {
-            if (expected == null || expected.isEmpty())
+            if (expected.isEmpty())
                 return current.isEmpty();
             else if (current.isEmpty())
                 return false;
 
+            // Push the expected results through ThriftResultsMerger to translate any static
+            // columns into clusterings. The current partition is retrieved in the same so
+            // unless they're both handled the same, they won't match.
+            FilteredPartition expectedPartition =
+                FilteredPartition.create(
+                    UnfilteredRowIterators.filter(
+                        ThriftResultsMerger.maybeWrap(expectedToUnfilteredRowIterator(), nowInSec), nowInSec));
+
             // Check that for everything we expected, the fetched values exists and correspond.
-            for (Row e : expected)
+            for (Row e : expectedPartition)
             {
                 Row c = current.getRow(e.clustering());
                 if (c == null)
@@ -2587,6 +2596,11 @@ public class CassandraServer implements Cassandra.Iface
         public PartitionUpdate makeUpdates(FilteredPartition current)
         {
             return updates;
+        }
+
+        private UnfilteredRowIterator expectedToUnfilteredRowIterator()
+        {
+            return LegacyLayout.toUnfilteredRowIterator(metadata, key, LegacyLayout.LegacyDeletionInfo.live(), expected.iterator());
         }
     }
 }

@@ -1,6 +1,17 @@
 3.0
  * Fix AssertionError while flushing memtable due to materialized views
    incorrectly inserting empty rows (CASSANDRA-10614)
+ * Use CQL type names in schema metadata tables (CASSANDRA-10365)
+ * Guard batchlog replay against integer division by zero (CASSANDRA-9223)
+ * Fix bug when adding a column to thrift with the same name than a primary key (CASSANDRA-10608)
+ * Add client address argument to IAuthenticator::newSaslNegotiator (CASSANDRA-8068)
+ * Fix implementation of LegacyLayout.LegacyBoundComparator (CASSANDRA-10602)
+ * Don't use 'names query' read path for counters (CASSANDRA-10572)
+ * Fix backward compatibility for counters (CASSANDRA-10470)
+ * Remove memory_allocator paramter from cassandra.yaml (CASSANDRA-10581)
+ * Execute the metadata reload task of all registered indexes on CFS::reload (CASSANDRA-10604)
+ * Fix thrift cas operations with defined columns (CASSANDRA-10576)
+ * Fix PartitionUpdate.operationCount()for updates with static column operations (CASSANDRA-10606)
  * Fix thrift get() queries with defined columns (CASSANDRA-10586)
  * Fix marking of indexes as built and removed (CASSANDRA-10601)
  * Skip initialization of non-registered 2i instances, remove Index::getIndexName (CASSANDRA-10595)
@@ -16,6 +27,11 @@ Merged from 2.2:
  * Expose phi values from failure detector via JMX and tweak debug
    and trace logging (CASSANDRA-9526)
 Merged from 2.1:
+ * Improve handling of dead nodes in gossip (CASSANDRA-10298)
+ * Fix logback-tools.xml incorrectly configured for outputing to System.err
+   (CASSANDRA-9937)
+ * Fix streaming to catch exception so retry not fail (CASSANDRA-10557)
+ * Add validation method to PerRowSecondaryIndex (CASSANDRA-10092)
  * Support encrypted and plain traffic on the same port (CASSANDRA-10559)
  * Do STCS in DTCS windows (CASSANDRA-10276)
  * Avoid repetition of JVM_OPTS in debian package (CASSANDRA-10251)
