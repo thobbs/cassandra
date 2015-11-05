@@ -237,7 +237,7 @@ public final class Types implements Iterable<UserType>
             return Types.builder().add(types).build();
         }
 
-        void add(String name, List<String> fieldNames, List<String> fieldTypes)
+        public void add(String name, List<String> fieldNames, List<String> fieldTypes)
         {
             List<CQL3Type.Raw> rawFieldTypes =
                 fieldTypes.stream()
@@ -274,7 +274,7 @@ public final class Types implements Iterable<UserType>
 
                 List<AbstractType<?>> preparedFieldTypes =
                     fieldTypes.stream()
-                              .map(t -> t.prepare(keyspace, types).getType())
+                              .map(t -> t.prepareInternal(keyspace, types).getType())
                               .collect(toList());
 
                 return new UserType(keyspace, bytes(name), preparedFieldNames, preparedFieldTypes);

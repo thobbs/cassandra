@@ -1,6 +1,7 @@
 3.0
  * Fix AssertionError while flushing memtable due to materialized views
    incorrectly inserting empty rows (CASSANDRA-10614)
+ * Fix reading of legacy sstables (CASSANDRA-10590)
  * Use CQL type names in schema metadata tables (CASSANDRA-10365)
  * Guard batchlog replay against integer division by zero (CASSANDRA-9223)
  * Fix bug when adding a column to thrift with the same name than a primary key (CASSANDRA-10608)
@@ -8,7 +9,7 @@
  * Fix implementation of LegacyLayout.LegacyBoundComparator (CASSANDRA-10602)
  * Don't use 'names query' read path for counters (CASSANDRA-10572)
  * Fix backward compatibility for counters (CASSANDRA-10470)
- * Remove memory_allocator paramter from cassandra.yaml (CASSANDRA-10581)
+ * Remove memory_allocator paramter from cassandra.yaml (CASSANDRA-10581,10628)
  * Execute the metadata reload task of all registered indexes on CFS::reload (CASSANDRA-10604)
  * Fix thrift cas operations with defined columns (CASSANDRA-10576)
  * Fix PartitionUpdate.operationCount()for updates with static column operations (CASSANDRA-10606)
