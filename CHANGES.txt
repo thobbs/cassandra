@@ -1,6 +1,14 @@
 3.0
  * Fix AssertionError while flushing memtable due to materialized views
    incorrectly inserting empty rows (CASSANDRA-10614)
+ * Don't use -1 for the position of partition key in schema (CASSANDRA-10491)
+ * Fix distinct queries in mixed version cluster (CASSANDRA-10573)
+ * Skip sstable on clustering in names query (CASSANDRA-10571)
+ * Remove value skipping as it breaks read-repair (CASSANDRA-10655)
+ * Fix bootstrapping with MVs (CASSANDRA-10621)
+ * Make sure EACH_QUORUM reads are using NTS (CASSANDRA-10584)
+ * Fix MV replica filtering for non-NetworkTopologyStrategy (CASSANDRA-10634)
+ * (Hadoop) fix CIF describeSplits() not handling 0 size estimates (CASSANDRA-10600)
  * Fix reading of legacy sstables (CASSANDRA-10590)
  * Use CQL type names in schema metadata tables (CASSANDRA-10365)
  * Guard batchlog replay against integer division by zero (CASSANDRA-9223)
@@ -25,9 +33,13 @@
  * Fix handling of range tombstones when reading old format sstables (CASSANDRA-10360)
  * Aggregate with Initial Condition fails with C* 3.0 (CASSANDRA-10367)
 Merged from 2.2:
+ * Use most up-to-date version of schema for system tables (CASSANDRA-10652)
+ * Deprecate memory_allocator in cassandra.yaml (CASSANDRA-10581,10628)
  * Expose phi values from failure detector via JMX and tweak debug
    and trace logging (CASSANDRA-9526)
 Merged from 2.1:
+ * (cqlsh) fix COPY using wrong variable name for time_format (CASSANDRA-10633)
+ * Do not run SizeEstimatesRecorder if a node is not a member of the ring (CASSANDRA-9912)
  * Improve handling of dead nodes in gossip (CASSANDRA-10298)
  * Fix logback-tools.xml incorrectly configured for outputing to System.err
    (CASSANDRA-9937)
