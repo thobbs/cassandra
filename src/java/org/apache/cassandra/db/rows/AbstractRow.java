@@ -27,6 +27,7 @@ import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -126,7 +127,11 @@ public abstract class AbstractRow extends AbstractCollection<ColumnData> impleme
                 if (cd.column().isSimple())
                 {
                     Cell cell = (Cell)cd;
-                    sb.append(cell.column().name).append('=').append(cell.column().type.getString(cell.value()));
+                    sb.append(cell.column().name).append('=');
+                    if (cell.isTombstone())
+                        sb.append("<tombstone>");
+                    else
+                        sb.append(cell.column().type.getString(cell.value()));
                 }
                 else
                 {
