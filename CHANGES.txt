@@ -27,6 +27,7 @@ Merged from 2.1:
 
 
 3.0.1
+ * Avoid NoSuchElementException when executing empty batch (CASSANDRA-10711)
  * Avoid MV race during node decommission (CASSANDRA-10674)
  * Disable reloading of GossipingPropertyFileSnitch (CASSANDRA-9474)
  * Handle single-column deletions correction in materialized views
