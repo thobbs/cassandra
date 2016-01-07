@@ -1,5 +1,6 @@
 3.4
  * Add nodetool gettimeout and settimeout commands (CASSANDRA-10953)
+ * Stripe view locks by key and table ID to reduce contention (CASSANDRA-10981)
 
 
 3.3
