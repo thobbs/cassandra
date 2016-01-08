@@ -424,7 +424,8 @@ public class Keyspace
             for (int i = 0; i < columnFamilyIds.size(); i++)
             {
                 UUID cfid = idIterator.next();
-                Lock lock = acquireViewLock(mutation.key().getKey(), cfid);
+                int lockKey = Objects.hash(mutation.key().getKey(), cfid);
+                Lock lock = ViewManager.acquireLockFor(lockKey);
                 if (lock == null)
                 {
                     // we will either time out or retry, so release all acquired locks
@@ -518,14 +519,6 @@ public class Keyspace
                     lock.unlock();
             }
         }
-    }
-
-    private static Lock acquireViewLock(ByteBuffer mutationKey, UUID cfid)
-    {
-         ByteBuffer lockKey = ByteBuffer.allocate(mutationKey.remaining() + 4);
-         ByteBufferUtil.arrayCopy(mutationKey, mutationKey.position(), lockKey, lockKey.position(), mutationKey.remaining());
-         lockKey.putInt(cfid.hashCode());
-         return ViewManager.acquireLockFor(lockKey);
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()
