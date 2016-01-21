@@ -381,29 +381,39 @@ public class Keyspace
 
     public void apply(Mutation mutation, boolean writeCommitLog)
     {
-        apply(mutation, writeCommitLog, true, false);
+        checkApplyResult(apply(mutation, writeCommitLog, true, false, null));
     }
 
     public void apply(Mutation mutation, boolean writeCommitLog, boolean updateIndexes)
     {
-        apply(mutation, writeCommitLog, updateIndexes, false);
+        checkApplyResult(apply(mutation, writeCommitLog, updateIndexes, false, null));
     }
 
     public void applyFromCommitLog(Mutation mutation)
     {
-        apply(mutation, false, true, true);
+        checkApplyResult(apply(mutation, false, true, true, null));
     }
 
     /**
      * This method appends a row to the global CommitLog, then updates memtables and indexes.
+     *
+     * This method deals with potential re-scheduling of the mutation application due to lock
+     * contention in the view manager.  If there is no lock contention, this method will execute synchronously and
+     * will return null.  Otherwise, this method call will be rescheduled on a threadpool executor and will return
+     * a non-null CompletableFuture which will be set when the mutation is actually applied.
+     *
+     * The checkApplyResult() function should be used on returned values to properly handle errors.
      *
      * @param mutation       the row to write.  Must not be modified after calling apply, since commitlog append
      *                       may happen concurrently, depending on the CL Executor type.
      * @param writeCommitLog false to disable commitlog append entirely
      * @param updateIndexes  false to disable index updates (used by CollationController "defragmenting")
      * @param isClReplay     true if caller is the commitlog replayer
+     * @param future         should be null except when this is internally called to reschedule a mutation application
+     * @return null if the application completed synchronously; otherwise, returns a CompletableFuture that will be
+     *         completed when the mutation application completes
      */
-    public void apply(final Mutation mutation, final boolean writeCommitLog, boolean updateIndexes, boolean isClReplay)
+    private CompletableFuture<Void> apply(final Mutation mutation, final boolean writeCommitLog, boolean updateIndexes, boolean isClReplay, CompletableFuture<Void> future)
     {
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             throw new RuntimeException("Testing write failures");
@@ -428,14 +438,17 @@ public class Keyspace
                 {
                     //This view update can't happen right now. so rather than keep this thread busy
                     // we will re-apply ourself to the queue and try again later
+                    final CompletableFuture<Void> f = future == null ? new CompletableFuture<>() : future;
                     StageManager.getStage(Stage.MUTATION).execute(() -> {
-                        if (writeCommitLog)
-                            mutation.apply();
-                        else
-                            mutation.applyUnsafe();
+                        try
+                        {
+                            apply(mutation, writeCommitLog, updateIndexes, isClReplay, f);
+                        } catch (Throwable exc) {
+                            f.completeExceptionally(exc);
+                        }
                     });
 
-                    return;
+                    return f;
                 }
             }
             else
@@ -500,6 +513,41 @@ public class Keyspace
         {
             if (lock != null)
                 lock.unlock();
+        }
+
+        // if this was a rescheduled call (due to lock contention), complete the future
+        if (future != null)
+            future.complete(null);
+
+        return future;
+    }
+
+    private static void checkApplyResult(CompletableFuture<Void> future)
+    {
+        if (future != null)
+        {
+            try
+            {
+                // we don't expect timeouts to be handled here (they should be covered by apply()), but this is a
+                // reasonable safety net
+                future.get(DatabaseDescriptor.getWriteRpcTimeout(), TimeUnit.MILLISECONDS);
+            }
+            catch (TimeoutException exc)
+            {
+                throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
+            }
+            catch (ExecutionException exc)
+            {
+                JVMStabilityInspector.inspectThrowable(exc);
+                if (exc.getCause() instanceof RuntimeException)
+                    throw (RuntimeException) exc.getCause();
+                else
+                    throw new RuntimeException(exc);
+            }
+            catch (InterruptedException exc)
+            {
+                throw new RuntimeException(exc);
+            }
         }
     }
 
