@@ -21,8 +21,10 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
+import java.util.stream.Collectors;
 
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Striped;
@@ -33,6 +35,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.service.StorageProxy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -256,13 +259,26 @@ public class ViewManager
         return forStore;
     }
 
-    public static Lock acquireLockFor(ByteBuffer key)
+    public static void grabViewLocks(ByteBuffer key, Collection<UUID> tableIDs, List<Lock> locks, long timeoutInMillis) throws WriteTimeoutException
     {
-        Lock lock = LOCKS.get(key);
+        long startTime = System.nanoTime();
+        long timeoutInNanos = TimeUnit.MILLISECONDS.toNanos(timeoutInMillis);
+        Collection<Integer> lockKeys = tableIDs.stream().map(tableId -> Objects.hash(key, tableId)).collect(Collectors.toList());
 
-        if (lock.tryLock())
-            return lock;
-
-        return null;
+        // bulkGet() returns locks in their stripe order, which allows us to avoid deadlock
+        for (Lock lock : LOCKS.bulkGet(lockKeys))
+        {
+            long timeout = timeoutInNanos - (System.nanoTime() - startTime);
+            try
+            {
+                if (!lock.tryLock(timeout, TimeUnit.NANOSECONDS))
+                    throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
+                locks.add(lock);
+            }
+            catch (InterruptedException e)
+            {
+                throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
+            }
+        }
     }
 }

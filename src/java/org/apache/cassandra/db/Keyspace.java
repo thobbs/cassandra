@@ -27,8 +27,6 @@ import java.util.concurrent.locks.Lock;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
@@ -37,7 +35,6 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.ViewManager;
-import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
@@ -47,7 +44,6 @@ import org.apache.cassandra.metrics.KeyspaceMetrics;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.concurrent.OpOrder;
@@ -408,48 +404,24 @@ public class Keyspace
         if (TEST_FAIL_WRITES && metadata.name.equals(TEST_FAIL_WRITES_KS))
             throw new RuntimeException("Testing write failures");
 
-        Lock lock = null;
+        List<Lock> locks = null;
         boolean requiresViewUpdate = updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false);
 
         if (requiresViewUpdate)
         {
+            Collection<UUID> columnFamilyIds = mutation.getColumnFamilyIds();
+            locks = new ArrayList<>(columnFamilyIds.size());
+
             mutation.viewLockAcquireStart.compareAndSet(0L, System.currentTimeMillis());
-            lock = ViewManager.acquireLockFor(mutation.key().getKey());
-
-            if (lock == null)
-            {
-                if ((System.currentTimeMillis() - mutation.createdAt) > DatabaseDescriptor.getWriteRpcTimeout())
-                {
-                    logger.trace("Could not acquire lock for {}", ByteBufferUtil.bytesToHex(mutation.key().getKey()));
-                    Tracing.trace("Could not acquire MV lock");
-                    throw new WriteTimeoutException(WriteType.VIEW, ConsistencyLevel.LOCAL_ONE, 0, 1);
-                }
-                else
-                {
-                    //This view update can't happen right now. so rather than keep this thread busy
-                    // we will re-apply ourself to the queue and try again later
-                    StageManager.getStage(Stage.MUTATION).execute(() -> {
-                        if (writeCommitLog)
-                            mutation.apply();
-                        else
-                            mutation.applyUnsafe();
-                    });
-
-                    return;
-                }
-            }
-            else
+            ViewManager.grabViewLocks(mutation.key().getKey(), columnFamilyIds, locks, DatabaseDescriptor.getWriteRpcTimeout());
+            if (!isClReplay)
             {
                 long acquireTime = System.currentTimeMillis() - mutation.viewLockAcquireStart.get();
-                if (!isClReplay)
-                {
-                    for(UUID cfid : mutation.getColumnFamilyIds())
-                    {
-                        columnFamilyStores.get(cfid).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
-                    }
-                }
+                for (UUID cfid : mutation.getColumnFamilyIds())
+                    columnFamilyStores.get(cfid).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
             }
         }
+
         int nowInSec = FBUtilities.nowInSeconds();
         try (OpOrder.Group opGroup = writeOrder.start())
         {
@@ -498,8 +470,11 @@ public class Keyspace
         }
         finally
         {
-            if (lock != null)
-                lock.unlock();
+            if (locks != null)
+            {
+                for (Lock lock : locks)
+                    lock.unlock();
+            }
         }
     }
 
