@@ -25,6 +25,7 @@ import org.apache.cassandra.serializers.SimpleDateSerializer;
 import org.apache.cassandra.serializers.TimeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -32,11 +33,10 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Random;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.Assert.fail;
@@ -999,10 +999,14 @@ public class JsonTest extends CQLTester
         };
 
         ExecutorService executor = Executors.newFixedThreadPool(numThreads);
+        List<Future> futures = new ArrayList<>();
         for (int i = 0; i < numThreads; i++)
-            executor.submit(worker);
+            futures.add(executor.submit(worker));
+
+        for (Future future : futures)
+            future.get(10, TimeUnit.SECONDS);
 
         executor.shutdown();
-        executor.awaitTermination(1, TimeUnit.MINUTES);
+        Assert.assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
     }
 }
