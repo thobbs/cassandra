@@ -83,3 +83,8 @@ BSD 3-clause
 ASM
 (http://asm.ow2.org/)
 Copyright (c) 2000-2011 INRIA, France Telecom
+
+Agrona
+(https://github.com/real-logic/Agrona)
+High performance primitives and utility library.
+Copyright 2014 - 2015 Real Logic Limited

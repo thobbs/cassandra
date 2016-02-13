@@ -68,7 +68,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         }
     }
 
-    public void response(MessageIn<T> message)
+    public void response(MessageIn<T> message, int id)
     {
         String dataCenter = message == null
                             ? DatabaseDescriptor.getLocalDataCenter()

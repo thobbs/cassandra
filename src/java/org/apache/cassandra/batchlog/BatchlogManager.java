@@ -477,11 +477,11 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
 
             @Override
-            public void response(MessageIn<T> m)
+            public void response(MessageIn<T> m, int id)
             {
                 boolean removed = undelivered.remove(m == null ? FBUtilities.getBroadcastAddress() : m.from);
                 assert removed;
-                super.response(m);
+                super.response(m, id);
             }
         }
     }

@@ -207,13 +207,13 @@ final class HintsDispatcher implements AutoCloseable
             return timedOut ? Outcome.TIMEOUT : outcome;
         }
 
-        public void onFailure(InetAddress from)
+        public void onFailure(InetAddress from, int id)
         {
             outcome = Outcome.FAILURE;
             condition.signalAll();
         }
 
-        public void response(MessageIn msg)
+        public void response(MessageIn msg, int id)
         {
             outcome = Outcome.SUCCESS;
             condition.signalAll();

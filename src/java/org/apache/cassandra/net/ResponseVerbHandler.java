@@ -44,13 +44,13 @@ public class ResponseVerbHandler implements IVerbHandler
         IAsyncCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
-            ((IAsyncCallbackWithFailure) cb).onFailure(message.from);
+            ((IAsyncCallbackWithFailure) cb).onFailure(message.from, id);
         }
         else
         {
             //TODO: Should we add latency only in success cases?
             MessagingService.instance().maybeAddLatency(cb, message.from, latency);
-            cb.response(message);
+            cb.response(message, id);
         }
     }
 }

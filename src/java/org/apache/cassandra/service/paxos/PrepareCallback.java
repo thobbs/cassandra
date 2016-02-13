@@ -22,7 +22,6 @@ package org.apache.cassandra.service.paxos;
 
 
 import java.net.InetAddress;
-import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -56,7 +55,7 @@ public class PrepareCallback extends AbstractPaxosCallback<PrepareResponse>
         mostRecentInProgressCommitWithUpdate = Commit.emptyCommit(key, metadata);
     }
 
-    public synchronized void response(MessageIn<PrepareResponse> message)
+    public synchronized void response(MessageIn<PrepareResponse> message, int id)
     {
         PrepareResponse response = message.payload;
         logger.debug("Prepare response {} from {}", response, message.from);

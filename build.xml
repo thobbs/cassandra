@@ -408,6 +408,7 @@
           <dependency groupId="org.mindrot" artifactId="jbcrypt" version="0.3m" />
           <dependency groupId="io.airlift" artifactId="airline" version="0.6" />
           <dependency groupId="io.netty" artifactId="netty-all" version="4.0.23.Final" />
+          <dependency groupId="uk.co.real-logic" artifactId="Agrona" version="0.4.11" />
           <dependency groupId="com.google.code.findbugs" artifactId="jsr305" version="2.0.2" />
           <dependency groupId="com.clearspring.analytics" artifactId="stream" version="2.5.2" />
           <dependency groupId="com.datastax.cassandra" artifactId="cassandra-driver-core" version="3.0.0" classifier="shaded" />
@@ -569,6 +570,7 @@
         <dependency groupId="com.github.jbellis" artifactId="jamm"/>
 
         <dependency groupId="io.netty" artifactId="netty-all"/>
+        <dependency groupId="uk.co.real-logic" artifactId="Agrona"/>
         <dependency groupId="joda-time" artifactId="joda-time"/>
         <dependency groupId="org.fusesource" artifactId="sigar"/>
         <dependency groupId="org.eclipse.jdt.core.compiler" artifactId="ecj"/>

@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.util.Collection;
 import java.util.EnumSet;
@@ -85,7 +84,7 @@ class MigrationTask extends WrappedRunnable
         IAsyncCallback<Collection<Mutation>> cb = new IAsyncCallback<Collection<Mutation>>()
         {
             @Override
-            public void response(MessageIn<Collection<Mutation>> message)
+            public void response(MessageIn<Collection<Mutation>> message, int id)
             {
                 try
                 {

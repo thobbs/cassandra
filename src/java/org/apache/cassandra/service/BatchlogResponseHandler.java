@@ -46,9 +46,9 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         return wrapped.ackCount();
     }
 
-    public void response(MessageIn<T> msg)
+    public void response(MessageIn<T> msg, int id)
     {
-        wrapped.response(msg);
+        wrapped.response(msg, id);
         if (requiredBeforeFinishUpdater.decrementAndGet(this) == 0)
             cleanup.run();
     }
@@ -58,9 +58,9 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         return wrapped.isLatencyForSnitch();
     }
 
-    public void onFailure(InetAddress from)
+    public void onFailure(InetAddress from, int id)
     {
-        wrapped.onFailure(from);
+        wrapped.onFailure(from, id);
     }
 
     public void assureSufficientLiveNodes()
