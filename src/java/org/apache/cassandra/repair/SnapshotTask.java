@@ -65,15 +65,16 @@ public class SnapshotTask extends AbstractFuture<InetAddress> implements Runnabl
          * When we received response from the node,
          *
          * @param msg response received.
+         * @param id
          */
-        public void response(MessageIn msg)
+        public void response(MessageIn msg, int id)
         {
             task.set(task.endpoint);
         }
 
         public boolean isLatencyForSnitch() { return false; }
 
-        public void onFailure(InetAddress from)
+        public void onFailure(InetAddress from, int id)
         {
             //listener.failedSnapshot();
             task.setException(new RuntimeException("Could not create snapshot at " + from));

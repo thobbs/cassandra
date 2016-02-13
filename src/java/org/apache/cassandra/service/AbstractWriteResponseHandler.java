@@ -31,7 +31,6 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.net.IAsyncCallback;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -139,7 +138,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected abstract int ackCount();
 
     /** null message means "response from local write" */
-    public abstract void response(MessageIn<T> msg);
+    public abstract void response(MessageIn<T> msg, int id);
 
     public void assureSufficientLiveNodes() throws UnavailableException
     {
@@ -154,7 +153,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     }
 
     @Override
-    public void onFailure(InetAddress from)
+    public void onFailure(InetAddress from, int id)
     {
         logger.trace("Got failure from {}", from);
 

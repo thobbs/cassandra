@@ -147,7 +147,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
         return blockfor;
     }
 
-    public void response(MessageIn<ReadResponse> message)
+    public void response(MessageIn<ReadResponse> message, int id)
     {
         resolver.preprocess(message);
         int n = waitingFor(message.from)
@@ -194,7 +194,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                                                            MessagingService.Verb.INTERNAL_RESPONSE,
                                                            MessagingService.current_version,
                                                            MessageIn.createTimestamp());
-        response(message);
+        response(message, -1);
     }
 
     public void assureSufficientLiveNodes() throws UnavailableException
@@ -249,7 +249,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     }
 
     @Override
-    public void onFailure(InetAddress from)
+    public void onFailure(InetAddress from, int id)
     {
         int n = waitingFor(from)
               ? failuresUpdater.incrementAndGet(this)

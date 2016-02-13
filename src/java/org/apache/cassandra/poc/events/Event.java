@@ -15,15 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.net;
+package org.apache.cassandra.poc.events;
 
-import java.net.InetAddress;
+import org.apache.cassandra.poc.Task;
 
-public interface IAsyncCallbackWithFailure<T> extends IAsyncCallback<T>
+public interface Event
 {
-
-    /**
-     * Called when there is an exception on the remote node or timeout happens
-     */
-    void onFailure(InetAddress from, int id);
+    Task task();
 }

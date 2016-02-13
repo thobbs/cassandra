@@ -72,8 +72,6 @@ import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
 
-import static com.google.common.collect.Iterables.contains;
-
 public class StorageProxy implements StorageProxyMBean
 {
     public static final String MBEAN_NAME = "org.apache.cassandra.db:type=StorageProxy";
@@ -556,13 +554,13 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     PaxosState.commit(message.payload);
                     if (responseHandler != null)
-                        responseHandler.response(null);
+                        responseHandler.response(null, -1);
                 }
                 catch (Exception ex)
                 {
                     if (!(ex instanceof WriteTimeoutException))
                         logger.error("Failed to apply paxos commit locally : {}", ex);
-                    responseHandler.onFailure(FBUtilities.getBroadcastAddress());
+                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), -1);
                 }
             }
 
@@ -996,7 +994,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (OverloadedException | WriteTimeoutException e)
             {
-                wrapper.handler.onFailure(FBUtilities.getBroadcastAddress());
+                wrapper.handler.onFailure(FBUtilities.getBroadcastAddress(), -1);
             }
         }
     }
@@ -1341,13 +1339,13 @@ public class StorageProxy implements StorageProxyMBean
                 try
                 {
                     runnable.run();
-                    handler.response(null);
+                    handler.response(null, -1);
                 }
                 catch (Exception ex)
                 {
                     if (!(ex instanceof WriteTimeoutException))
                         logger.error("Failed to apply mutation locally : {}", ex);
-                    handler.onFailure(FBUtilities.getBroadcastAddress());
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), -1);
                 }
             }
 
@@ -1467,7 +1465,7 @@ public class StorageProxy implements StorageProxyMBean
                 assert mutation instanceof CounterMutation;
 
                 Mutation result = ((CounterMutation) mutation).applyCounterMutation();
-                responseHandler.response(null);
+                responseHandler.response(null, -1);
 
                 Set<InetAddress> remotes = Sets.difference(ImmutableSet.copyOf(targets),
                                                            ImmutableSet.of(FBUtilities.getBroadcastAddress()));
@@ -1806,14 +1804,14 @@ public class StorageProxy implements StorageProxyMBean
                 else
                 {
                     MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
-                    handler.onFailure(FBUtilities.getBroadcastAddress());
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), -1);
                 }
 
                 MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
             }
             catch (Throwable t)
             {
-                handler.onFailure(FBUtilities.getBroadcastAddress());
+                handler.onFailure(FBUtilities.getBroadcastAddress(), -1);
                 if (t instanceof TombstoneOverwhelmingException)
                     logger.error(t.getMessage());
                 else
@@ -2185,7 +2183,7 @@ public class StorageProxy implements StorageProxyMBean
 
         IAsyncCallback<UUID> cb = new IAsyncCallback<UUID>()
         {
-            public void response(MessageIn<UUID> message)
+            public void response(MessageIn<UUID> message, int id)
             {
                 // record the response from the remote node.
                 versions.put(message.from, message.payload);
@@ -2430,9 +2428,9 @@ public class StorageProxy implements StorageProxyMBean
             viewWriteMetrics.viewReplicasAttempted.inc(totalEndpoints());
         }
 
-        public void response(MessageIn<IMutation> msg)
+        public void response(MessageIn<IMutation> msg, int id)
         {
-            super.response(msg);
+            super.response(msg, id);
             viewWriteMetrics.viewReplicasSuccess.inc();
         }
     }
@@ -2631,7 +2629,7 @@ public class StorageProxy implements StorageProxyMBean
                 validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
                 // Notify the handler only for CL == ANY
                 if (responseHandler != null && responseHandler.consistencyLevel == ConsistencyLevel.ANY)
-                    responseHandler.response(null);
+                    responseHandler.response(null, -1);
             }
         };
 

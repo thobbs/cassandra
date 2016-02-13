@@ -63,7 +63,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
         this(endpoint, writeType, null);
     }
 
-    public void response(MessageIn<T> m)
+    public void response(MessageIn<T> m, int id)
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();

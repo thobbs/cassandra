@@ -39,7 +39,7 @@ public class AsyncRepairCallback implements IAsyncCallback<ReadResponse>
         this.blockfor = blockfor;
     }
 
-    public void response(MessageIn<ReadResponse> message)
+    public void response(MessageIn<ReadResponse> message, int id)
     {
         repairResolver.preprocess(message);
         if (received.incrementAndGet() == blockfor)

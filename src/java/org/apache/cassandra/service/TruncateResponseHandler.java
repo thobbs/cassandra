@@ -66,7 +66,7 @@ public class TruncateResponseHandler implements IAsyncCallback
         }
     }
 
-    public void response(MessageIn message)
+    public void response(MessageIn message, int id)
     {
         responses.incrementAndGet();
         if (responses.get() >= responseCount)
