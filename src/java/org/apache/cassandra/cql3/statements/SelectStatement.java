@@ -23,6 +23,7 @@ import java.util.*;
 import com.google.common.base.Objects;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.db.marshal.UserType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,7 +47,6 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.View;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.ClientState;
@@ -755,13 +755,14 @@ public class SelectStatement implements CQLStatement
     {
         if (def.isComplex())
         {
-            // Collections are the only complex types we have so far
-            assert def.type.isCollection() && def.type.isMultiCell();
+            assert def.type.isMultiCell();
             ComplexColumnData complexData = row.getComplexColumnData(def);
             if (complexData == null)
-                result.add((ByteBuffer)null);
+                result.add(null);
+            else if (def.type.isCollection())
+                result.add(((CollectionType) def.type).serializeForNativeProtocol(def, complexData.iterator(), protocolVersion));
             else
-                result.add(((CollectionType)def.type).serializeForNativeProtocol(def, complexData.iterator(), protocolVersion));
+                result.add(((UserType) def.type).serializeForNativeProtocol(complexData.iterator()));
         }
         else
         {
@@ -869,7 +870,7 @@ public class SelectStatement implements CQLStatement
                                                  whereClause,
                                                  boundNames,
                                                  selection.containsOnlyStaticColumns(),
-                                                 selection.containsACollection(),
+                                                 selection.containsAComplexColumn(),
                                                  parameters.allowFiltering,
                                                  forView);
             }

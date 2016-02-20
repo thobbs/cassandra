@@ -204,6 +204,27 @@ public abstract class CollectionType<T> extends AbstractType<T>
     }
 
     @Override
+    public boolean equals(Object o, boolean ignoreFreezing)
+    {
+        if (this == o)
+            return true;
+
+        if (!(o instanceof CollectionType))
+            return false;
+
+        CollectionType other = (CollectionType)o;
+
+        if (kind != other.kind)
+            return false;
+
+        if (!ignoreFreezing && isMultiCell() != other.isMultiCell())
+            return false;
+
+        return nameComparator().equals(other.nameComparator(), ignoreFreezing) &&
+               valueComparator().equals(other.valueComparator(), ignoreFreezing);
+    }
+
+    @Override
     public String toString()
     {
         return this.toString(false);

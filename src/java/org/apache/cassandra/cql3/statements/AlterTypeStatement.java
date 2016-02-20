@@ -167,11 +167,11 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
 
             // If it's directly the type we've updated, then just use the new one.
             if (keyspace.equals(ut.keyspace) && toReplace.equals(ut.name))
-                return updated;
+                return type.isMultiCell() ? updated : updated.freeze();
 
             // Otherwise, check for nesting
             List<AbstractType<?>> updatedTypes = updateTypes(ut.fieldTypes(), keyspace, toReplace, updated);
-            return updatedTypes == null ? null : new UserType(ut.keyspace, ut.name, new ArrayList<>(ut.fieldNames()), updatedTypes);
+            return updatedTypes == null ? null : new UserType(ut.keyspace, ut.name, new ArrayList<>(ut.fieldNames()), updatedTypes, type.isMultiCell());
         }
         else if (type instanceof TupleType)
         {
@@ -267,7 +267,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             newTypes.addAll(toUpdate.fieldTypes());
             newTypes.add(addType);
 
-            return new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes);
+            return new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes, toUpdate.isMultiCell());
         }
 
         private UserType doAlter(UserType toUpdate) throws InvalidRequestException
@@ -284,7 +284,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
             List<AbstractType<?>> newTypes = new ArrayList<>(toUpdate.fieldTypes());
             newTypes.set(idx, type.prepare(keyspace()).getType());
 
-            return new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes);
+            return new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes, toUpdate.isMultiCell());
         }
 
         protected UserType makeUpdatedType(UserType toUpdate) throws InvalidRequestException
@@ -318,7 +318,7 @@ public abstract class AlterTypeStatement extends SchemaAlteringStatement
                 newNames.set(idx, to.bytes);
             }
 
-            UserType updated = new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes);
+            UserType updated = new UserType(toUpdate.keyspace, toUpdate.name, newNames, newTypes, toUpdate.isMultiCell());
             CreateTypeStatement.checkForDuplicateNames(updated);
             return updated;
         }

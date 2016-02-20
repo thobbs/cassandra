@@ -28,6 +28,7 @@ import com.google.common.base.Objects;
 
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -51,9 +52,19 @@ public class TupleType extends AbstractType<ByteBuffer>
 
     public TupleType(List<AbstractType<?>> types)
     {
+        this(types, true);
+    }
+
+    protected TupleType(List<AbstractType<?>> types, boolean freezeInner)
+    {
         super(ComparisonType.CUSTOM);
         for (int i = 0; i < types.size(); i++)
-            types.set(i, types.get(i).freeze());
+        {
+            AbstractType<?> type = types.get(i);
+            if (freezeInner)
+                type = type.freeze();
+            types.set(i, type);
+        }
         this.types = types;
     }
 
@@ -123,11 +134,22 @@ public class TupleType extends AbstractType<ByteBuffer>
                 return cmp;
         }
 
-        if (bb1.remaining() == 0)
-            return bb2.remaining() == 0 ? 0 : -1;
+        // handle trailing nulls
+        while (bb1.remaining() > 0)
+        {
+            int size = bb1.getInt();
+            if (size > 0) // non-null
+                return 1;
+        }
 
-        // bb1.remaining() > 0 && bb2.remaining() == 0
-        return 1;
+        while (bb2.remaining() > 0)
+        {
+            int size = bb2.getInt();
+            if (size > 0) // non-null
+                return -1;
+        }
+
+        return 0;
     }
 
     @Override
@@ -176,6 +198,15 @@ public class TupleType extends AbstractType<ByteBuffer>
             int size = input.getInt();
             components[i] = size < 0 ? null : ByteBufferUtil.readBytes(input, size);
         }
+
+        // error out if we got more values in the tuple/UDT than we expected
+        if (input.hasRemaining())
+        {
+            throw new InvalidRequestException(String.format(
+                    "Expected %s %s for %s column, but got more",
+                    size(), size() == 1 ? "value" : "values", this.asCQL3Type()));
+        }
+
         return components;
     }
 
@@ -205,6 +236,9 @@ public class TupleType extends AbstractType<ByteBuffer>
     @Override
     public String getString(ByteBuffer value)
     {
+        if (value == null)
+            return "null";
+
         StringBuilder sb = new StringBuilder();
         ByteBuffer input = value.duplicate();
         for (int i = 0; i < size(); i++)
