@@ -35,6 +35,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.ViewManager;
@@ -45,12 +46,14 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
+import org.apache.cassandra.poc.WriteTask;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -543,6 +546,71 @@ public class Keyspace
                     lock.unlock();
             }
         }
+    }
+
+    public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(final Mutation mutation,
+                                                                   int serializedSize,
+                                                                   final boolean writeCommitLog,
+                                                                   boolean updateIndexes,
+                                                                   boolean isClReplay,
+                                                                   WriteTask writeTask)
+    {
+        // TODO handle MVs
+        assert !(updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false));
+
+        OpOrder.Group opGroup = writeOrder.start();
+        try
+        {
+            // write the mutation to the commitlog and memtables
+            ReplayPosition replayPosition = null;
+            if (writeCommitLog)
+            {
+                Tracing.trace("Appending to commitlog");
+                replayPosition = CommitLog.instance.addAsync(mutation, serializedSize, writeTask);
+                // replayPosition will be null if we would have had to block
+            }
+            return Pair.create(replayPosition, opGroup);
+        }
+        catch (Throwable exc)
+        {
+            opGroup.close();
+            throw exc;
+        }
+    }
+
+    public WriteTask.MemtableApplyState applyPartitionUpdateToMemtableAsync(PartitionUpdate update, OpOrder.Group opGroup,
+                                                                            ReplayPosition replayPosition, int nowInSec, WriteTask writeTask)
+    {
+        CFMetaData cfm = update.metadata();
+        ColumnFamilyStore cfs = columnFamilyStores.get(cfm.cfId);
+        if (cfs == null)
+        {
+            // TODO error handling?
+            logger.error("Attempting to mutate non-existant table {} ({}.{})", cfm.cfId, cfm.ksName, cfm.cfName);
+            return null;
+        }
+
+        // TODO ensure tracing can't do blocking IO
+        Tracing.trace("Adding to {} memtable", update.metadata().cfName);
+
+        // TODO assume updateIndexes is true here?
+        UpdateTransaction indexTransaction = cfs.indexManager.newUpdateTransaction(update, opGroup, nowInSec);
+        WriteTask.MemtableApplyState state = cfs.applyAsync(update, indexTransaction, opGroup, replayPosition, writeTask);
+
+        // If state is not null, we would have blocked trying to acquire the memtable partition pessimistic lock,
+        // and we need to defer to the event loop.  This is the state needed to resume after lock acquisition.
+        if (state != null)
+            state.setIndexTransaction(indexTransaction);
+
+        return state;
+    }
+
+    public void resumeMemtableApply(PartitionUpdate update, long startTime, Memtable memtable, AtomicBTreePartition partition,
+                                    OpOrder.Group opGroup, UpdateTransaction indexTransaction, WriteTask writeTask)
+    {
+        CFMetaData cfm = update.metadata();
+        ColumnFamilyStore cfs = columnFamilyStores.get(cfm.cfId);
+        cfs.resumeApply(update, startTime, memtable, partition, indexTransaction, opGroup, writeTask);
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

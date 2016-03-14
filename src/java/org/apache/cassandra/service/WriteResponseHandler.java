@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,20 +48,17 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
                                 ConsistencyLevel consistencyLevel,
                                 Keyspace keyspace,
                                 Runnable callback,
-                                WriteType writeType)
+                                WriteType writeType,
+                                WriteTask writeTask)
     {
-        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType);
+        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, writeTask);
         responses = totalBlockFor();
-    }
-
-    public WriteResponseHandler(InetAddress endpoint, WriteType writeType, Runnable callback)
-    {
-        this(Arrays.asList(endpoint), Collections.<InetAddress>emptyList(), ConsistencyLevel.ONE, null, callback, writeType);
     }
 
     public WriteResponseHandler(InetAddress endpoint, WriteType writeType)
     {
-        this(endpoint, writeType, null);
+        this(Collections.singleton(endpoint), Collections.<InetAddress>emptyList(), ConsistencyLevel.ONE, null, null, writeType, null);
+        assert writeType == WriteType.COUNTER;
     }
 
     public void response(MessageIn<T> m, int id)

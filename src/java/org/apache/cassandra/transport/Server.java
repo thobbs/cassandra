@@ -18,6 +18,7 @@
 package org.apache.cassandra.transport;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
@@ -25,16 +26,18 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
 
+import io.netty.channel.*;
+import org.apache.cassandra.poc.EventLoop;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.*;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
@@ -87,6 +90,35 @@ public class Server implements CassandraDaemon.Server
 
     private EventLoopGroup workerGroup;
     private EventExecutor eventExecutorGroup;
+
+    /*
+    static class CassEpollEventLoopGroup extends MultithreadEventLoopGroup
+    {
+        public CassEpollEventLoopGroup() {
+            super(0, null, 128);
+        }
+
+        // TODO
+        public void setIoRatio(int ioRatio) {
+            for (EventExecutor e: children()) {
+                ((EpollEventLoop) e).setIoRatio(ioRatio);
+            }
+        }
+
+        @Override
+        protected EventExecutor newChild(ThreadFactory threadFactory, Object... args) throws Exception {
+            Class klass = Class.forName("io.netty.channel.epoll.EpollEventLoop");
+            Constructor<?> constructor = klass.getDeclaredConstructor(EventLoopGroup.class, ThreadFactory.class, Integer.class);
+            constructor.setAccessible(true);
+            SingleThreadEventLoop eventLoop = (SingleThreadEventLoop) constructor.newInstance(this, threadFactory, args[0]);
+
+            EventLoop cassEventLoop = new EventLoop();
+            cassEventLoop.setNettyExecutor(eventLoop);
+            eventLoop.execute(cassEventLoop::cycle);
+            return eventLoop;
+        }
+    }
+    */
 
     private Server (Builder builder)
     {

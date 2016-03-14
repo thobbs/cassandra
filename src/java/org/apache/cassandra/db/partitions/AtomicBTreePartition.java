@@ -23,6 +23,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -30,6 +32,7 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.poc.WriteTask;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.SearchIterator;
@@ -70,6 +73,8 @@ public class AtomicBTreePartition extends AbstractBTreePartition
     private static final AtomicIntegerFieldUpdater<AtomicBTreePartition> wasteTrackerUpdater = AtomicIntegerFieldUpdater.newUpdater(AtomicBTreePartition.class, "wasteTracker");
     private static final AtomicReferenceFieldUpdater<AtomicBTreePartition, Holder> refUpdater = AtomicReferenceFieldUpdater.newUpdater(AtomicBTreePartition.class, Holder.class, "ref");
 
+    public Lock pessimisticLock;
+
     /**
      * (clock + allocation) granularity are combined to give us an acceptable (waste) allocation rate that is defined by
      * the passage of real time of ALLOCATION_GRANULARITY_BYTES/CLOCK_GRANULARITY, or in this case 7.63Kb/ms, or 7.45Mb/s
@@ -89,6 +94,7 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         super(metadata, partitionKey);
         this.allocator = allocator;
         this.ref = EMPTY;
+        this.pessimisticLock = new ReentrantLock();
     }
 
     protected Holder holder()
@@ -181,6 +187,93 @@ public class AtomicBTreePartition extends AbstractBTreePartition
             indexer.commit();
             if (monitorOwned)
                 Locks.monitorExitUnsafe(this);
+        }
+    }
+
+    public long[] addAllWithSizeDeltaAsync(final PartitionUpdate update, OpOrder.Group writeOp, UpdateTransaction indexer, WriteTask writeTask)
+    {
+        RowUpdater updater = new RowUpdater(this, allocator, writeOp, indexer);
+        DeletionInfo inputDeletionInfoCopy = null;
+        boolean monitorOwned = false;
+        try
+        {
+            if (usePessimisticLocking())
+            {
+                // TODO replace with proper non-blocking lock acquisition
+                monitorOwned = pessimisticLock.tryLock();
+                if (!monitorOwned)
+                {
+                    WriteTask.MemtablePartitionLockAcquiredEvent.createAndEmit(writeTask, this);
+                    return null;
+                }
+            }
+
+            indexer.start();
+
+            while (true)
+            {
+                Holder current = ref;
+                updater.ref = current;
+                updater.reset();
+
+                if (!update.deletionInfo().getPartitionDeletion().isLive())
+                    indexer.onPartitionDeletion(update.deletionInfo().getPartitionDeletion());
+
+                if (update.deletionInfo().hasRanges())
+                    update.deletionInfo().rangeIterator(false).forEachRemaining(indexer::onRangeTombstone);
+
+                DeletionInfo deletionInfo;
+                if (update.deletionInfo().mayModify(current.deletionInfo))
+                {
+                    if (inputDeletionInfoCopy == null)
+                        inputDeletionInfoCopy = update.deletionInfo().copy(HeapAllocator.instance);
+
+                    deletionInfo = current.deletionInfo.mutableCopy().add(inputDeletionInfoCopy);
+                    updater.allocated(deletionInfo.unsharedHeapSize() - current.deletionInfo.unsharedHeapSize());
+                }
+                else
+                {
+                    deletionInfo = current.deletionInfo;
+                }
+
+                PartitionColumns columns = update.columns().mergeTo(current.columns);
+                Row newStatic = update.staticRow();
+                Row staticRow = newStatic.isEmpty()
+                              ? current.staticRow
+                              : (current.staticRow.isEmpty() ? updater.apply(newStatic) : updater.apply(current.staticRow, newStatic));
+                Object[] tree = BTree.update(current.tree, update.metadata().comparator, update, update.rowCount(), updater);
+                EncodingStats newStats = current.stats.mergeWith(update.stats());
+
+                if (tree != null && refUpdater.compareAndSet(this, current, new Holder(columns, tree, deletionInfo, staticRow, newStats)))
+                {
+                    updater.finish();
+                    return new long[]{ updater.dataSize, updater.colUpdateTimeDelta };
+                }
+                else if (!monitorOwned)
+                {
+                    boolean shouldLock = usePessimisticLocking();
+                    if (!shouldLock)
+                    {
+                        shouldLock = updateWastedAllocationTracker(updater.heapSize);
+                    }
+                    if (shouldLock)
+                    {
+                        // TODO replace with proper non-blocking lock acquisition
+                        monitorOwned = pessimisticLock.tryLock();
+                        if (!monitorOwned)
+                        {
+                            WriteTask.MemtablePartitionLockAcquiredEvent.createAndEmit(writeTask, this);
+                            return null;
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            indexer.commit();
+            if (monitorOwned)
+                pessimisticLock.unlock();
         }
     }
 

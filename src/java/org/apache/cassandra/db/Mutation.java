@@ -26,6 +26,10 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.cassandra.db.commitlog.ReplayPosition;
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -226,6 +230,13 @@ public class Mutation implements IMutation
     public void apply()
     {
         apply(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
+    }
+
+    public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(WriteTask writeTask, int serializedSize)
+    {
+        Keyspace keyspace = Keyspace.open(keyspaceName);
+        boolean durableWrites = keyspace.getMetadata().params.durableWrites;
+        return keyspace.writeCommitlogAsync(this, serializedSize, durableWrites, true, false, writeTask);
     }
 
     public void applyUnsafe()

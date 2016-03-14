@@ -37,6 +37,7 @@ import java.util.zip.CRC32;
 
 import com.codahale.metrics.Timer;
 
+import org.apache.cassandra.poc.WriteTask;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 import org.slf4j.Logger;
@@ -404,6 +405,20 @@ public abstract class CommitLogSegment
         }
     }
 
+    void waitForAsync(int position, WriteTask writeTask, Timer waitingOnCommit)
+    {
+        while (lastSyncedOffset < position)
+        {
+            WaitQueue.Signal signal = waitingOnCommit != null ?
+                                      syncComplete.register(waitingOnCommit.time()) :
+                                      syncComplete.register();
+            if (lastSyncedOffset < position)
+                signal.awaitUninterruptibly();
+            else
+                signal.cancel();
+        }
+    }
+
     /**
      * Stop writing to this file, sync and close it. Does nothing if the file is already closed.
      */
@@ -585,7 +600,7 @@ public abstract class CommitLogSegment
      * The constructor leaves the fields uninitialized for population by CommitlogManager, so that it can be
      * stack-allocated by escape analysis in CommitLog.add.
      */
-    static class Allocation
+    public static class Allocation
     {
         private final CommitLogSegment segment;
         private final OpOrder.Group appendOp;
@@ -618,6 +633,11 @@ public abstract class CommitLogSegment
         }
 
         void awaitDiskSync(Timer waitingOnCommit)
+        {
+            segment.waitForSync(position, waitingOnCommit);
+        }
+
+        void awaitDiskAsync(Timer waitingOnCommit, WriteTask writeTask)
         {
             segment.waitForSync(position, waitingOnCommit);
         }

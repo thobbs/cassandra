@@ -25,6 +25,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -248,6 +250,52 @@ public class Memtable implements Comparable<Memtable>
         statsCollector.update(update.stats());
         currentOperations.addAndGet(update.operationCount());
         return pair[1];
+    }
+
+    // TODO replace this terrible nested Pair of return values
+    Pair<Boolean, Pair<AtomicBTreePartition, Long>> putAsync(AtomicBTreePartition previous, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, WriteTask writeTask)
+    {
+        if (previous == null)
+            partitions.get(update.partitionKey());
+
+        long initialSize = 0;
+        if (previous == null)
+        {
+            final DecoratedKey cloneKey = allocator.clone(update.partitionKey(), opGroup);
+            AtomicBTreePartition empty = new AtomicBTreePartition(cfs.metadata, cloneKey, allocator);
+            // We'll add the columns later. This avoids wasting works if we get beaten in the putIfAbsent
+            previous = partitions.putIfAbsent(cloneKey, empty);
+            if (previous == null)
+            {
+                previous = empty;
+                // allocate the row overhead after the fact; this saves over allocating and having to free after, but
+                // means we can overshoot our declared limit.
+                int overhead = (int) (cloneKey.getToken().getHeapSize() + ROW_OVERHEAD_HEAP_SIZE);
+                allocator.onHeap().allocate(overhead, opGroup);
+                initialSize = 8;
+            }
+            else
+            {
+                allocator.reclaimer().reclaimImmediately(cloneKey);
+            }
+        }
+
+        return putAsync2(update, previous, initialSize, indexer, opGroup, writeTask);
+    }
+
+    // TODO real name
+    Pair<Boolean, Pair<AtomicBTreePartition, Long>> putAsync2(PartitionUpdate update, AtomicBTreePartition previous, long initialSize, UpdateTransaction indexer, OpOrder.Group opGroup, WriteTask writeTask)
+    {
+        long[] pair = previous.addAllWithSizeDeltaAsync(update, opGroup, indexer, writeTask);
+        if (pair == null)
+            return Pair.create(false, Pair.create(previous, initialSize));  // blocked on pessimistic lock acquisition, defer to event loop
+
+        minTimestamp = Math.min(minTimestamp, previous.stats().minTimestamp);
+        liveDataSize.addAndGet(initialSize + pair[0]);
+        columnsCollector.update(update.columns());
+        statsCollector.update(update.stats());
+        currentOperations.addAndGet(update.operationCount());
+        return Pair.create(true, Pair.create(previous, pair[1]));
     }
 
     public int partitionCount()

@@ -23,6 +23,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.poc.Task;
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.poc.events.Event;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,6 +50,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final Runnable callback;
     protected final Collection<InetAddress> pendingEndpoints;
     protected final WriteType writeType;
+    protected final WriteTask writeTask;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
         = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
     private volatile int failures = 0;
@@ -59,7 +63,8 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
                                            Collection<InetAddress> pendingEndpoints,
                                            ConsistencyLevel consistencyLevel,
                                            Runnable callback,
-                                           WriteType writeType)
+                                           WriteType writeType,
+                                           WriteTask writeTask)
     {
         this.keyspace = keyspace;
         this.pendingEndpoints = pendingEndpoints;
@@ -68,6 +73,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.naturalEndpoints = naturalEndpoints;
         this.callback = callback;
         this.writeType = writeType;
+        this.writeTask = writeTask;
     }
 
     public void get() throws WriteTimeoutException, WriteFailureException
@@ -147,9 +153,31 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
     protected void signal()
     {
-        condition.signalAll();
-        if (callback != null)
-            callback.run();
+        if (writeTask != null)
+        {
+            int blockedFor = totalBlockFor();
+            int acks = ackCount();
+            Event event;
+            if (blockedFor + failures > totalEndpoints())
+            {
+                event = new WriteTask.WriteTimeoutEvent(writeTask, writeType, consistencyLevel, acks, blockedFor);
+            }
+            else if (totalBlockFor() + failures > totalEndpoints())
+            {
+                event = new WriteTask.WriteFailureEvent(writeTask, writeType, consistencyLevel, acks, blockedFor, failures);
+            }
+            else
+            {
+                event = new WriteTask.WriteSuccessEvent(writeTask);
+            }
+            writeTask.eventLoop().emitEvent(event);
+        }
+        else
+        {
+            condition.signalAll();
+            if (callback != null)
+                callback.run();
+        }
     }
 
     @Override

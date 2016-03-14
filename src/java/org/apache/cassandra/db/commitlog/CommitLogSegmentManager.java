@@ -18,15 +18,7 @@
 package org.apache.cassandra.db.commitlog;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
@@ -36,6 +28,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.*;
+import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,6 +42,8 @@ import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.WrappedRunnable;
+import uk.co.real_logic.agrona.concurrent.ManyToOneConcurrentArrayQueue;
+import uk.co.real_logic.agrona.concurrent.ManyToOneConcurrentLinkedQueue;
 
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 
@@ -75,6 +70,9 @@ public class CommitLogSegmentManager
     private volatile CommitLogSegment allocatingFrom = null;
 
     private final WaitQueue hasAvailableSegments = new WaitQueue();
+
+    // TODO evaluate queue type and size more carefully
+    private final ManyToOneConcurrentArrayQueue<WriteTask> awaitingTasks = new ManyToOneConcurrentArrayQueue<>(1024 * 1024);
 
     /**
      * Tracks commitlog size, in multiples of the segment size.  We need to do this so we can "promise" size
@@ -118,8 +116,10 @@ public class CommitLogSegmentManager
                             {
                                 logger.trace("No segments in reserve; creating a fresh one");
                                 // TODO : some error handling in case we fail to create a new segment
-                                availableSegments.add(CommitLogSegment.createSegment(commitLog));
+                                CommitLogSegment segment = CommitLogSegment.createSegment(commitLog);
+                                availableSegments.add(segment);
                                 hasAvailableSegments.signalAll();
+                                awaitingTasks.drain((writeTask) -> WriteTask.CommitlogSegmentAvailableEvent.createAndEmit(writeTask, segment));
                             }
 
                             // flush old Cfs if we're full
@@ -187,6 +187,32 @@ public class CommitLogSegmentManager
             // failed to allocate, so move to a new segment with enough room
             advanceAllocatingFrom(segment);
             segment = allocatingFrom;
+        }
+
+        return alloc;
+    }
+
+    public Allocation allocateAsync(Mutation mutation, int size, WriteTask writeTask)
+    {
+        CommitLogSegment segment = allocatingFrom;
+        if (segment == null)
+        {
+            segment = advanceAllocatingFromAsync(null, writeTask);
+            if (segment == null)
+                return null;  // yield to event loop, await event
+        }
+        return allocateAsync(mutation, size, segment, writeTask);
+    }
+
+    public Allocation allocateAsync(Mutation mutation, int size, CommitLogSegment segment, WriteTask writeTask)
+    {
+        Allocation alloc;
+        while (null == (alloc = segment.allocate(mutation, size)))
+        {
+            // failed to allocate, so move to a new segment with enough room
+            segment = advanceAllocatingFromAsync(segment, writeTask);
+            if (segment == null)
+                return null;  // yield to event loop, await event
         }
 
         return alloc;
@@ -267,6 +293,71 @@ public class CommitLogSegmentManager
             // after updating allocatingFrom. Can safely block until we are signalled
             // by the allocator that new segments have been published
             signal.awaitUninterruptibly();
+        }
+    }
+
+    /**
+     *  Returns true when a new segment is available, false when we must yield to the event loop for a notification
+     */
+    private CommitLogSegment advanceAllocatingFromAsync(CommitLogSegment old, WriteTask writeTask)
+    {
+        while (true)
+        {
+            CommitLogSegment next;
+            // TODO async lock acquisition
+            synchronized (this)
+            {
+                // do this in a critical section so we can atomically remove from availableSegments and add to allocatingFrom/activeSegments
+                // see https://issues.apache.org/jira/browse/CASSANDRA-6557?focusedCommentId=13874432&page=com.atlassian.jira.plugin.system.issuetabpanels:comment-tabpanel#comment-13874432
+                if (allocatingFrom != old)
+                    return allocatingFrom;
+                next = availableSegments.poll();
+                if (next != null)
+                {
+                    allocatingFrom = next;
+                    activeSegments.add(next);
+                }
+            }
+
+            if (next != null)
+            {
+                if (old != null)
+                {
+                    // Now we can run the user defined command just after switching to the new commit log.
+                    // (Do this here instead of in the recycle call so we can get a head start on the archive.)
+                    // TODO blocking, needs async for TPC
+                    commitLog.archiver.maybeArchive(old);
+
+                    // ensure we don't continue to use the old file; not strictly necessary, but cleaner to enforce it
+                    // TLH: doesn't need special TPC handling
+                    old.discardUnusedTail();
+                }
+
+                // request that the CL be synced out-of-band, as we've finished a segment
+                // TLH: doesn't need special TPC handling, doesn't wait for sync to complete
+                commitLog.requestExtraSync();
+                return next;
+            }
+
+            // no more segments
+            // trigger the management thread; this must occur after registering
+            // the signal to ensure we are woken by any new segment creation
+            // TODO roll manager behavior into queued TPC work?
+            wakeManager();
+
+            // check if the queue has already been added to before waiting on the signal, to catch modifications
+            // that happened prior to registering the signal; *then* check to see if we've been beaten to making the change
+            if (!availableSegments.isEmpty() || allocatingFrom != old)
+            {
+                // if we've been beaten, just stop immediately
+                if (allocatingFrom != old)
+                    return allocatingFrom;
+                // otherwise try again, as there should be an available segment
+                continue;
+            }
+
+            awaitingTasks.add(writeTask);
+            return null;
         }
     }
 

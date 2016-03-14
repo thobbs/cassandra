@@ -17,10 +17,14 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import org.apache.cassandra.poc.WriteTask;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.slf4j.*;
+import uk.co.real_logic.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 
+import java.util.ArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -38,11 +42,15 @@ public abstract class AbstractCommitLogService
 
     // counts of total written, and pending, log messages
     private final AtomicLong written = new AtomicLong(0);
-    protected final AtomicLong pending = new AtomicLong(0);
+    // TODO expose this in a better way
+    public final AtomicLong pending = new AtomicLong(0);
 
     // signal that writers can wait on to be notified of a completed sync
     protected final WaitQueue syncComplete = new WaitQueue();
     protected final Semaphore haveWork = new Semaphore(1);
+
+    // TODO evaluate queue type and size more carefully, replace nasty nested pairs
+    protected final ManyToOneConcurrentArrayQueue<Pair<WriteTask, Pair<Allocation, Long>>> awaitingTasks = new ManyToOneConcurrentArrayQueue<>(1024 * 1024);
 
     final CommitLog commitLog;
     private final String name;
@@ -89,10 +97,26 @@ public abstract class AbstractCommitLogService
 
                         // sync and signal
                         long syncStarted = System.currentTimeMillis();
+
+                        ArrayList<Pair<WriteTask, Allocation>> tasksToNotify = new ArrayList<>();
+                        // drain awaiting tasks that are synced
+                        while (!awaitingTasks.isEmpty())
+                        {
+                            Pair<WriteTask, Pair<Allocation, Long>> pair = awaitingTasks.peek();
+                            if (waitForSyncToCatchUp(pair.right.right))
+                                break;  // sync hasn't caught up yet
+
+
+                            awaitingTasks.poll();
+                            tasksToNotify.add(Pair.create(pair.left, pair.right.left));
+                        }
+
                         commitLog.sync(shutdown);
                         lastSyncedAt = syncStarted;
                         syncComplete.signalAll();
 
+                        for (Pair<WriteTask, Allocation> writeTask : tasksToNotify)
+                            WriteTask.CommitlogSyncCompleteEvent.createAndEmit(writeTask.left, writeTask.right);
 
                         // sleep any time we have left before the next one is due
                         long now = System.currentTimeMillis();
@@ -171,7 +195,28 @@ public abstract class AbstractCommitLogService
         written.incrementAndGet();
     }
 
+    public boolean finishWriteForAsync(Allocation alloc, WriteTask writeTask)
+    {
+        boolean isSynced = maybeWaitForAsync(alloc, writeTask);
+        if (isSynced)
+            written.incrementAndGet();
+        return isSynced;
+    }
+
+    // TODO javadoc
+    protected boolean waitForSyncToCatchUp(long started)
+    {
+        return false;
+    }
+
     protected abstract void maybeWaitForSync(Allocation alloc);
+
+    /**
+     * Returns true if commit log sync is not lagging behind (and the write can be considered durable at this point).
+     * Otherwise, false is returned and a CommitlogSyncCompleteEvent will be emitted to the given WriteTask once
+     * syncing has caught up.
+     */
+    protected abstract boolean maybeWaitForAsync(Allocation alloc, WriteTask writeTask);
 
     /**
      * Sync immediately, but don't block for the sync to cmplete

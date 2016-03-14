@@ -22,6 +22,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.poc.events.Event;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import uk.co.real_logic.agrona.TimerWheel;
 import uk.co.real_logic.agrona.TimerWheel.Timer;
 import uk.co.real_logic.agrona.concurrent.BusySpinIdleStrategy;
@@ -30,6 +33,8 @@ import uk.co.real_logic.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 
 public final class EventLoop implements Runnable
 {
+    private static final Logger logger = LoggerFactory.getLogger(EventLoop.class);
+
     private volatile boolean isRunning = false;
 
     private final ManyToOneConcurrentArrayQueue<Task> newTasks;
@@ -126,8 +131,17 @@ public final class EventLoop implements Runnable
 
     private void handleEvent(Event event)
     {
-        if (event.task().dispatchEvent(this, event) == Task.Status.RESCHEDULED)
-            reschedule(event.task());
+        try
+        {
+            if (event.task().dispatchEvent(this, event) == Task.Status.RESCHEDULED)
+                reschedule(event.task());
+        }
+        catch (Throwable t)
+        {
+            logger.error("Unhandled exception in event loop: {}", t);
+            // JVMStabilityInspector.inspectThrowable(t);
+            System.exit(1);
+        }
     }
 
     private void handleTimeout(Task task, Timer timer)

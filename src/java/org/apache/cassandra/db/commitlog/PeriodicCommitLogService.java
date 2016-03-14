@@ -18,6 +18,8 @@
 package org.apache.cassandra.db.commitlog;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
@@ -29,9 +31,20 @@ class PeriodicCommitLogService extends AbstractCommitLogService
         super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod());
     }
 
+    protected boolean maybeWaitForAsync(CommitLogSegment.Allocation alloc, WriteTask writeTask)
+    {
+        long startedAt = System.currentTimeMillis();
+        if (!waitForSyncToCatchUp(startedAt))
+            return true; // we're synced
+
+        pending.incrementAndGet();
+        awaitingTasks.add(Pair.create(writeTask, Pair.create(alloc, startedAt)));
+        return false;
+    }
+
     protected void maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
-        if (waitForSyncToCatchUp(Long.MAX_VALUE))
+        if (waitForSyncToCatchUp(Long.MAX_VALUE))  // TODO this is always true, so why force a volatile read?  From #3578
         {
             // wait until periodic sync() catches up with its schedule
             long started = System.currentTimeMillis();
@@ -51,7 +64,7 @@ class PeriodicCommitLogService extends AbstractCommitLogService
     /**
      * @return true if sync is currently lagging behind inserts
      */
-    private boolean waitForSyncToCatchUp(long started)
+    protected boolean waitForSyncToCatchUp(long started)
     {
         return started > lastSyncedAt + blockWhenSyncLagsMillis;
     }

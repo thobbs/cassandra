@@ -18,12 +18,22 @@
 package org.apache.cassandra.db.commitlog;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.utils.Pair;
 
 class BatchCommitLogService extends AbstractCommitLogService
 {
     public BatchCommitLogService(CommitLog commitLog)
     {
         super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow());
+    }
+
+    protected boolean maybeWaitForAsync(CommitLogSegment.Allocation alloc, WriteTask writeTask)
+    {
+        pending.incrementAndGet();
+        haveWork.release();
+        awaitingTasks.add(Pair.create(writeTask, Pair.create(alloc, 0L)));
+        return false;
     }
 
     protected void maybeWaitForSync(CommitLogSegment.Allocation alloc)

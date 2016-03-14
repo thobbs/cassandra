@@ -28,6 +28,7 @@ import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -69,7 +70,7 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogSegmentManager allocator;
     public final CommitLogArchiver archiver;
     final CommitLogMetrics metrics;
-    final AbstractCommitLogService executor;
+    public final AbstractCommitLogService executor;
 
     final ICompressor compressor;
     public ParameterizedClass compressorClass;
@@ -250,6 +251,7 @@ public class CommitLog implements CommitLogMBean
         executor.requestExtraSync();
     }
 
+    // TODO only used by tests, update tests for TPC and remove this
     /**
      * Add a Mutation to the commit log.
      *
@@ -294,6 +296,56 @@ public class CommitLog implements CommitLogMBean
 
         executor.finishWriteFor(alloc);
         return alloc.getReplayPosition();
+    }
+
+    public ReplayPosition addAsync(Mutation mutation, int serializedSize, WriteTask writeTask)
+    {
+        assert mutation != null;
+
+        int totalSize = serializedSize + ENTRY_OVERHEAD_SIZE;
+        if (totalSize > MAX_MUTATION_SIZE)
+        {
+            throw new IllegalArgumentException(String.format("Mutation of %s bytes is too large for the maxiumum size of %s",
+                    totalSize, MAX_MUTATION_SIZE));
+        }
+
+        Allocation alloc = allocator.allocateAsync(mutation, totalSize, writeTask);
+        if (alloc == null)
+            return null;  // yield to event loop, wait for event
+
+        return writeToAllocationAndSync(mutation, alloc, serializedSize, writeTask);
+    }
+
+    public ReplayPosition writeToAllocationAndSync(Mutation mutation, Allocation alloc, int serializedSize, WriteTask writeTask)
+    {
+        CRC32 checksum = new CRC32();
+        final ByteBuffer buffer = alloc.getBuffer();
+        try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
+        {
+            // checksummed length
+            dos.writeInt(serializedSize);
+            updateChecksumInt(checksum, serializedSize);
+            buffer.putInt((int) checksum.getValue());
+
+            // checksummed mutation
+            Mutation.serializer.serialize(mutation, dos, MessagingService.current_version);
+            updateChecksum(checksum, buffer, buffer.position() - serializedSize, serializedSize);
+            buffer.putInt((int) checksum.getValue());
+        }
+        catch (IOException e)
+        {
+            throw new FSWriteError(e, alloc.getSegment().getPath());
+        }
+        finally
+        {
+            alloc.markWritten();
+        }
+
+        boolean isSynced = executor.finishWriteForAsync(alloc, writeTask);
+        if (isSynced)
+            return alloc.getReplayPosition();
+        else
+            return null;
     }
 
     /**
