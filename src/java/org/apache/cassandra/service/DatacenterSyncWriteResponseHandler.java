@@ -89,6 +89,20 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         signal();
     }
 
+    public AckResponse localResponse()
+    {
+        String dataCenter = DatabaseDescriptor.getLocalDataCenter();
+        responses.get(dataCenter).getAndDecrement();
+        acks.incrementAndGet();
+
+        for (AtomicInteger i : responses.values())
+        {
+            if (i.get() > 0)
+                return new AckResponse(false, null);
+        }
+        return new AckResponse(true, handleLocalFinalAck());
+    }
+
     protected int ackCount()
     {
         return acks.get();

@@ -54,6 +54,17 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
             cleanup.run();
     }
 
+    public AckResponse localResponse()
+    {
+        AckResponse response = wrapped.localResponse();
+
+        // TODO double check this is the correct behavior
+        if (requiredBeforeFinishUpdater.decrementAndGet(this) == 0)
+            cleanup.run();
+
+        return response;
+    }
+
     public boolean isLatencyForSnitch()
     {
         return wrapped.isLatencyForSnitch();

@@ -37,23 +37,7 @@ public class WriteTask extends Task
 {
     private static final Logger logger = LoggerFactory.getLogger(WriteTask.class);
 
-    enum LocalWriteState {
-        START,
-        WAITING_FOR_COMMITLOG,
-        FAILED,
-        COMPLETED
-    }
-
-    enum RemoteWriteState {
-        START,
-        WAITING_FOR_RESPONSES,
-        FAILED,
-        COMPLETED
-    }
-
     private EventLoop eventLoop;
-    private LocalWriteState localWriteState;
-    private RemoteWriteState remoteWriteState;
 
     private long startTime;
     private int nowInSec;
@@ -78,8 +62,6 @@ public class WriteTask extends Task
     public void initialize(EventLoop eventLoop)
     {
         this.eventLoop = eventLoop;
-        this.localWriteState = LocalWriteState.START;
-        this.remoteWriteState = RemoteWriteState.START;
 
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
         startTime = System.nanoTime();
@@ -115,7 +97,6 @@ public class WriteTask extends Task
         MessageOut<Mutation> message = null;
 
         boolean insertLocal = false;
-        boolean insertRemote = false;
         ArrayList<InetAddress> endpointsToHint = null;
 
         for (InetAddress destination : targets)
@@ -133,8 +114,6 @@ public class WriteTask extends Task
                 else
                 {
                     // belongs on a different server
-                    insertRemote = true;
-
                     if (message == null)
                         message = mutation.createMessage();
                     String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(destination);
@@ -169,14 +148,11 @@ public class WriteTask extends Task
             }
         }
 
-        if (insertRemote)
-            remoteWriteState = RemoteWriteState.WAITING_FOR_RESPONSES;
-        else
-            remoteWriteState = RemoteWriteState.COMPLETED;
-
         // TODO submitting hints
         // if (endpointsToHint != null)
         //     submitHint(mutation, endpointsToHint, responseHandler);
+
+        Status mutStatus = Status.REGULAR;
 
         // write locally
         if (insertLocal)
@@ -191,15 +167,10 @@ public class WriteTask extends Task
             if (replayPosition == null)
             {
                 // we are either waiting on commitlog allocation or syncing
-                localWriteState = LocalWriteState.WAITING_FOR_COMMITLOG;
                 return;
             }
 
-            applyToMemtable();
-        }
-        else
-        {
-            localWriteState = LocalWriteState.COMPLETED;
+            mutStatus = applyToMemtable();
         }
 
         // write to remote DCs
@@ -213,7 +184,7 @@ public class WriteTask extends Task
                 StorageProxy.sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
         }
 
-        status = currentStatus();
+        status = mutStatus;
     }
 
     private boolean checkForUnavailable()
@@ -225,7 +196,6 @@ public class WriteTask extends Task
         catch (UnavailableException exc)
         {
             error = exc;
-            remoteWriteState = RemoteWriteState.FAILED;
             status = Status.COMPLETED;
             return true;
         }
@@ -241,7 +211,6 @@ public class WriteTask extends Task
                     "Too many in flight hints: " + StorageMetrics.totalHintsInProgress.getCount() +
                             " destination: " + destination +
                             " destination hints: " + StorageProxy.getHintsInProgressFor(destination).get());
-            remoteWriteState = RemoteWriteState.FAILED;
             status = Status.COMPLETED;
             return true;
         }
@@ -252,31 +221,15 @@ public class WriteTask extends Task
     private Status applyToMemtable()
     {
         mutation.applyToMemtable(opGroup, replayPosition, nowInSec);
-        localWriteState = LocalWriteState.COMPLETED;
         AbstractWriteResponseHandler.AckResponse ackResponse = responseHandler.localResponse();
         if (ackResponse.complete)
         {
-            if (ackResponse.exc == null)
-            {
-                remoteWriteState = RemoteWriteState.COMPLETED;
-            }
-            else
-            {
+            if (ackResponse.exc != null)
                 error = ackResponse.exc;
-                remoteWriteState = RemoteWriteState.FAILED;
-            }
             return Status.COMPLETED;
         }
 
         return Status.REGULAR;
-    }
-
-    private Status currentStatus()
-    {
-        return ((localWriteState == LocalWriteState.COMPLETED || localWriteState == LocalWriteState.FAILED) &&
-                (remoteWriteState == RemoteWriteState.COMPLETED || remoteWriteState == RemoteWriteState.FAILED))
-               ? Status.COMPLETED
-               : Status.REGULAR;
     }
 
     public Status resume(EventLoop eventLoop)
@@ -292,15 +245,13 @@ public class WriteTask extends Task
         {
             // we've gotten acks on all writes
             StorageProxy.writeMetrics.addNano(System.nanoTime() - startTime);
-            remoteWriteState = RemoteWriteState.COMPLETED;
-            return currentStatus();
+            return Status.COMPLETED;
         }
         else if (event instanceof WriteTimeoutEvent)
         {
             WriteTimeoutEvent wte = (WriteTimeoutEvent) event;
             error = new WriteTimeoutException(wte.writeType, wte.consistencyLevel, wte.acks, wte.blockedFor);
             StorageProxy.writeMetrics.timeouts.mark();
-            remoteWriteState = RemoteWriteState.FAILED;
             return Status.COMPLETED;
         }
         else if (event instanceof WriteFailureEvent)
@@ -308,7 +259,6 @@ public class WriteTask extends Task
             WriteFailureEvent wfe = (WriteFailureEvent) event;
             error = new WriteFailureException(wfe.consistencyLevel, wfe.acks, wfe.failures, wfe.blockedFor, wfe.writeType);
             StorageProxy.writeMetrics.failures.mark();
-            remoteWriteState = RemoteWriteState.FAILED;
             return Status.COMPLETED;
         }
         else if (event instanceof CommitlogSegmentAvailableEvent)
@@ -323,8 +273,7 @@ public class WriteTask extends Task
             if (replayPosition == null)
                 return Status.REGULAR;  // commitlog sync would have blocked, wait for CommitlogSyncCompleteEvent
 
-            applyToMemtable();
-            return currentStatus();
+            return applyToMemtable();
         }
         else if (event instanceof CommitlogSyncCompleteEvent)
         {
@@ -332,8 +281,7 @@ public class WriteTask extends Task
             CommitLog.instance.executor.pending.decrementAndGet();
             CommitLogSegment.Allocation allocation = ((CommitlogSyncCompleteEvent) event).allocation;
             replayPosition = allocation.getReplayPosition();
-            applyToMemtable();
-            return currentStatus();
+            return applyToMemtable();
         }
         else
         {
