@@ -19,7 +19,6 @@ package org.apache.cassandra.db.commitlog;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.poc.WriteTask;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 class PeriodicCommitLogService extends AbstractCommitLogService
@@ -38,7 +37,7 @@ class PeriodicCommitLogService extends AbstractCommitLogService
             return true; // we're synced
 
         pending.incrementAndGet();
-        awaitingTasks.add(Pair.create(writeTask, Pair.create(alloc, startedAt)));
+        awaitingTasks.add(new TaskAwaitingSync(writeTask, alloc, startedAt));
         return false;
     }
 

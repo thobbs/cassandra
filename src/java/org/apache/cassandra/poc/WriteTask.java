@@ -9,9 +9,14 @@ import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.WriteFailureException;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.poc.events.Event;
@@ -35,7 +40,6 @@ public class WriteTask extends Task
     enum LocalWriteState {
         START,
         WAITING_FOR_COMMITLOG,
-        WAITING_FOR_MEMTABLE,
         FAILED,
         COMPLETED
     }
@@ -50,18 +54,16 @@ public class WriteTask extends Task
     private EventLoop eventLoop;
     private LocalWriteState localWriteState;
     private RemoteWriteState remoteWriteState;
+
     private long startTime;
-    private Iterator<PartitionUpdate> updateIterator;
     private int nowInSec;
+    private AbstractWriteResponseHandler<IMutation> responseHandler;
     private OpOrder.Group opGroup;
     private ReplayPosition replayPosition;
     private Mutation mutation;
     private int serializedSize;
-    private CommitLogSegment.Allocation allocation;
 
-    // in-flight partition update
-    private PartitionUpdate currentUpdate;
-    private MemtableApplyState memtableApplyState;
+    private Exception error;
 
     // TODO where do these get set?
     public Collection<? extends IMutation> mutations = Collections.EMPTY_LIST;
@@ -78,7 +80,6 @@ public class WriteTask extends Task
         this.eventLoop = eventLoop;
         this.localWriteState = LocalWriteState.START;
         this.remoteWriteState = RemoteWriteState.START;
-
 
         final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
         startTime = System.nanoTime();
@@ -97,12 +98,12 @@ public class WriteTask extends Task
         List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
         Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
 
-        AbstractWriteResponseHandler<IMutation> responseHandler = replicationStrategy.getWriteResponseHandler(
+        responseHandler = replicationStrategy.getWriteResponseHandler(
                 naturalEndpoints, pendingEndpoints, consistencyLevel, null, wt, this);
 
-        // TODO better err handling here
         // exit early if we can't fulfill the CL at this time
-        responseHandler.assureSufficientLiveNodes();
+        if (checkForUnavailable())
+            return;
 
         Iterable<InetAddress> targets = Iterables.concat(naturalEndpoints, pendingEndpoints);
 
@@ -120,8 +121,8 @@ public class WriteTask extends Task
         for (InetAddress destination : targets)
         {
             logger.warn("#### processing target {}", destination);
-            // TODO check for hint overload
-            // checkHintOverload(destination);
+            if (checkForHintOverload(destination))
+                return;
 
             if (FailureDetector.instance.isAlive(destination))
             {
@@ -177,83 +178,103 @@ public class WriteTask extends Task
         // if (endpointsToHint != null)
         //     submitHint(mutation, endpointsToHint, responseHandler);
 
+        // write locally
         if (insertLocal)
         {
-            logger.warn("#### starting local insert");
-            try
-            {
-                // begin StorageProxy.performLocally() behavior
-                nowInSec = FBUtilities.nowInSeconds();
-                serializedSize = (int) Mutation.serializer.serializedSize(mutation, MessagingService.current_version);
-                logger.warn("#### writing to commitlog");
-                Pair<ReplayPosition, OpOrder.Group> pair = mutation.writeCommitlogAsync(this, serializedSize);
-                logger.warn("#### done writing to commitlog");
-                replayPosition = pair.left;
-                opGroup = pair.right;
+            // begin StorageProxy.performLocally() behavior
+            nowInSec = FBUtilities.nowInSeconds();
+            serializedSize = (int) Mutation.serializer.serializedSize(mutation, MessagingService.current_version);
+            Pair<ReplayPosition, OpOrder.Group> pair = mutation.writeCommitlogAsync(this, serializedSize);
+            replayPosition = pair.left;
+            opGroup = pair.right;
 
-                if (replayPosition == null)
-                {
-                    // we are either waiting on commitlog allocation or syncing
-                    localWriteState = LocalWriteState.WAITING_FOR_COMMITLOG;
-                    logger.warn("#### waiting for commitlog");
-                    return;
-                }
-            }
-            catch (Exception exc)
+            if (replayPosition == null)
             {
-                logger.error("#### ", exc);
-                throw exc;
+                // we are either waiting on commitlog allocation or syncing
+                localWriteState = LocalWriteState.WAITING_FOR_COMMITLOG;
+                return;
             }
 
-            logger.warn("#### going to apply to memtable");
             applyToMemtable();
-            logger.warn("#### done applying to memtable");
         }
         else
         {
             localWriteState = LocalWriteState.COMPLETED;
         }
 
-        // TODO non-local DC writes
-        // if (dcGroups != null)
-        // {
-        //     // for each datacenter, send the message to one node to relay the write to other replicas
-        //     if (message == null)
-        //         message = mutation.createMessage();
+        // write to remote DCs
+        if (dcGroups != null)
+        {
+            // for each datacenter, send the message to one node to relay the write to other replicas
+            if (message == null)
+                message = mutation.createMessage();
 
-        //     for (Collection<InetAddress> dcTargets : dcGroups.values())
-        //         sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
-        // }
+            for (Collection<InetAddress> dcTargets : dcGroups.values())
+                StorageProxy.sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
+        }
 
         status = currentStatus();
     }
 
-    private void applyToMemtable()
+    private boolean checkForUnavailable()
     {
-        if (updateIterator == null)
-            updateIterator = mutation.getPartitionUpdates().iterator();
-
-        // TODO can potentially make progress on each of these individually if one is blocked
-        while (updateIterator.hasNext())
+        try
         {
-            currentUpdate = updateIterator.next();
-            Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
-            memtableApplyState = keyspace.applyPartitionUpdateToMemtableAsync(currentUpdate, opGroup, replayPosition, nowInSec, this);
-            if (memtableApplyState != null)
-            {
-                // need to defer to event loop while we acquire lock on memtable partition
-                logger.warn("#### waiting for memtable");
-                localWriteState = LocalWriteState.WAITING_FOR_MEMTABLE;
-                return;
-            }
+            responseHandler.assureSufficientLiveNodes();
         }
-        logger.warn("#### done applying to memtable");
+        catch (UnavailableException exc)
+        {
+            error = exc;
+            remoteWriteState = RemoteWriteState.FAILED;
+            status = Status.COMPLETED;
+            return true;
+        }
+
+        return false;
+    }
+
+    private boolean checkForHintOverload(InetAddress destination)
+    {
+        if (StorageProxy.hintsAreOverloaded(destination))
+        {
+            error = new OverloadedException(
+                    "Too many in flight hints: " + StorageMetrics.totalHintsInProgress.getCount() +
+                            " destination: " + destination +
+                            " destination hints: " + StorageProxy.getHintsInProgressFor(destination).get());
+            remoteWriteState = RemoteWriteState.FAILED;
+            status = Status.COMPLETED;
+            return true;
+        }
+
+        return false;
+    }
+
+    private Status applyToMemtable()
+    {
+        mutation.applyToMemtable(opGroup, replayPosition, nowInSec);
         localWriteState = LocalWriteState.COMPLETED;
+        AbstractWriteResponseHandler.AckResponse ackResponse = responseHandler.localResponse();
+        if (ackResponse.complete)
+        {
+            if (ackResponse.exc == null)
+            {
+                remoteWriteState = RemoteWriteState.COMPLETED;
+            }
+            else
+            {
+                error = ackResponse.exc;
+                remoteWriteState = RemoteWriteState.FAILED;
+            }
+            return Status.COMPLETED;
+        }
+
+        return Status.REGULAR;
     }
 
     private Status currentStatus()
     {
-        return (localWriteState == LocalWriteState.COMPLETED && remoteWriteState == RemoteWriteState.COMPLETED)
+        return ((localWriteState == LocalWriteState.COMPLETED || localWriteState == LocalWriteState.FAILED) &&
+                (remoteWriteState == RemoteWriteState.COMPLETED || remoteWriteState == RemoteWriteState.FAILED))
                ? Status.COMPLETED
                : Status.REGULAR;
     }
@@ -265,32 +286,35 @@ public class WriteTask extends Task
 
     public Status handleEvent(EventLoop eventLoop, Event event)
     {
-        // TODO better organization for state transitions
-        if (event instanceof WriteTimeoutEvent)
-        {
-            // TODO save error status for reporting
-            StorageProxy.writeMetrics.timeouts.mark();
-            remoteWriteState = RemoteWriteState.FAILED;
-            return Status.COMPLETED;
-        }
-        else if (event instanceof WriteFailureEvent)
-        {
-            // TODO save error status for reporting
-            StorageProxy.writeMetrics.failures.mark();
-            remoteWriteState = RemoteWriteState.FAILED;
-            return Status.COMPLETED;
-        }
-        else if (event instanceof WriteSuccessEvent)
+        // TODO better organization of state transitions
+
+        if (event instanceof WriteSuccessEvent)
         {
             // we've gotten acks on all writes
             StorageProxy.writeMetrics.addNano(System.nanoTime() - startTime);
             remoteWriteState = RemoteWriteState.COMPLETED;
             return currentStatus();
         }
+        else if (event instanceof WriteTimeoutEvent)
+        {
+            WriteTimeoutEvent wte = (WriteTimeoutEvent) event;
+            error = new WriteTimeoutException(wte.writeType, wte.consistencyLevel, wte.acks, wte.blockedFor);
+            StorageProxy.writeMetrics.timeouts.mark();
+            remoteWriteState = RemoteWriteState.FAILED;
+            return Status.COMPLETED;
+        }
+        else if (event instanceof WriteFailureEvent)
+        {
+            WriteFailureEvent wfe = (WriteFailureEvent) event;
+            error = new WriteFailureException(wfe.consistencyLevel, wfe.acks, wfe.failures, wfe.blockedFor, wfe.writeType);
+            StorageProxy.writeMetrics.failures.mark();
+            remoteWriteState = RemoteWriteState.FAILED;
+            return Status.COMPLETED;
+        }
         else if (event instanceof CommitlogSegmentAvailableEvent)
         {
             logger.warn("#### commitlog segment available event");
-            allocation = CommitLog.instance.allocator.allocateAsync(
+            CommitLogSegment.Allocation allocation = CommitLog.instance.allocator.allocateAsync(
                     mutation, serializedSize, ((CommitlogSegmentAvailableEvent) event).segment, this);
             if (allocation == null)
                 return Status.REGULAR;  // allocation failed, wait for another CommitlogSegmentAvailableEvent
@@ -306,24 +330,9 @@ public class WriteTask extends Task
         {
             logger.warn("#### commitlog sync complete event");
             CommitLog.instance.executor.pending.decrementAndGet();
-            logger.warn("#### getting replay position");
-            allocation = ((CommitlogSyncCompleteEvent) event).allocation;
+            CommitLogSegment.Allocation allocation = ((CommitlogSyncCompleteEvent) event).allocation;
             replayPosition = allocation.getReplayPosition();
-            logger.warn("#### going to apply to memtable");
             applyToMemtable();
-            logger.warn("#### done applying to memtable");
-            return currentStatus();
-        }
-        else if (event instanceof MemtablePartitionLockAcquiredEvent)
-        {
-            // TODO real non-blocking lock acquisition
-
-            logger.warn("#### memtable partition lock acq event");
-
-            Keyspace.open(mutation.getKeyspaceName()).resumeMemtableApply(
-                    currentUpdate, memtableApplyState.startTime, memtableApplyState.memtable, memtableApplyState.partition,
-                    opGroup, memtableApplyState.indexTransaction, this);
-            applyToMemtable();  // continue with next partition update
             return currentStatus();
         }
         else
@@ -431,45 +440,6 @@ public class WriteTask extends Task
         public static void createAndEmit(WriteTask task, CommitLogSegment.Allocation allocation)
         {
             task.eventLoop.emitEvent(new CommitlogSyncCompleteEvent(task, allocation));
-        }
-    }
-
-    public static class MemtablePartitionLockAcquiredEvent extends WriteTaskEvent
-    {
-        final AtomicBTreePartition partition;
-
-        public MemtablePartitionLockAcquiredEvent(WriteTask task, AtomicBTreePartition partition)
-        {
-            super(task);
-            this.partition = partition;
-        }
-
-        public static void createAndEmit(WriteTask task, AtomicBTreePartition partition)
-        {
-            task.eventLoop.emitEvent(new MemtablePartitionLockAcquiredEvent(task, partition));
-        }
-    }
-
-    public static class MemtableApplyState
-    {
-        final Memtable memtable;
-        final AtomicBTreePartition partition;
-        final long startTime;
-        final long initialSize;
-
-        UpdateTransaction indexTransaction;
-
-        public MemtableApplyState(Memtable memtable, AtomicBTreePartition partition, long startTime, long initialSize)
-        {
-            this.memtable = memtable;
-            this.partition = partition;
-            this.startTime = startTime;
-            this.initialSize = initialSize;
-        }
-
-        public void setIndexTransaction(UpdateTransaction indexTransaction)
-        {
-            this.indexTransaction = indexTransaction;
         }
     }
 }

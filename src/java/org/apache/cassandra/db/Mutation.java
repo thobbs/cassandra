@@ -239,6 +239,13 @@ public class Mutation implements IMutation
         return keyspace.writeCommitlogAsync(this, serializedSize, durableWrites, true, false, writeTask);
     }
 
+    public void applyToMemtable(OpOrder.Group opGroup, ReplayPosition replayPosition, int nowInSec)
+    {
+        Keyspace keyspace = Keyspace.open(getKeyspaceName());
+        for (PartitionUpdate update : this.getPartitionUpdates())
+            keyspace.applyPartitionUpdateToMemtable(update, opGroup, replayPosition, nowInSec);
+    }
+
     public void applyUnsafe()
     {
         apply(false);

@@ -1257,15 +1257,20 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static void checkHintOverload(InetAddress destination)
+    public static boolean hintsAreOverloaded(InetAddress destination)
     {
         // avoid OOMing due to excess hints.  we need to do this check even for "live" nodes, since we can
         // still generate hints for those if it's overloaded or simply dead but not yet known-to-be-dead.
         // The idea is that if we have over maxHintsInProgress hints in flight, this is probably due to
         // a small number of nodes causing problems, so we should avoid shutting down writes completely to
         // healthy nodes.  Any node with no hintsInProgress is considered healthy.
-        if (StorageMetrics.totalHintsInProgress.getCount() > maxHintsInProgress
-                && (getHintsInProgressFor(destination).get() > 0 && shouldHint(destination)))
+        return StorageMetrics.totalHintsInProgress.getCount() > maxHintsInProgress
+                && (getHintsInProgressFor(destination).get() > 0 && shouldHint(destination));
+    }
+
+    private static void checkHintOverload(InetAddress destination)
+    {
+        if (hintsAreOverloaded(destination))
         {
             throw new OverloadedException("Too many in flight hints: " + StorageMetrics.totalHintsInProgress.getCount() +
                                           " destination: " + destination +
@@ -1273,7 +1278,7 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    private static void sendMessagesToNonlocalDC(MessageOut<? extends IMutation> message,
+    public static void sendMessagesToNonlocalDC(MessageOut<? extends IMutation> message,
                                                  Collection<InetAddress> targets,
                                                  AbstractWriteResponseHandler<IMutation> handler)
     {
@@ -2590,7 +2595,7 @@ public class StorageProxy implements StorageProxyMBean
             logger.warn("Some hints were not written before shutdown.  This is not supposed to happen.  You should (a) run repair, and (b) file a bug report");
     }
 
-    private static AtomicInteger getHintsInProgressFor(InetAddress destination)
+    public static AtomicInteger getHintsInProgressFor(InetAddress destination)
     {
         try
         {

@@ -36,7 +36,6 @@ import com.google.common.base.*;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
-import org.apache.cassandra.db.partitions.AbstractBTreePartition;
 import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
@@ -1223,47 +1222,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         StorageHook.instance.reportWrite(metadata.cfId, update);
         metric.writeLatency.addNano(System.nanoTime() - start);
         if(timeDelta < Long.MAX_VALUE)
-            metric.colUpdateTimeDeltaHistogram.update(timeDelta);
-    }
-
-    public WriteTask.MemtableApplyState applyAsync(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, ReplayPosition replayPosition, WriteTask writeTask)
-    {
-        long start = System.nanoTime();
-        // TLH: already good for TPC
-        Memtable mt = data.getMemtableFor(opGroup, replayPosition);
-        Pair<Boolean, Pair<AtomicBTreePartition, Long>> results = mt.putAsync(null, update, indexer, opGroup, writeTask);
-        if (!results.left)
-        {
-            // blocked on pessimistic partition lock acquisition
-            AtomicBTreePartition partition = results.right.left;
-            long initialSize = results.right.right;
-            return new WriteTask.MemtableApplyState(mt, partition, start, initialSize);
-        }
-        else
-        {
-            long timeDelta = results.right.right;
-            DecoratedKey key = update.partitionKey();
-            invalidateCachedPartition(key);
-            metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
-            StorageHook.instance.reportWrite(metadata.cfId, update);  // TODO update API for TPC
-            metric.writeLatency.addNano(System.nanoTime() - start);
-            if (timeDelta < Long.MAX_VALUE)
-                metric.colUpdateTimeDeltaHistogram.update(timeDelta);
-            return null;
-        }
-    }
-
-    public void resumeApply(PartitionUpdate update, long startTime, Memtable mt, AtomicBTreePartition partition, UpdateTransaction indexer, OpOrder.Group opGroup, WriteTask writeTask)
-    {
-        Pair<Boolean, Pair<AtomicBTreePartition, Long>> results = mt.putAsync(partition, update, indexer, opGroup, writeTask);
-        assert results.left;  // we should have acquired the lock already
-        long timeDelta = results.right.right;
-        DecoratedKey key = update.partitionKey();
-        invalidateCachedPartition(key);
-        metric.samplers.get(Sampler.WRITES).addSample(key.getKey(), key.hashCode(), 1);
-        StorageHook.instance.reportWrite(metadata.cfId, update);  // TODO update API for TPC
-        metric.writeLatency.addNano(System.nanoTime() - startTime);
-        if (timeDelta < Long.MAX_VALUE)
             metric.colUpdateTimeDeltaHistogram.update(timeDelta);
     }
 

@@ -23,6 +23,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,6 +66,14 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();
+    }
+
+    public AckResponse localResponse()
+    {
+        if (responsesUpdater.decrementAndGet(this) == 0)
+            return new AckResponse(true, handleLocalFinalAck());
+
+        return new AckResponse(false, null);
     }
 
     protected int ackCount()

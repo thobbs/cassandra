@@ -19,7 +19,6 @@ package org.apache.cassandra.db.commitlog;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.poc.WriteTask;
-import org.apache.cassandra.utils.Pair;
 
 class BatchCommitLogService extends AbstractCommitLogService
 {
@@ -32,7 +31,7 @@ class BatchCommitLogService extends AbstractCommitLogService
     {
         pending.incrementAndGet();
         haveWork.release();
-        awaitingTasks.add(Pair.create(writeTask, Pair.create(alloc, 0L)));
+        awaitingTasks.add(new TaskAwaitingSync(writeTask, alloc, 0L));
         return false;
     }
 

@@ -39,6 +39,7 @@ import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.ViewManager;
+import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -578,16 +579,16 @@ public class Keyspace
         }
     }
 
-    public WriteTask.MemtableApplyState applyPartitionUpdateToMemtableAsync(PartitionUpdate update, OpOrder.Group opGroup,
-                                                                            ReplayPosition replayPosition, int nowInSec, WriteTask writeTask)
+    public void applyPartitionUpdateToMemtable(PartitionUpdate update, OpOrder.Group opGroup,
+                                               ReplayPosition replayPosition, int nowInSec)
     {
         CFMetaData cfm = update.metadata();
         ColumnFamilyStore cfs = columnFamilyStores.get(cfm.cfId);
         if (cfs == null)
         {
-            // TODO error handling?
+            // TODO error handling?  Throw WriteFailureException?
             logger.error("Attempting to mutate non-existant table {} ({}.{})", cfm.cfId, cfm.ksName, cfm.cfName);
-            return null;
+            return;
         }
 
         // TODO ensure tracing can't do blocking IO
@@ -595,22 +596,7 @@ public class Keyspace
 
         // TODO assume updateIndexes is true here?
         UpdateTransaction indexTransaction = cfs.indexManager.newUpdateTransaction(update, opGroup, nowInSec);
-        WriteTask.MemtableApplyState state = cfs.applyAsync(update, indexTransaction, opGroup, replayPosition, writeTask);
-
-        // If state is not null, we would have blocked trying to acquire the memtable partition pessimistic lock,
-        // and we need to defer to the event loop.  This is the state needed to resume after lock acquisition.
-        if (state != null)
-            state.setIndexTransaction(indexTransaction);
-
-        return state;
-    }
-
-    public void resumeMemtableApply(PartitionUpdate update, long startTime, Memtable memtable, AtomicBTreePartition partition,
-                                    OpOrder.Group opGroup, UpdateTransaction indexTransaction, WriteTask writeTask)
-    {
-        CFMetaData cfm = update.metadata();
-        ColumnFamilyStore cfs = columnFamilyStores.get(cfm.cfId);
-        cfs.resumeApply(update, startTime, memtable, partition, indexTransaction, opGroup, writeTask);
+        cfs.apply(update, indexTransaction, opGroup, replayPosition);
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

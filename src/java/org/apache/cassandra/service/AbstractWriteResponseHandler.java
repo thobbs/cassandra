@@ -146,6 +146,8 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     /** null message means "response from local write" */
     public abstract void response(MessageIn<T> msg, int id);
 
+    public abstract AckResponse localResponse();
+
     public void assureSufficientLiveNodes() throws UnavailableException
     {
         consistencyLevel.assureSufficientLiveNodes(keyspace, Iterables.filter(Iterables.concat(naturalEndpoints, pendingEndpoints), isAlive));
@@ -180,6 +182,23 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         }
     }
 
+    /**
+     * Called when the final required ack is received from the local node.  Token-aware writes at CL.ONE are common
+     * enough that this can be optimized for by avoiding emitting an event on the event loop.
+     * @return null if the consistency level has been met, a WriteTimeoutException
+     */
+    protected WriteFailureException handleLocalFinalAck()
+    {
+        assert writeTask != null;
+
+        int blockedFor = totalBlockFor();
+        int acks = ackCount();
+        if (blockedFor + failures > totalEndpoints())
+            return new WriteFailureException(consistencyLevel, acks, failures, blockedFor, writeType);
+        else
+            return null;
+    }
+
     @Override
     public void onFailure(InetAddress from, int id)
     {
@@ -191,5 +210,17 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         if (totalBlockFor() + n > totalEndpoints())
             signal();
+    }
+
+    public static class AckResponse
+    {
+        public final boolean complete;
+        public final WriteFailureException exc;
+
+        AckResponse(boolean complete, WriteFailureException exc)
+        {
+            this.complete = complete;
+            this.exc = exc;
+        }
     }
 }
