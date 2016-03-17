@@ -550,11 +550,10 @@ public class Keyspace
     }
 
     public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(final Mutation mutation,
-                                                                   int serializedSize,
                                                                    final boolean writeCommitLog,
                                                                    boolean updateIndexes,
                                                                    boolean isClReplay,
-                                                                   WriteTask writeTask)
+                                                                   WriteTask.MutationTask mutationTask)
     {
         // TODO handle MVs
         assert !(updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false));
@@ -567,7 +566,7 @@ public class Keyspace
             if (writeCommitLog)
             {
                 Tracing.trace("Appending to commitlog");
-                replayPosition = CommitLog.instance.addAsync(mutation, serializedSize, writeTask);
+                replayPosition = CommitLog.instance.addAsync(mutation, mutationTask);
                 // replayPosition will be null if we would have had to block
             }
             return Pair.create(replayPosition, opGroup);

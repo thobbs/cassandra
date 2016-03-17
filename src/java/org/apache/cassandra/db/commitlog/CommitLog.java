@@ -298,26 +298,27 @@ public class CommitLog implements CommitLogMBean
         return alloc.getReplayPosition();
     }
 
-    public ReplayPosition addAsync(Mutation mutation, int serializedSize, WriteTask writeTask)
+    public ReplayPosition addAsync(Mutation mutation, WriteTask.MutationTask mutationTask)
     {
         assert mutation != null;
 
-        int totalSize = serializedSize + ENTRY_OVERHEAD_SIZE;
+        int totalSize = mutationTask.getSerializedSize() + ENTRY_OVERHEAD_SIZE;
         if (totalSize > MAX_MUTATION_SIZE)
         {
             throw new IllegalArgumentException(String.format("Mutation of %s bytes is too large for the maxiumum size of %s",
                     totalSize, MAX_MUTATION_SIZE));
         }
 
-        Allocation alloc = allocator.allocateAsync(mutation, totalSize, writeTask);
+        Allocation alloc = allocator.allocateAsync(mutation, totalSize, mutationTask);
         if (alloc == null)
             return null;  // yield to event loop, wait for event
 
-        return writeToAllocationAndSync(mutation, alloc, serializedSize, writeTask);
+        return writeToAllocationAndSync(mutation, alloc, mutationTask);
     }
 
-    public ReplayPosition writeToAllocationAndSync(Mutation mutation, Allocation alloc, int serializedSize, WriteTask writeTask)
+    public ReplayPosition writeToAllocationAndSync(Mutation mutation, Allocation alloc, WriteTask.MutationTask mutationTask)
     {
+        int serializedSize = mutationTask.getSerializedSize();
         CRC32 checksum = new CRC32();
         final ByteBuffer buffer = alloc.getBuffer();
         try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
@@ -341,7 +342,7 @@ public class CommitLog implements CommitLogMBean
             alloc.markWritten();
         }
 
-        boolean isSynced = executor.finishWriteForAsync(alloc, writeTask);
+        boolean isSynced = executor.finishWriteForAsync(alloc, mutationTask);
         if (isSynced)
             return alloc.getReplayPosition();
         else

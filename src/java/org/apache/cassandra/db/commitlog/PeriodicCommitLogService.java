@@ -30,14 +30,14 @@ class PeriodicCommitLogService extends AbstractCommitLogService
         super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod());
     }
 
-    protected boolean maybeWaitForAsync(CommitLogSegment.Allocation alloc, WriteTask writeTask)
+    protected boolean maybeWaitForAsync(CommitLogSegment.Allocation alloc, WriteTask.MutationTask mutationTask)
     {
         long startedAt = System.currentTimeMillis();
         if (!waitForSyncToCatchUp(startedAt))
             return true; // we're synced
 
         pending.incrementAndGet();
-        awaitingTasks.add(new TaskAwaitingSync(writeTask, alloc, startedAt));
+        awaitingTasks.add(new TaskAwaitingSync(mutationTask, alloc, startedAt));
         return false;
     }
 

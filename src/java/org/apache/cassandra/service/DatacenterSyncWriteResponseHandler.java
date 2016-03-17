@@ -48,10 +48,10 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
                                               Keyspace keyspace,
                                               Runnable callback,
                                               WriteType writeType,
-                                              WriteTask writeTask)
+                                              WriteTask.MutationTask mutationTask)
     {
         // Response is been managed by the map so make it 1 for the superclass.
-        super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, writeTask);
+        super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, mutationTask);
         assert consistencyLevel == ConsistencyLevel.EACH_QUORUM;
 
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();

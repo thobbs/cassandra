@@ -72,7 +72,7 @@ public class CommitLogSegmentManager
     private final WaitQueue hasAvailableSegments = new WaitQueue();
 
     // TODO evaluate queue type and size more carefully
-    private final ManyToOneConcurrentArrayQueue<WriteTask> awaitingTasks = new ManyToOneConcurrentArrayQueue<>(1024 * 1024);
+    private final ManyToOneConcurrentArrayQueue<WriteTask.MutationTask> awaitingTasks = new ManyToOneConcurrentArrayQueue<>(1024 * 1024);
 
     /**
      * Tracks commitlog size, in multiples of the segment size.  We need to do this so we can "promise" size
@@ -119,7 +119,7 @@ public class CommitLogSegmentManager
                                 CommitLogSegment segment = CommitLogSegment.createSegment(commitLog);
                                 availableSegments.add(segment);
                                 hasAvailableSegments.signalAll();
-                                awaitingTasks.drain((writeTask) -> WriteTask.CommitlogSegmentAvailableEvent.createAndEmit(writeTask, segment));
+                                awaitingTasks.drain((mutationTask) -> WriteTask.CommitlogSegmentAvailableEvent.createAndEmit(mutationTask, segment));
                             }
 
                             // flush old Cfs if we're full
@@ -192,25 +192,25 @@ public class CommitLogSegmentManager
         return alloc;
     }
 
-    public Allocation allocateAsync(Mutation mutation, int size, WriteTask writeTask)
+    public Allocation allocateAsync(Mutation mutation, int size, WriteTask.MutationTask mutationTask)
     {
         CommitLogSegment segment = allocatingFrom;
         if (segment == null)
         {
-            segment = advanceAllocatingFromAsync(null, writeTask);
+            segment = advanceAllocatingFromAsync(null, mutationTask);
             if (segment == null)
                 return null;  // yield to event loop, await event
         }
-        return allocateAsync(mutation, size, segment, writeTask);
+        return allocateAsync(mutation, size, segment, mutationTask);
     }
 
-    public Allocation allocateAsync(Mutation mutation, int size, CommitLogSegment segment, WriteTask writeTask)
+    public Allocation allocateAsync(Mutation mutation, int size, CommitLogSegment segment, WriteTask.MutationTask mutationTask)
     {
         Allocation alloc;
         while (null == (alloc = segment.allocate(mutation, size)))
         {
             // failed to allocate, so move to a new segment with enough room
-            segment = advanceAllocatingFromAsync(segment, writeTask);
+            segment = advanceAllocatingFromAsync(segment, mutationTask);
             if (segment == null)
                 return null;  // yield to event loop, await event
         }
@@ -299,12 +299,12 @@ public class CommitLogSegmentManager
     /**
      *  Returns true when a new segment is available, false when we must yield to the event loop for a notification
      */
-    private CommitLogSegment advanceAllocatingFromAsync(CommitLogSegment old, WriteTask writeTask)
+    private CommitLogSegment advanceAllocatingFromAsync(CommitLogSegment old, WriteTask.MutationTask mutationTask)
     {
         while (true)
         {
             CommitLogSegment next;
-            // TODO async lock acquisition
+            // ignore for TPC purposes, for now
             synchronized (this)
             {
                 // do this in a critical section so we can atomically remove from availableSegments and add to allocatingFrom/activeSegments
@@ -356,7 +356,7 @@ public class CommitLogSegmentManager
                 continue;
             }
 
-            awaitingTasks.add(writeTask);
+            awaitingTasks.add(mutationTask);
             return null;
         }
     }

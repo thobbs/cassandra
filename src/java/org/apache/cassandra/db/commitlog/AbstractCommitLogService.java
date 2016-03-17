@@ -194,9 +194,9 @@ public abstract class AbstractCommitLogService
         written.incrementAndGet();
     }
 
-    public boolean finishWriteForAsync(Allocation alloc, WriteTask writeTask)
+    public boolean finishWriteForAsync(Allocation alloc, WriteTask.MutationTask mutationTask)
     {
-        boolean isSynced = maybeWaitForAsync(alloc, writeTask);
+        boolean isSynced = maybeWaitForAsync(alloc, mutationTask);
         if (isSynced)
             written.incrementAndGet();
         return isSynced;
@@ -215,7 +215,7 @@ public abstract class AbstractCommitLogService
      * Otherwise, false is returned and a CommitlogSyncCompleteEvent will be emitted to the given WriteTask once
      * syncing has caught up.
      */
-    protected abstract boolean maybeWaitForAsync(Allocation alloc, WriteTask writeTask);
+    protected abstract boolean maybeWaitForAsync(Allocation alloc, WriteTask.MutationTask mutationTask);
 
     /**
      * Sync immediately, but don't block for the sync to cmplete
@@ -273,11 +273,11 @@ public abstract class AbstractCommitLogService
 
     protected static class TaskAwaitingSync
     {
-        final WriteTask writeTask;
+        final WriteTask.MutationTask writeTask;
         final Allocation allocation;
         final long startedAt;
 
-        TaskAwaitingSync(WriteTask writeTask, Allocation allocation, long startedAt)
+        TaskAwaitingSync(WriteTask.MutationTask writeTask, Allocation allocation, long startedAt)
         {
             this.writeTask = writeTask;
             this.allocation = allocation;

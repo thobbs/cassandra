@@ -120,7 +120,8 @@ public final class EventLoop implements Runnable
 
     private void initializeTask(Task task)
     {
-        task.initialize(this);
+        if (task.initialize(this) == Task.Status.RESCHEDULED)
+            reschedule(task);
     }
 
     private void resumeTask(Task task)

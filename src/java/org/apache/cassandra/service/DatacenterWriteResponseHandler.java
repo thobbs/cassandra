@@ -37,9 +37,9 @@ public class DatacenterWriteResponseHandler<T> extends WriteResponseHandler<T>
                                           Keyspace keyspace,
                                           Runnable callback,
                                           WriteType writeType,
-                                          WriteTask writeTask)
+                                          WriteTask.MutationTask mutationTask)
     {
-        super(naturalEndpoints, pendingEndpoints, consistencyLevel, keyspace, callback, writeType, writeTask);
+        super(naturalEndpoints, pendingEndpoints, consistencyLevel, keyspace, callback, writeType, mutationTask);
         assert consistencyLevel.isDatacenterLocal();
     }
 

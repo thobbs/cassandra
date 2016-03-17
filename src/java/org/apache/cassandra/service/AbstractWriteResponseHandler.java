@@ -50,7 +50,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final Runnable callback;
     protected final Collection<InetAddress> pendingEndpoints;
     protected final WriteType writeType;
-    protected final WriteTask writeTask;
+    protected final WriteTask.MutationTask mutationTask;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
         = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
     private volatile int failures = 0;
@@ -64,7 +64,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
                                            ConsistencyLevel consistencyLevel,
                                            Runnable callback,
                                            WriteType writeType,
-                                           WriteTask writeTask)
+                                           WriteTask.MutationTask mutationTask)
     {
         this.keyspace = keyspace;
         this.pendingEndpoints = pendingEndpoints;
@@ -73,7 +73,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.naturalEndpoints = naturalEndpoints;
         this.callback = callback;
         this.writeType = writeType;
-        this.writeTask = writeTask;
+        this.mutationTask = mutationTask;
     }
 
     public void get() throws WriteTimeoutException, WriteFailureException
@@ -155,24 +155,24 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
     protected void signal()
     {
-        if (writeTask != null)
+        if (mutationTask != null)
         {
             int blockedFor = totalBlockFor();
             int acks = ackCount();
             Event event;
             if (blockedFor + failures > totalEndpoints())
             {
-                event = new WriteTask.WriteTimeoutEvent(writeTask, writeType, consistencyLevel, acks, blockedFor);
+                event = new WriteTask.WriteTimeoutEvent(mutationTask, writeType, consistencyLevel, acks, blockedFor);
             }
             else if (totalBlockFor() + failures > totalEndpoints())
             {
-                event = new WriteTask.WriteFailureEvent(writeTask, writeType, consistencyLevel, acks, blockedFor, failures);
+                event = new WriteTask.WriteFailureEvent(mutationTask, writeType, consistencyLevel, acks, blockedFor, failures);
             }
             else
             {
-                event = new WriteTask.WriteSuccessEvent(writeTask);
+                event = new WriteTask.WriteSuccessEvent(mutationTask);
             }
-            writeTask.eventLoop().emitEvent(event);
+            mutationTask.writeTask().eventLoop().emitEvent(event);
         }
         else
         {
@@ -189,7 +189,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
      */
     protected WriteFailureException handleLocalFinalAck()
     {
-        assert writeTask != null;
+        assert mutationTask != null;
 
         int blockedFor = totalBlockFor();
         int acks = ackCount();

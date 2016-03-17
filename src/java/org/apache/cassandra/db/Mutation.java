@@ -232,11 +232,11 @@ public class Mutation implements IMutation
         apply(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
     }
 
-    public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(WriteTask writeTask, int serializedSize)
+    public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(WriteTask.MutationTask mutationTask)
     {
         Keyspace keyspace = Keyspace.open(keyspaceName);
         boolean durableWrites = keyspace.getMetadata().params.durableWrites;
-        return keyspace.writeCommitlogAsync(this, serializedSize, durableWrites, true, false, writeTask);
+        return keyspace.writeCommitlogAsync(this, durableWrites, true, false, mutationTask);
     }
 
     public void applyToMemtable(OpOrder.Group opGroup, ReplayPosition replayPosition, int nowInSec)

@@ -50,9 +50,9 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
                                 Keyspace keyspace,
                                 Runnable callback,
                                 WriteType writeType,
-                                WriteTask writeTask)
+                                WriteTask.MutationTask mutationTask)
     {
-        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, writeTask);
+        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, mutationTask);
         responses = totalBlockFor();
     }
 

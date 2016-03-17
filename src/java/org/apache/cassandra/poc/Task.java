@@ -32,8 +32,9 @@ public class Task
 
     protected Status status = Status.NEW;
 
-    public void initialize(EventLoop eventLoop)
+    public Status initialize(EventLoop eventLoop)
     {
+        return Status.REGULAR;
     }
 
     public Status resume(EventLoop eventLoop)
