@@ -36,19 +36,29 @@ public class WriteTask extends Task
 
     private static final int CHUNK_SIZE = 64;  // number of mutations to process before yielding to the event loop
 
-    private EventLoop eventLoop;
-    public ConsistencyLevel consistencyLevel = ConsistencyLevel.ONE;
-    private WriteType writeType;
-    private ArrayList<MutationTask> mutationTasks;
-    private Exception error;
-    private long startTime;
-    private int remaining;
-
     private final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
-    // TODO how do we want to let these be set?
-    public Collection<? extends IMutation> mutations = Collections.EMPTY_LIST;
-    private Iterator<? extends IMutation> mutationIterator;
+    public final Collection<? extends IMutation> mutations;
+    public final ConsistencyLevel consistencyLevel;
+    private final Iterator<? extends IMutation> mutationIterator;
+    private final ArrayList<MutationTask> mutationTasks;
+    private final WriteType writeType;
+
+    private EventLoop eventLoop;
+    private Exception error;
+    private int remaining;
+    private long startTime;
+
+    public WriteTask(Collection<? extends IMutation> mutations, ConsistencyLevel consistencyLevel)
+    {
+        this.mutations = mutations;
+        this.consistencyLevel = consistencyLevel;
+
+        this.mutationIterator = mutations.iterator();
+        mutationTasks = new ArrayList<>(mutations.size());
+        remaining = mutations.size();
+        writeType = remaining <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
+    }
 
     public EventLoop eventLoop()
     {
@@ -60,10 +70,6 @@ public class WriteTask extends Task
         startTime = System.nanoTime();
 
         this.eventLoop = eventLoop;
-        mutationTasks = new ArrayList<>(mutations.size());
-        mutationIterator = mutations.iterator();
-        remaining = mutations.size();
-        writeType = remaining <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
         status = processMutations();
         return status;
     }
