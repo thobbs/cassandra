@@ -37,18 +37,19 @@ public class WriteTask extends Task
     private static final int CHUNK_SIZE = 64;  // number of mutations to process before yielding to the event loop
 
     private EventLoop eventLoop;
-
-    private long startTime;
-    private Exception error;
-
-    // TODO where do these get set?
-    public Collection<? extends IMutation> mutations = Collections.EMPTY_LIST;
-    private Iterator<? extends IMutation> mutationIterator;
     public ConsistencyLevel consistencyLevel = ConsistencyLevel.ONE;
+    private WriteType writeType;
     private ArrayList<MutationTask> mutationTasks;
+    private Exception error;
+    private long startTime;
     private int remaining;
 
-    // TODO maybe not the best way to expose this
+    private final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
+
+    // TODO how do we want to let these be set?
+    public Collection<? extends IMutation> mutations = Collections.EMPTY_LIST;
+    private Iterator<? extends IMutation> mutationIterator;
+
     public EventLoop eventLoop()
     {
         return this.eventLoop;
@@ -62,46 +63,33 @@ public class WriteTask extends Task
         mutationTasks = new ArrayList<>(mutations.size());
         mutationIterator = mutations.iterator();
         remaining = mutations.size();
+        writeType = remaining <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
         status = processMutations();
         return status;
     }
 
     private Status processMutations()
     {
-        final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
         int chunkCount = 0;
         while (mutationIterator.hasNext() && chunkCount < CHUNK_SIZE)
         {
             Mutation mutation = (Mutation) mutationIterator.next();
             chunkCount++;
 
-            // TODO breakup multi-partition batch into chunks, yield and resume
-            WriteType wt = mutations.size() <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
-
             // start StorageProxy.performWrite() behavior
-            String keyspaceName = mutation.getKeyspaceName();
-            AbstractReplicationStrategy replicationStrategy = Keyspace.open(keyspaceName).getReplicationStrategy();
-
-            Token tk = mutation.key().getToken();
-            List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
-            Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
-
-            MutationTask mutTask = new MutationTask(this, mutation);
-            mutationTasks.add(mutTask);
-            AbstractWriteResponseHandler<IMutation> responseHandler = replicationStrategy.getWriteResponseHandler(
-                    naturalEndpoints, pendingEndpoints, consistencyLevel, null, wt, mutTask);
-            mutTask.responseHandler = responseHandler;
+            MutationTask mutationTask = new MutationTask(this, mutation);
+            mutationTasks.add(mutationTask);
+            AbstractWriteResponseHandler<IMutation> responseHandler = makeResponseHandler(mutation, mutationTask);
+            mutationTask.responseHandler = responseHandler;
 
             // exit early if we can't fulfill the CL at this time
             if (checkForUnavailable(responseHandler))
                 return Status.COMPLETED;
 
-            Iterable<InetAddress> targets = Iterables.concat(naturalEndpoints, pendingEndpoints);
-
-            // start StorageProxy.sendToHintedEndpoints() behavior
+            Iterable<InetAddress> targets = responseHandler.getTargetedEndpoints();
 
             // extra-datacenter replicas, grouped by dc
-            Map<String, Collection<InetAddress>> dcGroups = null;
+            Map<String, Collection<InetAddress>> dcGroups = new HashMap<>();
             // only need to create a Message for non-local writes
             MessageOut<Mutation> message = null;
 
@@ -121,47 +109,26 @@ public class WriteTask extends Task
                     }
                     else
                     {
-                        // belongs on a different server
                         if (message == null)
                             message = mutation.createMessage();
-                        String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(destination);
-                        // direct writes to local DC or old Cassandra versions
-                        // (1.1 knows how to forward old-style String message IDs; updated to int in 2.0)
-                        if (localDataCenter.equals(dc))
-                        {
-                            MessagingService.instance().sendRR(message, destination, responseHandler, true);
-                        }
-                        else
-                        {
-                            Collection<InetAddress> messages = (dcGroups != null) ? dcGroups.get(dc) : null;
-                            if (messages == null)
-                            {
-                                messages = new ArrayList<>(3); // most DCs will have <= 3 replicas
-                                if (dcGroups == null)
-                                    dcGroups = new HashMap<>();
-                                dcGroups.put(dc, messages);
-                            }
-                            messages.add(destination);
-                        }
+
+                        handleRemoteReplica(destination, message, responseHandler, dcGroups);
                     }
                 }
-                else
+                else if (StorageProxy.shouldHint(destination))
                 {
-                    if (StorageProxy.shouldHint(destination))
-                    {
-                        if (endpointsToHint == null)
-                            endpointsToHint = new ArrayList<>(Iterables.size(targets));
-                        endpointsToHint.add(destination);
-                    }
+                    if (endpointsToHint == null)
+                        endpointsToHint = new ArrayList<>(Iterables.size(targets));
+                    endpointsToHint.add(destination);
                 }
             }
 
-            // TODO submitting hints
-            // if (endpointsToHint != null)
-            //     submitHint(mutation, endpointsToHint, responseHandler);
+            // TODO hint submission is still performed in a separate stage
+            if (endpointsToHint != null)
+                StorageProxy.submitHint(mutation, endpointsToHint, responseHandler);
 
             // write to remote DCs
-            if (dcGroups != null)
+            if (!dcGroups.isEmpty())
             {
                 // for each datacenter, send the message to one node to relay the write to other replicas
                 if (message == null)
@@ -171,28 +138,10 @@ public class WriteTask extends Task
                     StorageProxy.sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
             }
 
-            // write locally
             if (insertLocal)
-            {
-                // begin StorageProxy.performLocally() behavior
-                mutTask.nowInSec = FBUtilities.nowInSeconds();
-                mutTask.serializedSize = (int) Mutation.serializer.serializedSize(mutation, MessagingService.current_version);
-
-                Pair<ReplayPosition, OpOrder.Group> pair = mutation.writeCommitlogAsync(mutTask);
-                mutTask.replayPosition = pair.left;
-                mutTask.opGroup = pair.right;
-
-                if (mutTask.replayPosition == null)
-                {
-                    // we are either waiting on commitlog allocation or syncing
-                    continue;
-                }
-
-                mutTask.applyToMemtable();
-                if (remaining == 0)
-                    status = Status.COMPLETED;
-            }
+                performLocalWrite(mutationTask, mutation);
         }
+
         if (mutationIterator.hasNext())
             status = Status.RESCHEDULED;
 
@@ -230,16 +179,66 @@ public class WriteTask extends Task
         return false;
     }
 
+    private void handleRemoteReplica(InetAddress destination, MessageOut<Mutation> message,
+                                     AbstractWriteResponseHandler<IMutation> responseHandler,
+                                     Map<String, Collection<InetAddress>> dcGroups)
+    {
+        String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(destination);
+        // direct writes to local DC or old Cassandra versions
+        // (1.1 knows how to forward old-style String message IDs; updated to int in 2.0)
+        if (localDataCenter.equals(dc))
+        {
+            MessagingService.instance().sendRR(message, destination, responseHandler, true);
+        }
+        else
+        {
+            Collection<InetAddress> messages = (dcGroups != null) ? dcGroups.get(dc) : null;
+            if (messages == null)
+            {
+                messages = new ArrayList<>(3); // most DCs will have <= 3 replicas
+                dcGroups.put(dc, messages);
+            }
+            messages.add(destination);
+        }
+    }
+
+    private void performLocalWrite(MutationTask mutationTask, Mutation mutation)
+    {
+        mutationTask.nowInSec = FBUtilities.nowInSeconds();
+        mutationTask.serializedSize = (int) Mutation.serializer.serializedSize(mutation, MessagingService.current_version);
+
+        Pair<ReplayPosition, OpOrder.Group> pair = mutation.writeCommitlogAsync(mutationTask);
+        mutationTask.replayPosition = pair.left;
+        mutationTask.opGroup = pair.right;
+
+        if (mutationTask.replayPosition == null)
+            return; // we are either waiting on commitlog allocation or syncing
+
+        mutationTask.applyToMemtable();
+        if (remaining == 0)
+            status = Status.COMPLETED;
+    }
+
+    private AbstractWriteResponseHandler<IMutation> makeResponseHandler(Mutation mutation, MutationTask mutationTask)
+    {
+        String keyspaceName = mutation.getKeyspaceName();
+        AbstractReplicationStrategy replicationStrategy = Keyspace.open(keyspaceName).getReplicationStrategy();
+
+        Token tk = mutation.key().getToken();
+        List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(keyspaceName, tk);
+        Collection<InetAddress> pendingEndpoints = StorageService.instance.getTokenMetadata().pendingEndpointsFor(tk, keyspaceName);
+
+        return replicationStrategy.getWriteResponseHandler(
+                naturalEndpoints, pendingEndpoints, consistencyLevel, null, writeType, mutationTask);
+    }
+
     public Status resume(EventLoop eventLoop)
     {
-        // logger.warn("#### resuming");
         return processMutations();
     }
 
     public Status handleEvent(EventLoop eventLoop, Event event)
     {
-        // TODO better organization of state transitions
-
         if (event instanceof WriteSuccessEvent)
         {
             // we've gotten acks on all writes

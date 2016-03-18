@@ -19,6 +19,7 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
@@ -128,6 +129,11 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected int totalEndpoints()
     {
         return naturalEndpoints.size() + pendingEndpoints.size();
+    }
+
+    public Iterable<InetAddress> getTargetedEndpoints()
+    {
+        return Iterables.concat(naturalEndpoints, pendingEndpoints);
     }
 
     /**
