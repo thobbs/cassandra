@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 
@@ -58,14 +59,10 @@ public class TupleType extends AbstractType<ByteBuffer>
     protected TupleType(List<AbstractType<?>> types, boolean freezeInner)
     {
         super(ComparisonType.CUSTOM);
-        for (int i = 0; i < types.size(); i++)
-        {
-            AbstractType<?> type = types.get(i);
-            if (freezeInner)
-                type = type.freeze();
-            types.set(i, type);
-        }
-        this.types = types;
+        if (freezeInner)
+            this.types = types.stream().map(AbstractType::freeze).collect(Collectors.toList());
+        else
+            this.types = types;
     }
 
     public static TupleType getInstance(TypeParser parser) throws ConfigurationException, SyntaxException

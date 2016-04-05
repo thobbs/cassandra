@@ -115,11 +115,8 @@ public class FunctionCall extends Term.NonTerminal
         {
             return UserTypes.Value.fromSerialized(result, (UserType) fun.returnType());
         }
-        else
-        {
-            return new Constants.Value(result);
-        }
-        throw new AssertionError();
+
+        return new Constants.Value(result);
     }
 
     public static class Raw extends Term.Raw

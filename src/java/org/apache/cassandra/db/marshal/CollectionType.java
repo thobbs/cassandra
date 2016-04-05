@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Iterator;
 
-import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.Lists;
@@ -133,13 +132,19 @@ public abstract class CollectionType<T> extends AbstractType<T>
         return kind == Kind.MAP;
     }
 
+    @Override
+    public boolean isFreezable()
+    {
+        return true;
+    }
+
     // Overrided by maps
     protected int collectionSize(List<ByteBuffer> values)
     {
         return values.size();
     }
 
-    public ByteBuffer serializeForNativeProtocol(ColumnDefinition def, Iterator<Cell> cells, int version)
+    public ByteBuffer serializeForNativeProtocol(Iterator<Cell> cells, int version)
     {
         assert isMultiCell();
         List<ByteBuffer> values = serializedValues(cells);

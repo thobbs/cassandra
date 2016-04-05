@@ -760,9 +760,9 @@ public class SelectStatement implements CQLStatement
             if (complexData == null)
                 result.add(null);
             else if (def.type.isCollection())
-                result.add(((CollectionType) def.type).serializeForNativeProtocol(def, complexData.iterator(), protocolVersion));
+                result.add(((CollectionType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
             else
-                result.add(((UserType) def.type).serializeForNativeProtocol(complexData.iterator()));
+                result.add(((UserType) def.type).serializeForNativeProtocol(complexData.iterator(), protocolVersion));
         }
         else
         {

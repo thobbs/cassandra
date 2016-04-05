@@ -614,18 +614,6 @@ public class UserTypesTest extends CQLTester
         assertInvalid("DELETE v.bad FROM %s WHERE k = ?", 0);
     }
 
-    @FunctionalInterface
-    public interface CheckedFunction {
-        void apply() throws Throwable;
-    }
-
-    private void beforeAndAfterFlush(CheckedFunction runnable) throws Throwable
-    {
-        runnable.apply();
-        flush();
-        runnable.apply();
-    }
-
     private String typeWithKs(String type1)
     {
         return keyspace() + '.' + type1;

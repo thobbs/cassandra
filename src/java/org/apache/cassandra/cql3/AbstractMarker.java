@@ -85,10 +85,8 @@ public abstract class AbstractMarker extends Term.NonTerminal
             {
                 return new UserTypes.Marker(bindIndex, receiver);
             }
-            else
-            {
-                return new Constants.Marker(bindIndex, receiver);
-            }
+
+            return new Constants.Marker(bindIndex, receiver);
         }
 
         public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)

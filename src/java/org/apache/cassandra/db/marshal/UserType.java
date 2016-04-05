@@ -101,6 +101,12 @@ public class UserType extends TupleType
         return isMultiCell;
     }
 
+    @Override
+    public boolean isFreezable()
+    {
+        return true;
+    }
+
     public AbstractType<?> fieldType(int i)
     {
         return type(i);
@@ -155,7 +161,7 @@ public class UserType extends TupleType
         return ShortType.instance;
     }
 
-    public ByteBuffer serializeForNativeProtocol(Iterator<Cell> cells)
+    public ByteBuffer serializeForNativeProtocol(Iterator<Cell> cells, int protocolVersion)
     {
         assert isMultiCell;
 

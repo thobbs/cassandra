@@ -785,13 +785,15 @@ public class ColumnCondition
     static class UDTBound extends Bound
     {
         private final ByteBuffer value;
+        private final int protocolVersion;
 
         private UDTBound(ColumnCondition condition, QueryOptions options) throws InvalidRequestException
         {
             super(condition.column, condition.operator);
             assert column.type.isUDT() && condition.field == null;
             assert condition.operator != Operator.IN;
-            this.value = condition.value.bindAndGet(options);
+            protocolVersion = options.getProtocolVersion();
+            value = condition.value.bindAndGet(options);
         }
 
         public boolean appliesTo(Row row) throws InvalidRequestException
@@ -801,7 +803,7 @@ public class ColumnCondition
             if (userType.isMultiCell())
             {
                 Iterator<Cell> iter = getCells(row, column);
-                rowValue = iter.hasNext() ? userType.serializeForNativeProtocol(iter) : null;
+                rowValue = iter.hasNext() ? userType.serializeForNativeProtocol(iter, protocolVersion) : null;
             }
             else
             {
@@ -827,12 +829,14 @@ public class ColumnCondition
     public static class UDTInBound extends Bound
     {
         private final List<ByteBuffer> inValues;
+        private final int protocolVersion;
 
         private UDTInBound(ColumnCondition condition, QueryOptions options) throws InvalidRequestException
         {
             super(condition.column, condition.operator);
             assert column.type.isUDT() && condition.field == null;
             assert condition.operator == Operator.IN;
+            protocolVersion = options.getProtocolVersion();
             inValues = new ArrayList<>();
             if (condition.inValues == null)
             {
@@ -854,7 +858,7 @@ public class ColumnCondition
             if (userType.isMultiCell())
             {
                 Iterator<Cell> cells = getCells(row, column);
-                rowValue = cells.hasNext() ? userType.serializeForNativeProtocol(cells) : null;
+                rowValue = cells.hasNext() ? userType.serializeForNativeProtocol(cells, protocolVersion) : null;
             }
             else
             {

@@ -322,6 +322,11 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>
         return false;
     }
 
+    public boolean isFreezable()
+    {
+        return false;
+    }
+
     public AbstractType<?> freeze()
     {
         return this;
