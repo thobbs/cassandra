@@ -208,7 +208,7 @@ public class UserTypesTest extends CQLTester
         assertRows(execute("SELECT v FROM %s"), row(userType("a", 2, "foo", "def", "c", null)));
         assertRows(execute("SELECT v.a FROM %s"), row(2));
         assertRows(execute("SELECT v.foo FROM %s"), row("def"));
-        assertRows(execute("SELECT v.c FROM %s"), row(null));
+        assertRows(execute("SELECT v.c FROM %s"), row(new Object[] {null}));
 
         execute("INSERT INTO %s (k, v) VALUES (0, ?)", userType("a", 3, "foo", "abc", "c", 0));
         beforeAndAfterFlush(() -> {

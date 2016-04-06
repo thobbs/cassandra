@@ -552,13 +552,13 @@ def ks_name_completer(ctxt, cass):
 
 
 @completer_for('nonSystemKeyspaceName', 'ksname')
-def ks_name_completer(ctxt, cass):
+def non_system_ks_name_completer(ctxt, cass):
     ksnames = [n for n in cass.get_keyspace_names() if n not in SYSTEM_KEYSPACES]
     return map(maybe_escape_name, ksnames)
 
 
 @completer_for('alterableKeyspaceName', 'ksname')
-def ks_name_completer(ctxt, cass):
+def alterable_ks_name_completer(ctxt, cass):
     ksnames = [n for n in cass.get_keyspace_names() if n not in NONALTERBALE_KEYSPACES]
     return map(maybe_escape_name, ksnames)
 
@@ -864,7 +864,6 @@ def insert_newval_completer(ctxt, cass):
 
 @completer_for('insertStatement', 'valcomma')
 def insert_valcomma_completer(ctxt, cass):
-    layout = get_table_meta(ctxt, cass)
     numcols = len(ctxt.get_binding('colname', ()))
     numvals = len(ctxt.get_binding('newval', ()))
     if numcols > numvals:
@@ -892,7 +891,7 @@ syntax_rules += r'''
                                 ( counterop=( "+" | "-" ) inc=<wholenumber>
                                 | listadder="+" listcol=<cident> )? )
                     | ( indexbracket="[" <term> "]" "=" <term> )
-                    | ( udt_field_dot="." <identifier> "=" <term> ))
+                    | ( udt_field_dot="." udt_field=<identifier> "=" <term> ))
                ;
 <conditions> ::=  <condition> ( "AND" <condition> )*
                ;
@@ -901,14 +900,14 @@ syntax_rules += r'''
                          ;
 <condition> ::= conditioncol=<cident>
                     ( (( indexbracket="[" <term> "]" )
-                      |( udt_field_dot="." <identifier> )) )?
+                      |( udt_field_dot="." udt_field=<identifier> )) )?
                     <condition_op_and_rhs>
               ;
 '''
 
 
 @completer_for('updateStatement', 'updateopt')
-def insert_option_completer(ctxt, cass):
+def update_option_completer(ctxt, cass):
     opts = set('TIMESTAMP TTL'.split())
     for opt in ctxt.get_binding('updateopt', ()):
         opts.discard(opt.split()[0])
@@ -982,14 +981,35 @@ def update_indexbracket_completer(ctxt, cass):
 def update_udt_field_dot_completer(ctxt, cass):
     layout = get_table_meta(ctxt, cass)
     curcol = dequote_name(ctxt.get_binding('updatecol', ''))
+    return ["."] if _is_usertype(layout, curcol) else []
+
+
+@completer_for('assignment', 'udt_field')
+def assignment_udt_field_completer(ctxt, cass):
+    layout = get_table_meta(ctxt, cass)
+    curcol = dequote_name(ctxt.get_binding('updatecol', ''))
+    return _usertype_fields(ctxt, cass, layout, curcol)
+
+
+def _is_usertype(layout, curcol):
     coltype = layout.columns[curcol].cql_type
-    if coltype not in simple_cql_types and coltype not in ('map', 'set', 'list'):
-        return ["."]
-    return []
+    return coltype not in simple_cql_types and coltype not in ('map', 'set', 'list')
+
+
+def _usertype_fields(ctxt, cass, layout, curcol):
+    if not _is_usertype(layout, curcol):
+        return []
+
+    coltype = layout.columns[curcol].cql_type
+    ks = ctxt.get_binding('ksname', None)
+    if ks is not None:
+        ks = dequote_name(ks)
+    user_type = cass.get_usertype_layout(ks, coltype)
+    return [field_name for (field_name, field_type) in user_type]
 
 
 @completer_for('condition', 'indexbracket')
-def update_indexbracket_completer(ctxt, cass):
+def condition_indexbracket_completer(ctxt, cass):
     layout = get_table_meta(ctxt, cass)
     curcol = dequote_name(ctxt.get_binding('conditioncol', ''))
     coltype = layout.columns[curcol].cql_type
@@ -999,13 +1019,17 @@ def update_indexbracket_completer(ctxt, cass):
 
 
 @completer_for('condition', 'udt_field_dot')
-def update_udt_field_dot_completer(ctxt, cass):
+def condition_udt_field_dot_completer(ctxt, cass):
     layout = get_table_meta(ctxt, cass)
     curcol = dequote_name(ctxt.get_binding('conditioncol', ''))
-    coltype = layout.columns[curcol].cql_type
-    if coltype not in simple_cql_types and coltype not in ('map', 'set', 'list'):
-        return ["."]
-    return []
+    return ["."] if _is_usertype(layout, curcol) else []
+
+
+@completer_for('condition', 'udt_field')
+def condition_udt_field_completer(ctxt, cass):
+    layout = get_table_meta(ctxt, cass)
+    curcol = dequote_name(ctxt.get_binding('conditioncol', ''))
+    return _usertype_fields(ctxt, cass, layout, curcol)
 
 
 syntax_rules += r'''
@@ -1016,8 +1040,8 @@ syntax_rules += r'''
                         ( "IF" ( "EXISTS" | <conditions> ) )?
                     ;
 <deleteSelector> ::= delcol=<cident>
-                     ( ( memberbracket="[" memberselector=<term> "]" )
-                     | ( udt_field_dot="." <identifier> ) )?
+                     ( ( "[" <term> "]" )
+                     | ( "." <identifier> ) )?
                    ;
 <deleteOption> ::= "TIMESTAMP" <wholenumber>
                  ;
@@ -1036,25 +1060,6 @@ def delete_opt_completer(ctxt, cass):
 def delete_delcol_completer(ctxt, cass):
     layout = get_table_meta(ctxt, cass)
     return map(maybe_escape_name, regular_column_names(layout))
-
-
-@completer_for('deleteSelector', 'memberbracket')
-def update_indexbracket_completer(ctxt, cass):
-    layout = get_table_meta(ctxt, cass)
-    curcol = dequote_name(ctxt.get_binding('delcol', ''))
-    coltype = layout.columns[curcol].cql_type
-    if coltype in ('map', 'list'):
-        return ['[']
-    return []
-
-@completer_for('deleteSelector', 'udt_field_dot')
-def update_indexbracket_completer(ctxt, cass):
-    layout = get_table_meta(ctxt, cass)
-    curcol = dequote_name(ctxt.get_binding('delcol', ''))
-    coltype = layout.columns[curcol].cql_type
-    if coltype not in simple_cql_types and coltype not in ('map', 'set', 'list'):
-        return ["."]
-    return []
 
 
 syntax_rules += r'''
@@ -1518,7 +1523,7 @@ def get_trigger_names(ctxt, cass):
 
 
 @completer_for('dropTriggerStatement', 'triggername')
-def alter_type_field_completer(ctxt, cass):
+def drop_trigger_completer(ctxt, cass):
     names = get_trigger_names(ctxt, cass)
     return map(maybe_escape_name, names)
 

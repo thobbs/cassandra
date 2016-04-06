@@ -2310,7 +2310,7 @@ The following describes the changes in each version of CQL.
 
 h3. 3.4.2
 
-* User-defined types may now be stored in a non-frozen form, allowing individual fields to be updated and deleted in "@UPDATE@ statements":#updateStmt and "@DELETE@ statements":#deleteStmt, respectively.
+* User-defined types may now be stored in a non-frozen form, allowing individual fields to be updated and deleted in "@UPDATE@ statements":#updateStmt and "@DELETE@ statements":#deleteStmt, respectively.  (CASSANDRA-7423)
 
 h3. 3.4.1
 
