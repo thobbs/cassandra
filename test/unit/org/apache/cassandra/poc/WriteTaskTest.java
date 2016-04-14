@@ -73,10 +73,9 @@ public class WriteTaskTest extends CQLTester
         WriteTask task = new WriteTask(mutations, ConsistencyLevel.ONE);
         eventLoop.scheduleTask(task);
         long startTime = System.currentTimeMillis();
-        logger.warn("#### going to cycle");
         while (task.status != Task.Status.COMPLETED)
             eventLoop.cycle();
-        logger.warn("#### done with cycle, full time: {}ms", System.currentTimeMillis() - startTime);
+        logger.info("WriteTasks took {}ms to execute", System.currentTimeMillis() - startTime);
         assert task.status != Task.Status.NEW;
     }
 }

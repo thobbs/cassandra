@@ -23,8 +23,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -32,7 +30,6 @@ import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
-import org.apache.cassandra.poc.WriteTask;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.SearchIterator;
@@ -73,8 +70,6 @@ public class AtomicBTreePartition extends AbstractBTreePartition
     private static final AtomicIntegerFieldUpdater<AtomicBTreePartition> wasteTrackerUpdater = AtomicIntegerFieldUpdater.newUpdater(AtomicBTreePartition.class, "wasteTracker");
     private static final AtomicReferenceFieldUpdater<AtomicBTreePartition, Holder> refUpdater = AtomicReferenceFieldUpdater.newUpdater(AtomicBTreePartition.class, Holder.class, "ref");
 
-    public Lock pessimisticLock;
-
     /**
      * (clock + allocation) granularity are combined to give us an acceptable (waste) allocation rate that is defined by
      * the passage of real time of ALLOCATION_GRANULARITY_BYTES/CLOCK_GRANULARITY, or in this case 7.63Kb/ms, or 7.45Mb/s
@@ -94,7 +89,6 @@ public class AtomicBTreePartition extends AbstractBTreePartition
         super(metadata, partitionKey);
         this.allocator = allocator;
         this.ref = EMPTY;
-        this.pessimisticLock = new ReentrantLock();
     }
 
     protected Holder holder()

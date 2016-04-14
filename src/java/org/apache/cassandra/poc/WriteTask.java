@@ -288,7 +288,6 @@ public class WriteTask extends Task
         }
         else if (event instanceof CommitlogSyncCompleteEvent)
         {
-            // logger.warn("#### commitlog sync complete event");
             MutationTask mutTask = ((CommitlogSyncCompleteEvent) event).task;
             CommitLog.instance.executor.pending.decrementAndGet();
             CommitLogSegment.Allocation allocation = ((CommitlogSyncCompleteEvent) event).allocation;
@@ -309,7 +308,6 @@ public class WriteTask extends Task
 
     public void cleanup(EventLoop eventLoop)
     {
-        logger.warn("#### doing cleanup");
         for (MutationTask mutationTask : mutationTasks)
         {
             if (mutationTask.opGroup != null)
