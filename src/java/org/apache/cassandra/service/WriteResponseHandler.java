@@ -18,12 +18,10 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,7 +48,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
                                 Keyspace keyspace,
                                 Runnable callback,
                                 WriteType writeType,
-                                WriteTask.MutationTask mutationTask)
+                                WriteTask.SubTask mutationTask)
     {
         super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, mutationTask);
         responses = totalBlockFor();

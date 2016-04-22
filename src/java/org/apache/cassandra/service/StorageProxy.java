@@ -97,7 +97,7 @@ public class StorageProxy implements StorageProxyMBean
     private static final ClientRequestMetrics rangeMetrics = new ClientRequestMetrics("RangeSlice");
     // TODO better way to expose these for WriteTask
     public static final ClientRequestMetrics writeMetrics = new ClientRequestMetrics("Write");
-    private static final CASClientRequestMetrics casWriteMetrics = new CASClientRequestMetrics("CASWrite");
+    public static final CASClientRequestMetrics casWriteMetrics = new CASClientRequestMetrics("CASWrite");
     private static final CASClientRequestMetrics casReadMetrics = new CASClientRequestMetrics("CASRead");
     private static final ViewWriteMetrics viewWriteMetrics = new ViewWriteMetrics("ViewWrite");
 
@@ -323,7 +323,7 @@ public class StorageProxy implements StorageProxyMBean
         };
     }
 
-    private static Pair<List<InetAddress>, Integer> getPaxosParticipants(CFMetaData cfm, DecoratedKey key, ConsistencyLevel consistencyForPaxos) throws UnavailableException
+    public static Pair<List<InetAddress>, Integer> getPaxosParticipants(CFMetaData cfm, DecoratedKey key, ConsistencyLevel consistencyForPaxos) throws UnavailableException
     {
         Token tk = key.getToken();
         List<InetAddress> naturalEndpoints = StorageService.instance.getNaturalEndpoints(cfm.ksName, tk);
@@ -458,7 +458,7 @@ public class StorageProxy implements StorageProxyMBean
     /**
      * Unlike commitPaxos, this does not wait for replies
      */
-    private static void sendCommit(Commit commit, Iterable<InetAddress> replicas)
+    public static void sendCommit(Commit commit, Iterable<InetAddress> replicas)
     {
         MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_COMMIT, commit, Commit.serializer);
         for (InetAddress target : replicas)
@@ -2485,7 +2485,7 @@ public class StorageProxy implements StorageProxyMBean
      * Like DroppableRunnable, but if it aborts, it will rerun (on the mutation stage) after
      * marking itself as a hint in progress so that the hint backpressure mechanism can function.
      */
-    private static abstract class LocalMutationRunnable implements Runnable
+    public static abstract class LocalMutationRunnable implements Runnable
     {
         private final long constructionTime = System.currentTimeMillis();
 

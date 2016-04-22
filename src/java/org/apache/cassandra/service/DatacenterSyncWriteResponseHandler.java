@@ -48,7 +48,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
                                               Keyspace keyspace,
                                               Runnable callback,
                                               WriteType writeType,
-                                              WriteTask.MutationTask mutationTask)
+                                              WriteTask.SubTask mutationTask)
     {
         // Response is been managed by the map so make it 1 for the superclass.
         super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, mutationTask);

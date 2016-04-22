@@ -110,12 +110,12 @@ public class Server implements CassandraDaemon.Server
             Class klass = Class.forName("io.netty.channel.epoll.EpollEventLoop");
             Constructor<?> constructor = klass.getDeclaredConstructor(EventLoopGroup.class, ThreadFactory.class, Integer.class);
             constructor.setAccessible(true);
-            SingleThreadEventLoop eventLoop = (SingleThreadEventLoop) constructor.newInstance(this, threadFactory, args[0]);
+            SingleThreadEventLoop getEventLoop = (SingleThreadEventLoop) constructor.newInstance(this, threadFactory, args[0]);
 
             EventLoop cassEventLoop = new EventLoop();
-            cassEventLoop.setNettyExecutor(eventLoop);
-            eventLoop.execute(cassEventLoop::cycle);
-            return eventLoop;
+            cassEventLoop.setNettyExecutor(getEventLoop);
+            getEventLoop.execute(cassEventLoop::cycle);
+            return getEventLoop;
         }
     }
     */

@@ -20,7 +20,7 @@ package org.apache.cassandra.poc;
 import org.apache.cassandra.poc.events.Event;
 import uk.co.real_logic.agrona.TimerWheel.Timer;
 
-public class Task
+public abstract class Task
 {
     enum Status
     {
@@ -31,6 +31,8 @@ public class Task
     }
 
     protected Status status = Status.NEW;
+
+    public abstract EventLoop eventLoop();
 
     public Status initialize(EventLoop eventLoop)
     {

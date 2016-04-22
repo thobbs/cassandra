@@ -19,12 +19,10 @@ package org.apache.cassandra.service;
 
 import java.net.InetAddress;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
-import org.apache.cassandra.poc.Task;
 import org.apache.cassandra.poc.WriteTask;
 import org.apache.cassandra.poc.events.Event;
 import org.slf4j.Logger;
@@ -51,7 +49,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final Runnable callback;
     protected final Collection<InetAddress> pendingEndpoints;
     protected final WriteType writeType;
-    protected final WriteTask.MutationTask mutationTask;
+    protected final WriteTask.SubTask mutationTask;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
         = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
     private volatile int failures = 0;
@@ -65,7 +63,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
                                            ConsistencyLevel consistencyLevel,
                                            Runnable callback,
                                            WriteType writeType,
-                                           WriteTask.MutationTask mutationTask)
+                                           WriteTask.SubTask mutationTask)
     {
         this.keyspace = keyspace;
         this.pendingEndpoints = pendingEndpoints;
@@ -178,7 +176,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
             {
                 event = new WriteTask.WriteSuccessEvent(mutationTask);
             }
-            mutationTask.writeTask().eventLoop().emitEvent(event);
+            mutationTask.getTask().eventLoop().emitEvent(event);
         }
         else
         {

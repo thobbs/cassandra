@@ -43,6 +43,8 @@ public class WriteTask extends Task
     private final Iterator<? extends IMutation> mutationIterator;
     private final ArrayList<MutationTask> mutationTasks;
     private final WriteType writeType;
+    private final boolean localOnly;
+    private final Task parentTask;
 
     private EventLoop eventLoop;
     private Exception error;
@@ -58,6 +60,26 @@ public class WriteTask extends Task
         mutationTasks = new ArrayList<>(mutations.size());
         remaining = mutations.size();
         writeType = remaining <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
+
+        localOnly = false;
+        parentTask = null;
+    }
+
+    /**
+     * Used only for local mutations
+     */
+    public WriteTask(Collection<? extends IMutation> mutations, Task parentTask)
+    {
+        this.mutations = mutations;
+        this.consistencyLevel = null;
+
+        this.mutationIterator = mutations.iterator();
+        mutationTasks = new ArrayList<>(mutations.size());
+        remaining = mutations.size();
+        writeType = remaining <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
+
+        localOnly = true;
+        this.parentTask = parentTask;
     }
 
     public EventLoop eventLoop()
@@ -85,63 +107,68 @@ public class WriteTask extends Task
             // start StorageProxy.performWrite() behavior
             MutationTask mutationTask = new MutationTask(this, mutation);
             mutationTasks.add(mutationTask);
-            AbstractWriteResponseHandler<IMutation> responseHandler = makeResponseHandler(mutation, mutationTask);
-            mutationTask.responseHandler = responseHandler;
 
-            // exit early if we can't fulfill the CL at this time
-            if (checkForUnavailable(responseHandler))
-                return Status.COMPLETED;
+            boolean insertLocal = localOnly;
 
-            Iterable<InetAddress> targets = responseHandler.getTargetedEndpoints();
-
-            // extra-datacenter replicas, grouped by dc
-            Map<String, Collection<InetAddress>> dcGroups = new HashMap<>();
-            // only need to create a Message for non-local writes
-            MessageOut<Mutation> message = null;
-
-            boolean insertLocal = false;
-            ArrayList<InetAddress> endpointsToHint = null;
-
-            for (InetAddress destination : targets)
+            if (!localOnly)
             {
-                if (checkForHintOverload(destination))
+                AbstractWriteResponseHandler<IMutation> responseHandler = makeResponseHandler(mutation, mutationTask);
+                mutationTask.responseHandler = responseHandler;
+
+                // exit early if we can't fulfill the CL at this time
+                if (checkForUnavailable(responseHandler))
                     return Status.COMPLETED;
 
-                if (FailureDetector.instance.isAlive(destination))
-                {
-                    if (StorageProxy.canDoLocalRequest(destination))
-                    {
-                        insertLocal = true;
-                    }
-                    else
-                    {
-                        if (message == null)
-                            message = mutation.createMessage();
+                Iterable<InetAddress> targets = responseHandler.getTargetedEndpoints();
 
-                        handleRemoteReplica(destination, message, responseHandler, dcGroups);
+                // extra-datacenter replicas, grouped by dc
+                Map<String, Collection<InetAddress>> dcGroups = new HashMap<>();
+                // only need to create a Message for non-local writes
+                MessageOut<Mutation> message = null;
+
+                ArrayList<InetAddress> endpointsToHint = null;
+
+                for (InetAddress destination : targets)
+                {
+                    if (checkForHintOverload(destination))
+                        return Status.COMPLETED;
+
+                    if (FailureDetector.instance.isAlive(destination))
+                    {
+                        if (StorageProxy.canDoLocalRequest(destination))
+                        {
+                            insertLocal = true;
+                        }
+                        else
+                        {
+                            if (message == null)
+                                message = mutation.createMessage();
+
+                            handleRemoteReplica(destination, message, responseHandler, dcGroups);
+                        }
+                    }
+                    else if (StorageProxy.shouldHint(destination))
+                    {
+                        if (endpointsToHint == null)
+                            endpointsToHint = new ArrayList<>(Iterables.size(targets));
+                        endpointsToHint.add(destination);
                     }
                 }
-                else if (StorageProxy.shouldHint(destination))
+
+                // TODO hint submission is still performed in a separate stage
+                if (endpointsToHint != null)
+                    StorageProxy.submitHint(mutation, endpointsToHint, responseHandler);
+
+                // write to remote DCs
+                if (!dcGroups.isEmpty())
                 {
-                    if (endpointsToHint == null)
-                        endpointsToHint = new ArrayList<>(Iterables.size(targets));
-                    endpointsToHint.add(destination);
+                    // for each datacenter, send the message to one node to relay the write to other replicas
+                    if (message == null)
+                        message = mutation.createMessage();
+
+                    for (Collection<InetAddress> dcTargets : dcGroups.values())
+                        StorageProxy.sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
                 }
-            }
-
-            // TODO hint submission is still performed in a separate stage
-            if (endpointsToHint != null)
-                StorageProxy.submitHint(mutation, endpointsToHint, responseHandler);
-
-            // write to remote DCs
-            if (!dcGroups.isEmpty())
-            {
-                // for each datacenter, send the message to one node to relay the write to other replicas
-                if (message == null)
-                    message = mutation.createMessage();
-
-                for (Collection<InetAddress> dcTargets : dcGroups.values())
-                    StorageProxy.sendMessagesToNonlocalDC(message, dcTargets, responseHandler);
             }
 
             if (insertLocal)
@@ -222,7 +249,16 @@ public class WriteTask extends Task
 
         mutationTask.applyToMemtable();
         if (remaining == 0)
+        {
             status = Status.COMPLETED;
+            maybeNotifyParentTask();
+        }
+    }
+
+    private void maybeNotifyParentTask()
+    {
+        if (parentTask != null)
+            parentTask.dispatchEvent(this.eventLoop, new LocalWriteCompleteEvent(this, parentTask, error));
     }
 
     private AbstractWriteResponseHandler<IMutation> makeResponseHandler(Mutation mutation, MutationTask mutationTask)
@@ -256,7 +292,6 @@ public class WriteTask extends Task
         {
             WriteTimeoutEvent wte = (WriteTimeoutEvent) event;
             WriteTimeoutException exc = new WriteTimeoutException(wte.writeType, wte.consistencyLevel, wte.acks, wte.blockedFor);
-            wte.task.error = exc;
             error = exc;
             StorageProxy.writeMetrics.timeouts.mark();
             return Status.COMPLETED;
@@ -265,14 +300,13 @@ public class WriteTask extends Task
         {
             WriteFailureEvent wfe = (WriteFailureEvent) event;
             WriteFailureException exc = new WriteFailureException(wfe.consistencyLevel, wfe.acks, wfe.failures, wfe.blockedFor, wfe.writeType);
-            wfe.task.error = exc;
             error = exc;
             StorageProxy.writeMetrics.failures.mark();
             return Status.COMPLETED;
         }
         else if (event instanceof CommitlogSegmentAvailableEvent)
         {
-            MutationTask mutTask = ((CommitlogSegmentAvailableEvent) event).task;
+            MutationTask mutTask = (MutationTask) ((CommitlogSegmentAvailableEvent) event).task;
             int totalSize = mutTask.serializedSize + CommitLogSegment.ENTRY_OVERHEAD_SIZE;
             CommitLogSegment.Allocation allocation = CommitLog.instance.allocator.allocateAsync(
                     mutTask.mutation, totalSize, ((CommitlogSegmentAvailableEvent) event).segment, mutTask);
@@ -284,15 +318,19 @@ public class WriteTask extends Task
                 return Status.REGULAR;  // commitlog sync would have blocked, wait for CommitlogSyncCompleteEvent
 
             mutTask.applyToMemtable();
+            if (remaining == 0)
+                maybeNotifyParentTask();
             return remaining == 0 ? Status.COMPLETED : Status.REGULAR;
         }
         else if (event instanceof CommitlogSyncCompleteEvent)
         {
-            MutationTask mutTask = ((CommitlogSyncCompleteEvent) event).task;
+            MutationTask mutTask = (MutationTask) ((CommitlogSyncCompleteEvent) event).task;
             CommitLog.instance.executor.pending.decrementAndGet();
             CommitLogSegment.Allocation allocation = ((CommitlogSyncCompleteEvent) event).allocation;
             mutTask.replayPosition = allocation.getReplayPosition();
             mutTask.applyToMemtable();
+            if (remaining == 0)
+                maybeNotifyParentTask();
             return remaining == 0 ? Status.COMPLETED : Status.REGULAR;
         }
         else
@@ -317,16 +355,16 @@ public class WriteTask extends Task
 
     public static abstract class WriteTaskEvent implements Event
     {
-        protected final MutationTask task;
+        protected final SubTask task;
 
-        WriteTaskEvent(MutationTask task)
+        WriteTaskEvent(SubTask task)
         {
             this.task = task;
         }
 
-        public WriteTask task()
+        public Task task()
         {
-            return task.writeTask;
+            return task.getTask();
         }
     }
 
@@ -337,7 +375,7 @@ public class WriteTask extends Task
         public final int acks;
         public final int blockedFor;
 
-        public WriteTimeoutEvent(MutationTask task, WriteType writeType, ConsistencyLevel consistencyLevel, int acks, int blockedFor)
+        public WriteTimeoutEvent(SubTask task, WriteType writeType, ConsistencyLevel consistencyLevel, int acks, int blockedFor)
         {
             super(task);
             this.writeType = writeType;
@@ -355,7 +393,7 @@ public class WriteTask extends Task
         public final int blockedFor;
         public final int failures;
 
-        public WriteFailureEvent(MutationTask task, WriteType writeType, ConsistencyLevel consistencyLevel, int acks, int blockedFor, int failures)
+        public WriteFailureEvent(SubTask task, WriteType writeType, ConsistencyLevel consistencyLevel, int acks, int blockedFor, int failures)
         {
             super(task);
             this.writeType = writeType;
@@ -368,7 +406,7 @@ public class WriteTask extends Task
 
     public static class WriteSuccessEvent extends WriteTaskEvent
     {
-        public WriteSuccessEvent(MutationTask task)
+        public WriteSuccessEvent(SubTask task)
         {
             super(task);
         }
@@ -405,7 +443,36 @@ public class WriteTask extends Task
         }
     }
 
-    public class MutationTask
+    public static class LocalWriteCompleteEvent implements Event
+    {
+        public final WriteTask writeTask;
+        public final Task parentTask;
+        public final Exception error;
+
+        public LocalWriteCompleteEvent(WriteTask writeTask, Task parentTask, Exception error)
+        {
+            this.writeTask = writeTask;
+            this.parentTask = parentTask;
+            this.error = error;
+        }
+
+        public Task task()
+        {
+            return parentTask;
+        }
+
+        public boolean didFail()
+        {
+            return error != null;
+        }
+    }
+
+    public interface SubTask
+    {
+        Task getTask();
+    }
+
+    public class MutationTask implements SubTask
     {
         private final WriteTask writeTask;
         private final Mutation mutation;
@@ -415,15 +482,13 @@ public class WriteTask extends Task
         private OpOrder.Group opGroup;
         private ReplayPosition replayPosition;
 
-        private Exception error;
-
         MutationTask(WriteTask writeTask, Mutation mutation)
         {
             this.writeTask = writeTask;
             this.mutation = mutation;
         }
 
-        public WriteTask writeTask()
+        public WriteTask getTask()
         {
             return writeTask;
         }
