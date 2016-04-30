@@ -59,7 +59,7 @@ public class Memory implements AutoCloseable
     {
         String arch = System.getProperty("os.arch");
         unaligned = arch.equals("i386") || arch.equals("x86")
-                    || arch.equals("amd64") || arch.equals("x86_64");
+                    || arch.equals("amd64") || arch.equals("x86_64") || arch.equals("s390x");
     }
 
     protected long peer;
@@ -386,6 +386,7 @@ public class Memory implements AutoCloseable
 
     public ByteBuffer[] asByteBuffers(long offset, long length)
     {
+        checkBounds(offset, offset + length);
         if (size() == 0)
             return NO_BYTE_BUFFERS;
 

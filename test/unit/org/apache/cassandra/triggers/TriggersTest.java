@@ -18,7 +18,6 @@
 package org.apache.cassandra.triggers;
 
 import java.net.InetAddress;
-import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.Collections;
 
@@ -31,22 +30,21 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.db.ArrayBackedSortedColumns;
-import org.apache.cassandra.db.BufferCell;
-import org.apache.cassandra.db.ColumnFamily;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.thrift.*;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.thrift.protocol.TBinaryProtocol;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 import static org.apache.cassandra.utils.ByteBufferUtil.toInt;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class TriggersTest
 {
@@ -197,9 +195,7 @@ public class TriggersTest
         assertUpdateIsAugmented(6);
     }
 
-    // Unfortunately, an IRE thrown from StorageProxy.cas
-    // results in a RuntimeException from QueryProcessor.process
-    @Test(expected=RuntimeException.class)
+    @Test(expected=org.apache.cassandra.exceptions.InvalidRequestException.class)
     public void onCqlUpdateWithConditionsRejectGeneratedUpdatesForDifferentPartition() throws Exception
     {
         String cf = "cf" + System.nanoTime();
@@ -215,9 +211,7 @@ public class TriggersTest
         }
     }
 
-    // Unfortunately, an IRE thrown from StorageProxy.cas
-    // results in a RuntimeException from QueryProcessor.process
-    @Test(expected=RuntimeException.class)
+    @Test(expected=org.apache.cassandra.exceptions.InvalidRequestException.class)
     public void onCqlUpdateWithConditionsRejectGeneratedUpdatesForDifferentTable() throws Exception
     {
         String cf = "cf" + System.nanoTime();
@@ -283,6 +277,27 @@ public class TriggersTest
         }
     }
 
+    @Test(expected=org.apache.cassandra.exceptions.InvalidRequestException.class)
+    public void ifTriggerThrowsErrorNoMutationsAreApplied() throws Exception
+    {
+        String cf = "cf" + System.nanoTime();
+        try
+        {
+            setupTableWithTrigger(cf, ErrorTrigger.class);
+            String cql = String.format("INSERT INTO %s.%s (k, v1) VALUES (11, 11)", ksName, cf);
+            QueryProcessor.process(cql, ConsistencyLevel.ONE);
+        }
+        catch (Exception e)
+        {
+            assertTrue(e.getMessage().equals(ErrorTrigger.MESSAGE));
+            throw e;
+        }
+        finally
+        {
+            assertUpdateNotExecuted(cf, 11);
+        }
+    }
+
     private void setupTableWithTrigger(String cf, Class<? extends ITrigger> triggerImpl)
     throws RequestExecutionException
     {
@@ -298,7 +313,7 @@ public class TriggersTest
     private void assertUpdateIsAugmented(int key)
     {
         UntypedResultSet rs = QueryProcessor.executeInternal(
-                                String.format("SELECT * FROM %s.%s WHERE k=%s", ksName, cfName, key));
+                String.format("SELECT * FROM %s.%s WHERE k=%s", ksName, cfName, key));
         assertTrue(String.format("Expected value (%s) for augmented cell v2 was not found", key), rs.one().has("v2"));
         assertEquals(999, rs.one().getInt("v2"));
     }
@@ -313,7 +328,7 @@ public class TriggersTest
     private org.apache.cassandra.thrift.Column getColumnForInsert(String columnName, int value)
     {
         org.apache.cassandra.thrift.Column column = new org.apache.cassandra.thrift.Column();
-        column.setName(Schema.instance.getCFMetaData(ksName, cfName).comparator.asAbstractType().fromString(columnName));
+        column.setName(LegacyLayout.makeLegacyComparator(Schema.instance.getCFMetaData(ksName, cfName)).fromString(columnName));
         column.setValue(bytes(value));
         column.setTimestamp(System.currentTimeMillis());
         return column;
@@ -321,33 +336,44 @@ public class TriggersTest
 
     public static class TestTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(ByteBuffer key, ColumnFamily update)
+        public Collection<Mutation> augment(Partition partition)
         {
-            ColumnFamily extraUpdate = update.cloneMeShallow(ArrayBackedSortedColumns.factory, false);
-            extraUpdate.addColumn(new BufferCell(update.metadata().comparator.makeCellName(bytes("v2")), bytes(999)));
-            return Collections.singletonList(new Mutation(ksName, key, extraUpdate));
+            RowUpdateBuilder update = new RowUpdateBuilder(partition.metadata(), FBUtilities.timestampMicros(), partition.partitionKey().getKey());
+            update.add("v2", 999);
+
+            return Collections.singletonList(update.build());
         }
     }
 
     public static class CrossPartitionTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(ByteBuffer key, ColumnFamily update)
+        public Collection<Mutation> augment(Partition partition)
         {
-            ColumnFamily extraUpdate = update.cloneMeShallow(ArrayBackedSortedColumns.factory, false);
-            extraUpdate.addColumn(new BufferCell(update.metadata().comparator.makeCellName(bytes("v2")), bytes(999)));
+            RowUpdateBuilder update = new RowUpdateBuilder(partition.metadata(), FBUtilities.timestampMicros(), toInt(partition.partitionKey().getKey()) + 1000);
+            update.add("v2", 999);
 
-            int newKey = toInt(key) + 1000;
-            return Collections.singletonList(new Mutation(ksName, bytes(newKey), extraUpdate));
+            return Collections.singletonList(update.build());
         }
     }
 
     public static class CrossTableTrigger implements ITrigger
     {
-        public Collection<Mutation> augment(ByteBuffer key, ColumnFamily update)
+        public Collection<Mutation> augment(Partition partition)
         {
-            ColumnFamily extraUpdate = ArrayBackedSortedColumns.factory.create(ksName, otherCf);
-            extraUpdate.addColumn(new BufferCell(extraUpdate.metadata().comparator.makeCellName(bytes("v2")), bytes(999)));
-            return Collections.singletonList(new Mutation(ksName, key, extraUpdate));
+
+            RowUpdateBuilder update = new RowUpdateBuilder(Schema.instance.getCFMetaData(ksName, otherCf), FBUtilities.timestampMicros(), partition.partitionKey().getKey());
+            update.add("v2", 999);
+
+            return Collections.singletonList(update.build());
+        }
+    }
+
+    public static class ErrorTrigger implements ITrigger
+    {
+        public static final String MESSAGE = "Thrown by ErrorTrigger";
+        public Collection<Mutation> augment(Partition partition)
+        {
+            throw new org.apache.cassandra.exceptions.InvalidRequestException(MESSAGE);
         }
     }
 }

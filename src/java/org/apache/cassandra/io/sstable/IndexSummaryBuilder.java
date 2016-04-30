@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.io.sstable;
 
+import java.io.IOException;
 import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.TreeMap;
@@ -151,7 +152,7 @@ public class IndexSummaryBuilder implements AutoCloseable
         return lastReadableBoundary;
     }
 
-    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart)
+    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart) throws IOException
     {
         return maybeAddEntry(decoratedKey, indexStart, 0, 0);
     }
@@ -164,7 +165,7 @@ public class IndexSummaryBuilder implements AutoCloseable
      * @param dataEnd the position in the data file we need to be able to read to (exclusive) to read this record
      *                a value of 0 indicates we are not tracking readable boundaries
      */
-    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart, long indexEnd, long dataEnd)
+    public IndexSummaryBuilder maybeAddEntry(DecoratedKey decoratedKey, long indexStart, long indexEnd, long dataEnd) throws IOException
     {
         if (keysWritten == nextSamplePosition)
         {
@@ -202,12 +203,16 @@ public class IndexSummaryBuilder implements AutoCloseable
         }
     }
 
-    public IndexSummary build(IPartitioner partitioner)
+    public void prepareToCommit()
     {
         // this method should only be called when we've finished appending records, so we truncate the
         // memory we're using to the exact amount required to represent it before building our summary
         entries.setCapacity(entries.length());
         offsets.setCapacity(offsets.length());
+    }
+
+    public IndexSummary build(IPartitioner partitioner)
+    {
         return build(partitioner, null);
     }
 
@@ -237,6 +242,13 @@ public class IndexSummaryBuilder implements AutoCloseable
     {
         entries.close();
         offsets.close();
+    }
+
+    public Throwable close(Throwable accumulate)
+    {
+        accumulate = entries.close(accumulate);
+        accumulate = offsets.close(accumulate);
+        return accumulate;
     }
 
     public static int entriesAtSamplingLevel(int samplingLevel, int maxSummarySize)
@@ -269,6 +281,7 @@ public class IndexSummaryBuilder implements AutoCloseable
      * @param partitioner the partitioner used for the index summary
      * @return a new IndexSummary
      */
+    @SuppressWarnings("resource")
     public static IndexSummary downsample(IndexSummary existing, int newSamplingLevel, int minIndexInterval, IPartitioner partitioner)
     {
         // To downsample the old index summary, we'll go through (potentially) several rounds of downsampling.

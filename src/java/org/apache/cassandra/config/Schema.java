@@ -22,21 +22,26 @@ import java.security.NoSuchAlgorithmException;
 import java.util.*;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.functions.Functions;
-import org.apache.cassandra.cql3.functions.UDAggregate;
-import org.apache.cassandra.cql3.functions.UDFunction;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.auth.AuthKeyspace;
+import org.apache.cassandra.cql3.functions.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.sstable.Descriptor;
-import org.apache.cassandra.schema.LegacySchemaTables;
+import org.apache.cassandra.repair.SystemDistributedKeyspace;
+import org.apache.cassandra.schema.*;
 import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.utils.ConcurrentBiMap;
 import org.apache.cassandra.utils.Pair;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
@@ -47,6 +52,14 @@ public class Schema
 
     public static final Schema instance = new Schema();
 
+    /* system keyspace names (the ones with LocalStrategy replication strategy) */
+    public static final Set<String> SYSTEM_KEYSPACE_NAMES = ImmutableSet.of(SystemKeyspace.NAME, SchemaKeyspace.NAME);
+
+    /* replicate system keyspace names (the ones with a "true" replication strategy) */
+    public static final Set<String> REPLICATED_SYSTEM_KEYSPACE_NAMES = ImmutableSet.of(TraceKeyspace.NAME,
+                                                                                       AuthKeyspace.NAME,
+                                                                                       SystemDistributedKeyspace.NAME);
+
     /**
      * longest permissible KS or CF name.  Our main concern is that filename not be more than 255 characters;
      * the filename will contain both the KS and CF names. Since non-schema-name components only take up
@@ -56,7 +69,7 @@ public class Schema
     public static final int NAME_LENGTH = 48;
 
     /* metadata map for faster keyspace lookup */
-    private final Map<String, KSMetaData> keyspaces = new NonBlockingHashMap<>();
+    private final Map<String, KeyspaceMetadata> keyspaces = new NonBlockingHashMap<>();
 
     /* Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace. */
     private final Map<String, Keyspace> keyspaceInstances = new NonBlockingHashMap<>();
@@ -68,6 +81,7 @@ public class Schema
 
     // 59adb24e-f3cd-3e02-97f0-5b395827453f
     public static final UUID emptyVersion;
+
 
     static
     {
@@ -86,7 +100,19 @@ public class Schema
      */
     public Schema()
     {
-        load(SystemKeyspace.definition());
+        if (!Config.isClientMode())
+        {
+            load(SchemaKeyspace.metadata());
+            load(SystemKeyspace.metadata());
+        }
+    }
+
+    /**
+     * @return whether or not the keyspace is a really system one (w/ LocalStrategy, unmodifiable, hardcoded)
+     */
+    public static boolean isSystemKeyspace(String keyspaceName)
+    {
+        return SYSTEM_KEYSPACE_NAMES.contains(keyspaceName.toLowerCase());
     }
 
     /**
@@ -105,7 +131,7 @@ public class Schema
      */
     public Schema loadFromDisk(boolean updateVersion)
     {
-        load(LegacySchemaTables.readSchemaFromSystemTables());
+        load(SchemaKeyspace.fetchNonSystemKeyspaces());
         if (updateVersion)
             updateVersion();
         return this;
@@ -118,11 +144,9 @@ public class Schema
      *
      * @return self to support chaining calls
      */
-    public Schema load(Collection<KSMetaData> keyspaceDefs)
+    public Schema load(Iterable<KeyspaceMetadata> keyspaceDefs)
     {
-        for (KSMetaData def : keyspaceDefs)
-            load(def);
-
+        keyspaceDefs.forEach(this::load);
         return this;
     }
 
@@ -133,13 +157,11 @@ public class Schema
      *
      * @return self to support chaining calls
      */
-    public Schema load(KSMetaData keyspaceDef)
+    public Schema load(KeyspaceMetadata keyspaceDef)
     {
-        for (CFMetaData cfm : keyspaceDef.cfMetaData().values())
-            load(cfm);
-
-        setKeyspaceDefinition(keyspaceDef);
-
+        keyspaceDef.tables.forEach(this::load);
+        keyspaceDef.views.forEach(this::load);
+        setKeyspaceMetadata(keyspaceDef);
         return this;
     }
 
@@ -153,6 +175,55 @@ public class Schema
     public Keyspace getKeyspaceInstance(String keyspaceName)
     {
         return keyspaceInstances.get(keyspaceName);
+    }
+
+    /**
+     * Retrieve a CFS by name even if that CFS is an index
+     *
+     * An index is identified by looking for '.' in the CF name and separating to find the base table
+     * containing the index
+     * @param ksNameAndCFName
+     * @return The named CFS or null if the keyspace, base table, or index don't exist
+     */
+    public ColumnFamilyStore getColumnFamilyStoreIncludingIndexes(Pair<String, String> ksNameAndCFName) {
+        String ksName = ksNameAndCFName.left;
+        String cfName = ksNameAndCFName.right;
+        Pair<String, String> baseTable;
+
+        /*
+         * Split does special case a one character regex, and it looks like it can detect
+         * if you use two characters to escape '.', but it still allocates a useless array.
+         */
+        int indexOfSeparator = cfName.indexOf('.');
+        if (indexOfSeparator > -1)
+            baseTable = Pair.create(ksName, cfName.substring(0, indexOfSeparator));
+        else
+            baseTable = ksNameAndCFName;
+
+        UUID cfId = cfIdMap.get(baseTable);
+        if (cfId == null)
+            return null;
+
+        Keyspace ks = keyspaceInstances.get(ksName);
+        if (ks == null)
+            return null;
+
+        ColumnFamilyStore baseCFS = ks.getColumnFamilyStore(cfId);
+
+        //Not an index
+        if (indexOfSeparator == -1)
+            return baseCFS;
+
+        if (baseCFS == null)
+            return null;
+
+        Index index = baseCFS.indexManager.getIndexByName(cfName.substring(indexOfSeparator + 1, cfName.length()));
+        if (index == null)
+            return null;
+
+        //Shouldn't ask for a backing table if there is none so just throw?
+        //Or should it return null?
+        return index.getBackingTable().get();
     }
 
     public ColumnFamilyStore getColumnFamilyStoreInstance(UUID cfId)
@@ -198,13 +269,13 @@ public class Schema
      *
      * @param ksm The keyspace definition to remove
      */
-    public void clearKeyspaceDefinition(KSMetaData ksm)
+    public void clearKeyspaceMetadata(KeyspaceMetadata ksm)
     {
         keyspaces.remove(ksm.name);
     }
 
     /**
-     * Given a keyspace name & column family name, get the column family
+     * Given a keyspace name and column family name, get the column family
      * meta data. If the keyspace name or column family name is not valid
      * this function returns null.
      *
@@ -216,8 +287,11 @@ public class Schema
     public CFMetaData getCFMetaData(String keyspaceName, String cfName)
     {
         assert keyspaceName != null;
-        KSMetaData ksm = keyspaces.get(keyspaceName);
-        return (ksm == null) ? null : ksm.cfMetaData().get(cfName);
+
+        KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
+        return ksm == null
+             ? null
+             : ksm.getTableOrViewNullable(cfName);
     }
 
     /**
@@ -238,6 +312,13 @@ public class Schema
         return getCFMetaData(descriptor.ksname, descriptor.cfname);
     }
 
+    public ViewDefinition getView(String keyspaceName, String viewName)
+    {
+        assert keyspaceName != null;
+        KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
+        return (ksm == null) ? null : ksm.views.getNullable(viewName);
+    }
+
     /**
      * Get metadata about keyspace by its name
      *
@@ -245,18 +326,33 @@ public class Schema
      *
      * @return The keyspace metadata or null if it wasn't found
      */
-    public KSMetaData getKSMetaData(String keyspaceName)
+    public KeyspaceMetadata getKSMetaData(String keyspaceName)
     {
         assert keyspaceName != null;
         return keyspaces.get(keyspaceName);
     }
 
+    private Set<String> getNonSystemKeyspacesSet()
+    {
+        return Sets.difference(keyspaces.keySet(), SYSTEM_KEYSPACE_NAMES);
+    }
+
     /**
-     * @return collection of the non-system keyspaces
+     * @return collection of the non-system keyspaces (note that this count as system only the
+     * non replicated keyspaces, so keyspace like system_traces which are replicated are actually
+     * returned. See getUserKeyspace() below if you don't want those)
      */
     public List<String> getNonSystemKeyspaces()
     {
-        return ImmutableList.copyOf(Sets.difference(keyspaces.keySet(), Collections.singleton(SystemKeyspace.NAME)));
+        return ImmutableList.copyOf(getNonSystemKeyspacesSet());
+    }
+
+    /**
+     * @return collection of the user defined keyspaces
+     */
+    public List<String> getUserKeyspaces()
+    {
+        return ImmutableList.copyOf(Sets.difference(getNonSystemKeyspacesSet(), REPLICATED_SYSTEM_KEYSPACE_NAMES));
     }
 
     /**
@@ -266,12 +362,12 @@ public class Schema
      *
      * @return metadata about ColumnFamilies the belong to the given keyspace
      */
-    public Map<String, CFMetaData> getKeyspaceMetaData(String keyspaceName)
+    public Iterable<CFMetaData> getTablesAndViews(String keyspaceName)
     {
         assert keyspaceName != null;
-        KSMetaData ksm = keyspaces.get(keyspaceName);
+        KeyspaceMetadata ksm = keyspaces.get(keyspaceName);
         assert ksm != null;
-        return ksm.cfMetaData();
+        return ksm.tablesAndViews();
     }
 
     /**
@@ -282,12 +378,14 @@ public class Schema
         return keyspaces.keySet();
     }
 
-    /**
-     * @return collection of the metadata about all keyspaces registered in the system (system and non-system)
-     */
-    public Collection<KSMetaData> getKeyspaceDefinitions()
+    public Keyspaces getKeyspaces(Set<String> includedKeyspaceNames)
     {
-        return keyspaces.values();
+        Keyspaces.Builder builder = Keyspaces.builder();
+        keyspaces.values()
+                 .stream()
+                 .filter(k -> includedKeyspaceNames.contains(k.name))
+                 .forEach(builder::add);
+        return builder.build();
     }
 
     /**
@@ -295,10 +393,14 @@ public class Schema
      *
      * @param ksm The metadata about keyspace
      */
-    public void setKeyspaceDefinition(KSMetaData ksm)
+    public void setKeyspaceMetadata(KeyspaceMetadata ksm)
     {
         assert ksm != null;
+
         keyspaces.put(ksm.name, ksm);
+        Keyspace keyspace = getKeyspaceInstance(ksm.name);
+        if (keyspace != null)
+            keyspace.setMetadata(ksm);
     }
 
     /* ColumnFamily query/control methods */
@@ -313,12 +415,12 @@ public class Schema
     }
 
     /**
-     * @param cfId The identifier of the ColumnFamily to lookup
-     * @return true if the CF id is a known one, false otherwise.
+     * @param ksAndCFName The identifier of the ColumnFamily to lookup
+     * @return true if the KS and CF pair is a known one, false otherwise.
      */
-    public boolean hasCF(UUID cfId)
+    public boolean hasCF(Pair<String, String> ksAndCFName)
     {
-        return cfIdMap.containsValue(cfId);
+        return cfIdMap.containsKey(ksAndCFName);
     }
 
     /**
@@ -352,14 +454,80 @@ public class Schema
     }
 
     /**
+     * Load individual View Definition to the schema
+     * (to make View lookup faster)
+     *
+     * @param view The View definition to load
+     */
+    public void load(ViewDefinition view)
+    {
+        CFMetaData cfm = view.metadata;
+        Pair<String, String> key = Pair.create(cfm.ksName, cfm.cfName);
+
+        if (cfIdMap.containsKey(key))
+            throw new RuntimeException(String.format("Attempting to load already loaded view %s.%s", cfm.ksName, cfm.cfName));
+
+        logger.debug("Adding {} to cfIdMap", cfm);
+        cfIdMap.put(key, cfm.cfId);
+    }
+
+    /**
      * Used for ColumnFamily data eviction out from the schema
      *
      * @param cfm The ColumnFamily Definition to evict
      */
-    public void purge(CFMetaData cfm)
+    public void unload(CFMetaData cfm)
     {
         cfIdMap.remove(Pair.create(cfm.ksName, cfm.cfName));
-        cfm.markPurged();
+    }
+
+    /**
+     * Used for View eviction from the schema
+     *
+     * @param view The view definition to evict
+     */
+    private void unload(ViewDefinition view)
+    {
+        cfIdMap.remove(Pair.create(view.ksName, view.viewName));
+    }
+
+    /* Function helpers */
+
+    /**
+     * Get all function overloads with the specified name
+     *
+     * @param name fully qualified function name
+     * @return an empty list if the keyspace or the function name are not found;
+     *         a non-empty collection of {@link Function} otherwise
+     */
+    public Collection<Function> getFunctions(FunctionName name)
+    {
+        if (!name.hasKeyspace())
+            throw new IllegalArgumentException(String.format("Function name must be fully quallified: got %s", name));
+
+        KeyspaceMetadata ksm = getKSMetaData(name.keyspace);
+        return ksm == null
+             ? Collections.emptyList()
+             : ksm.functions.get(name);
+    }
+
+    /**
+     * Find the function with the specified name
+     *
+     * @param name fully qualified function name
+     * @param argTypes function argument types
+     * @return an empty {@link Optional} if the keyspace or the function name are not found;
+     *         a non-empty optional of {@link Function} otherwise
+     */
+    public Optional<Function> findFunction(FunctionName name, List<AbstractType<?>> argTypes)
+    {
+        if (!name.hasKeyspace())
+            throw new IllegalArgumentException(String.format("Function name must be fully quallified: got %s", name));
+
+        KeyspaceMetadata ksm = getKSMetaData(name.keyspace);
+        return ksm == null
+             ? Optional.empty()
+             : ksm.functions.find(name, argTypes);
     }
 
     /* Version control */
@@ -378,7 +546,7 @@ public class Schema
      */
     public void updateVersion()
     {
-        version = LegacySchemaTables.calculateSchemaDigest();
+        version = SchemaKeyspace.calculateSchemaDigest();
         SystemKeyspace.updateSchemaVersion(version);
     }
 
@@ -398,16 +566,16 @@ public class Schema
     {
         for (String keyspaceName : getNonSystemKeyspaces())
         {
-            KSMetaData ksm = getKSMetaData(keyspaceName);
-            for (CFMetaData cfm : ksm.cfMetaData().values())
-                purge(cfm);
-            clearKeyspaceDefinition(ksm);
+            KeyspaceMetadata ksm = getKSMetaData(keyspaceName);
+            ksm.tables.forEach(this::unload);
+            ksm.views.forEach(this::unload);
+            clearKeyspaceMetadata(ksm);
         }
 
         updateVersionAndAnnounce();
     }
 
-    public void addKeyspace(KSMetaData ksm)
+    public void addKeyspace(KeyspaceMetadata ksm)
     {
         assert getKSMetaData(ksm.name) == null;
         load(ksm);
@@ -416,34 +584,28 @@ public class Schema
         MigrationManager.instance.notifyCreateKeyspace(ksm);
     }
 
-    public void updateKeyspace(String ksName)
+    public void updateKeyspace(String ksName, KeyspaceParams newParams)
     {
-        KSMetaData oldKsm = getKSMetaData(ksName);
-        assert oldKsm != null;
-        KSMetaData newKsm = LegacySchemaTables.createKeyspaceFromName(ksName).cloneWith(oldKsm.cfMetaData().values(), oldKsm.userTypes);
-
-        setKeyspaceDefinition(newKsm);
-
-        Keyspace.open(ksName).createReplicationStrategy(newKsm);
-        MigrationManager.instance.notifyUpdateKeyspace(newKsm);
+        KeyspaceMetadata ksm = update(ksName, ks -> ks.withSwapped(newParams));
+        MigrationManager.instance.notifyUpdateKeyspace(ksm);
     }
 
     public void dropKeyspace(String ksName)
     {
-        KSMetaData ksm = Schema.instance.getKSMetaData(ksName);
+        KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
         String snapshotName = Keyspace.getTimestampedSnapshotName(ksName);
 
-        CompactionManager.instance.interruptCompactionFor(ksm.cfMetaData().values(), true);
+        CompactionManager.instance.interruptCompactionFor(ksm.tablesAndViews(), true);
 
         Keyspace keyspace = Keyspace.open(ksm.name);
 
         // remove all cfs from the keyspace instance.
         List<UUID> droppedCfs = new ArrayList<>();
-        for (CFMetaData cfm : ksm.cfMetaData().values())
+        for (CFMetaData cfm : ksm.tablesAndViews())
         {
             ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(cfm.cfName);
 
-            purge(cfm);
+            unload(cfm);
 
             if (DatabaseDescriptor.isAutoSnapshot())
                 cfs.snapshot(snapshotName);
@@ -454,9 +616,9 @@ public class Schema
 
         // remove the keyspace from the static instances.
         Keyspace.clear(ksm.name);
-        clearKeyspaceDefinition(ksm);
+        clearKeyspaceMetadata(ksm);
 
-        keyspace.writeOrder.awaitNewBarrier();
+        Keyspace.writeOrder.awaitNewBarrier();
 
         // force a new segment in the CL
         CommitLog.instance.forceRecycleAllSegments(droppedCfs);
@@ -467,142 +629,177 @@ public class Schema
     public void addTable(CFMetaData cfm)
     {
         assert getCFMetaData(cfm.ksName, cfm.cfName) == null;
-        KSMetaData ksm = getKSMetaData(cfm.ksName).cloneWithTableAdded(cfm);
 
-        logger.info("Loading {}", cfm);
-
+        // Make sure the keyspace is initialized
+        Keyspace.open(cfm.ksName);
+        // Update the keyspaces map with the updated metadata
+        update(cfm.ksName, ks -> ks.withSwapped(ks.tables.with(cfm)));
+        // Update the table ID <-> table name map (cfIdMap)
         load(cfm);
 
-        // make sure it's init-ed w/ the old definitions first,
-        // since we're going to call initCf on the new one manually
-        Keyspace.open(cfm.ksName);
-
-        setKeyspaceDefinition(ksm);
-        Keyspace.open(ksm.name).initCf(cfm.cfId, cfm.cfName, true);
+        // init the new CF before switching the KSM to the new one
+        // to avoid races as in CASSANDRA-10761
+        Keyspace.open(cfm.ksName).initCf(cfm, true);
         MigrationManager.instance.notifyCreateColumnFamily(cfm);
     }
 
-    public void updateTable(String ksName, String tableName)
+    public void updateTable(CFMetaData table)
     {
-        CFMetaData cfm = getCFMetaData(ksName, tableName);
-        assert cfm != null;
-        boolean columnsDidChange = cfm.reload();
+        CFMetaData current = getCFMetaData(table.ksName, table.cfName);
+        assert current != null;
+        boolean changeAffectsStatements = current.apply(table);
 
-        Keyspace keyspace = Keyspace.open(cfm.ksName);
-        keyspace.getColumnFamilyStore(cfm.cfName).reload();
-        MigrationManager.instance.notifyUpdateColumnFamily(cfm, columnsDidChange);
+        Keyspace keyspace = Keyspace.open(current.ksName);
+        keyspace.getColumnFamilyStore(current.cfName).reload();
+        MigrationManager.instance.notifyUpdateColumnFamily(current, changeAffectsStatements);
     }
 
     public void dropTable(String ksName, String tableName)
     {
-        KSMetaData ksm = getKSMetaData(ksName);
-        assert ksm != null;
+        KeyspaceMetadata oldKsm = getKSMetaData(ksName);
+        assert oldKsm != null;
         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(tableName);
         assert cfs != null;
 
+        // make sure all the indexes are dropped, or else.
+        cfs.indexManager.markAllIndexesRemoved();
+
         // reinitialize the keyspace.
-        CFMetaData cfm = ksm.cfMetaData().get(tableName);
+        CFMetaData cfm = oldKsm.tables.get(tableName).get();
+        KeyspaceMetadata newKsm = oldKsm.withSwapped(oldKsm.tables.without(tableName));
 
-        purge(cfm);
-        setKeyspaceDefinition(ksm.cloneWithTableRemoved(cfm));
+        unload(cfm);
+        setKeyspaceMetadata(newKsm);
 
-        CompactionManager.instance.interruptCompactionFor(Arrays.asList(cfm), true);
+        CompactionManager.instance.interruptCompactionFor(Collections.singleton(cfm), true);
 
         if (DatabaseDescriptor.isAutoSnapshot())
             cfs.snapshot(Keyspace.getTimestampedSnapshotName(cfs.name));
-        Keyspace.open(ksm.name).dropCf(cfm.cfId);
+        Keyspace.open(ksName).dropCf(cfm.cfId);
         MigrationManager.instance.notifyDropColumnFamily(cfm);
 
         CommitLog.instance.forceRecycleAllSegments(Collections.singleton(cfm.cfId));
     }
 
+    public void addView(ViewDefinition view)
+    {
+        assert getCFMetaData(view.ksName, view.viewName) == null;
+
+        Keyspace keyspace = Keyspace.open(view.ksName);
+
+        // Make sure the keyspace is initialized and initialize the table.
+        keyspace.initCf(view.metadata, true);
+        // Update the keyspaces map with the updated metadata
+        update(view.ksName, ks -> ks.withSwapped(ks.views.with(view)));
+        // Update the table ID <-> table name map (cfIdMap)
+        load(view);
+
+        keyspace.viewManager.reload();
+        MigrationManager.instance.notifyCreateView(view);
+    }
+
+    public void updateView(ViewDefinition view)
+    {
+        ViewDefinition current = getKSMetaData(view.ksName).views.get(view.viewName).get();
+        boolean changeAffectsStatements = current.metadata.apply(view.metadata);
+
+        Keyspace keyspace = Keyspace.open(current.ksName);
+        keyspace.getColumnFamilyStore(current.viewName).reload();
+        Keyspace.open(current.ksName).viewManager.update(current.viewName);
+        MigrationManager.instance.notifyUpdateView(current, changeAffectsStatements);
+    }
+
+    public void dropView(String ksName, String viewName)
+    {
+        KeyspaceMetadata oldKsm = getKSMetaData(ksName);
+        assert oldKsm != null;
+        ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(viewName);
+        assert cfs != null;
+
+        // make sure all the indexes are dropped, or else.
+        cfs.indexManager.markAllIndexesRemoved();
+
+        // reinitialize the keyspace.
+        ViewDefinition view = oldKsm.views.get(viewName).get();
+        KeyspaceMetadata newKsm = oldKsm.withSwapped(oldKsm.views.without(viewName));
+
+        unload(view);
+        setKeyspaceMetadata(newKsm);
+
+        CompactionManager.instance.interruptCompactionFor(Collections.singleton(view.metadata), true);
+
+        if (DatabaseDescriptor.isAutoSnapshot())
+            cfs.snapshot(Keyspace.getTimestampedSnapshotName(cfs.name));
+        Keyspace.open(ksName).dropCf(view.metadata.cfId);
+        Keyspace.open(ksName).viewManager.reload();
+        MigrationManager.instance.notifyDropView(view);
+
+        CommitLog.instance.forceRecycleAllSegments(Collections.singleton(view.metadata.cfId));
+    }
+
     public void addType(UserType ut)
     {
-        KSMetaData ksm = getKSMetaData(ut.keyspace);
-        assert ksm != null;
-
-        logger.info("Loading {}", ut);
-
-        ksm.userTypes.addType(ut);
-
+        update(ut.keyspace, ks -> ks.withSwapped(ks.types.with(ut)));
         MigrationManager.instance.notifyCreateUserType(ut);
     }
 
     public void updateType(UserType ut)
     {
-        KSMetaData ksm = getKSMetaData(ut.keyspace);
-        assert ksm != null;
-
-        logger.info("Updating {}", ut);
-
-        ksm.userTypes.addType(ut);
-
+        update(ut.keyspace, ks -> ks.withSwapped(ks.types.without(ut.name).with(ut)));
         MigrationManager.instance.notifyUpdateUserType(ut);
     }
 
     public void dropType(UserType ut)
     {
-        KSMetaData ksm = getKSMetaData(ut.keyspace);
-        assert ksm != null;
-
-        ksm.userTypes.removeType(ut);
-
+        update(ut.keyspace, ks -> ks.withSwapped(ks.types.without(ut.name)));
         MigrationManager.instance.notifyDropUserType(ut);
     }
 
     public void addFunction(UDFunction udf)
     {
-        logger.info("Loading {}", udf);
-
-        Functions.addFunction(udf);
-
+        update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.with(udf)));
         MigrationManager.instance.notifyCreateFunction(udf);
     }
 
     public void updateFunction(UDFunction udf)
     {
-        logger.info("Updating {}", udf);
-
-        Functions.replaceFunction(udf);
-
+        update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.without(udf.name(), udf.argTypes()).with(udf)));
         MigrationManager.instance.notifyUpdateFunction(udf);
     }
 
     public void dropFunction(UDFunction udf)
     {
-        logger.info("Drop {}", udf);
-
-        // TODO: this is kind of broken as this remove all overloads of the function name
-        Functions.removeFunction(udf.name(), udf.argTypes());
-
+        update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.without(udf.name(), udf.argTypes())));
         MigrationManager.instance.notifyDropFunction(udf);
     }
 
-    public void addAggregate(UDAggregate udf)
+    public void addAggregate(UDAggregate uda)
     {
-        logger.info("Loading {}", udf);
-
-        Functions.addFunction(udf);
-
-        MigrationManager.instance.notifyCreateAggregate(udf);
+        update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.with(uda)));
+        MigrationManager.instance.notifyCreateAggregate(uda);
     }
 
-    public void updateAggregate(UDAggregate udf)
+    public void updateAggregate(UDAggregate uda)
     {
-        logger.info("Updating {}", udf);
-
-        Functions.replaceFunction(udf);
-
-        MigrationManager.instance.notifyUpdateAggregate(udf);
+        update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.without(uda.name(), uda.argTypes()).with(uda)));
+        MigrationManager.instance.notifyUpdateAggregate(uda);
     }
 
-    public void dropAggregate(UDAggregate udf)
+    public void dropAggregate(UDAggregate uda)
     {
-        logger.info("Drop {}", udf);
+        update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.without(uda.name(), uda.argTypes())));
+        MigrationManager.instance.notifyDropAggregate(uda);
+    }
 
-        // TODO: this is kind of broken as this remove all overloads of the function name
-        Functions.removeFunction(udf.name(), udf.argTypes());
+    private synchronized KeyspaceMetadata update(String keyspaceName, java.util.function.Function<KeyspaceMetadata, KeyspaceMetadata> transformation)
+    {
+        KeyspaceMetadata current = getKSMetaData(keyspaceName);
+        if (current == null)
+            throw new IllegalStateException(String.format("Keyspace %s doesn't exist", keyspaceName));
 
-        MigrationManager.instance.notifyDropAggregate(udf);
+        KeyspaceMetadata transformed = transformation.apply(current);
+        setKeyspaceMetadata(transformed);
+
+        return transformed;
     }
 }

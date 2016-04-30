@@ -69,12 +69,14 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
             set(getCurrentState());
     }
 
-    private StreamResultFuture(UUID planId, String description, boolean keepSSTableLevels)
+    private StreamResultFuture(UUID planId, String description, boolean keepSSTableLevels, boolean isIncremental)
     {
-        this(planId, description, new StreamCoordinator(0, keepSSTableLevels, new DefaultConnectionFactory()));
+        this(planId, description, new StreamCoordinator(0, keepSSTableLevels, isIncremental,
+                                                        new DefaultConnectionFactory(), false));
     }
 
-    static StreamResultFuture init(UUID planId, String description, Collection<StreamEventHandler> listeners, StreamCoordinator coordinator)
+    static StreamResultFuture init(UUID planId, String description, Collection<StreamEventHandler> listeners,
+                                   StreamCoordinator coordinator)
     {
         StreamResultFuture future = createAndRegister(planId, description, coordinator);
         if (listeners != null)
@@ -90,7 +92,8 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
         {
             session.init(future);
         }
-        coordinator.connectAllStreamSessions();
+
+        coordinator.connect(future);
 
         return future;
     }
@@ -102,7 +105,8 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
                                                                     Socket socket,
                                                                     boolean isForOutgoing,
                                                                     int version,
-                                                                    boolean keepSSTableLevel) throws IOException
+                                                                    boolean keepSSTableLevel,
+                                                                    boolean isIncremental) throws IOException
     {
         StreamResultFuture future = StreamManager.instance.getReceivingStream(planId);
         if (future == null)
@@ -110,7 +114,7 @@ public final class StreamResultFuture extends AbstractFuture<StreamState>
             logger.info("[Stream #{} ID#{}] Creating new streaming plan for {}", planId, sessionIndex, description);
 
             // The main reason we create a StreamResultFuture on the receiving side is for JMX exposure.
-            future = new StreamResultFuture(planId, description, keepSSTableLevel);
+            future = new StreamResultFuture(planId, description, keepSSTableLevel, isIncremental);
             StreamManager.instance.registerReceiving(future);
         }
         future.attachSocket(from, sessionIndex, socket, isForOutgoing, version);

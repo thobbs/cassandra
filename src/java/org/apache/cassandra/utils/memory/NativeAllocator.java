@@ -24,17 +24,8 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.db.Cell;
-import org.apache.cassandra.db.CounterCell;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletedCell;
-import org.apache.cassandra.db.ExpiringCell;
-import org.apache.cassandra.db.NativeCell;
-import org.apache.cassandra.db.NativeCounterCell;
-import org.apache.cassandra.db.NativeDecoratedKey;
-import org.apache.cassandra.db.NativeDeletedCell;
-import org.apache.cassandra.db.NativeExpiringCell;
+import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 public class NativeAllocator extends MemtableAllocator
@@ -54,34 +45,42 @@ public class NativeAllocator extends MemtableAllocator
 
     private final AtomicReference<Region> currentRegion = new AtomicReference<>();
     private final ConcurrentLinkedQueue<Region> regions = new ConcurrentLinkedQueue<>();
+    private final EnsureOnHeap.CloneToHeap cloneToHeap = new EnsureOnHeap.CloneToHeap();
 
     protected NativeAllocator(NativePool pool)
     {
         super(pool.onHeap.newAllocator(), pool.offHeap.newAllocator());
     }
 
-    @Override
-    public Cell clone(Cell cell, CFMetaData cfm, OpOrder.Group writeOp)
+    private static class CloningBTreeRowBuilder extends BTreeRow.Builder
     {
-        return new NativeCell(this, writeOp, cell);
+        final OpOrder.Group writeOp;
+        final NativeAllocator allocator;
+        private CloningBTreeRowBuilder(OpOrder.Group writeOp, NativeAllocator allocator)
+        {
+            super(true);
+            this.writeOp = writeOp;
+            this.allocator = allocator;
+        }
+
+        @Override
+        public void newRow(Clustering clustering)
+        {
+            if (clustering != Clustering.STATIC_CLUSTERING)
+                clustering = new NativeClustering(allocator, writeOp, clustering);
+            super.newRow(clustering);
+        }
+
+        @Override
+        public void addCell(Cell cell)
+        {
+            super.addCell(new NativeCell(allocator, writeOp, cell));
+        }
     }
 
-    @Override
-    public CounterCell clone(CounterCell cell, CFMetaData cfm, OpOrder.Group writeOp)
+    public Row.Builder rowBuilder(OpOrder.Group opGroup)
     {
-        return new NativeCounterCell(this, writeOp, cell);
-    }
-
-    @Override
-    public DeletedCell clone(DeletedCell cell, CFMetaData cfm, OpOrder.Group writeOp)
-    {
-        return new NativeDeletedCell(this, writeOp, cell);
-    }
-
-    @Override
-    public ExpiringCell clone(ExpiringCell cell, CFMetaData cfm, OpOrder.Group writeOp)
-    {
-        return new NativeExpiringCell(this, writeOp, cell);
+        return new CloningBTreeRowBuilder(opGroup, this);
     }
 
     public DecoratedKey clone(DecoratedKey key, OpOrder.Group writeOp)
@@ -93,6 +92,11 @@ public class NativeAllocator extends MemtableAllocator
     public MemtableAllocator.DataReclaimer reclaimer()
     {
         return NO_OP;
+    }
+
+    public EnsureOnHeap ensureOnHeap()
+    {
+        return cloneToHeap;
     }
 
     public long allocate(int size, OpOrder.Group opGroup)
@@ -161,6 +165,7 @@ public class NativeAllocator extends MemtableAllocator
     {
         for (Region region : regions)
             MemoryUtil.free(region.peer);
+
         super.setDiscarded();
     }
 
@@ -206,12 +211,12 @@ public class NativeAllocator extends MemtableAllocator
          * Offset for the next allocation, or the sentinel value -1
          * which implies that the region is still uninitialized.
          */
-        private AtomicInteger nextFreeOffset = new AtomicInteger(0);
+        private final AtomicInteger nextFreeOffset = new AtomicInteger(0);
 
         /**
          * Total number of allocations satisfied from this buffer
          */
-        private AtomicInteger allocCount = new AtomicInteger();
+        private final AtomicInteger allocCount = new AtomicInteger();
 
         /**
          * Create an uninitialized region. Note that memory is not allocated yet, so

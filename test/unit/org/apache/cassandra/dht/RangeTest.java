@@ -1,37 +1,43 @@
 /*
-* Licensed to the Apache Software Foundation (ASF) under one
-* or more contributor license agreements.  See the NOTICE file
-* distributed with this work for additional information
-* regarding copyright ownership.  The ASF licenses this file
-* to you under the Apache License, Version 2.0 (the
-* "License"); you may not use this file except in compliance
-* with the License.  You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing,
-* software distributed under the License is distributed on an
-* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-* KIND, either express or implied.  See the License for the
-* specific language governing permissions and limitations
-* under the License.
-*/
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.cassandra.dht;
 
 import java.nio.ByteBuffer;
+import java.util.Collection;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Random;
 import java.util.Set;
 
-import static java.util.Arrays.asList;
-
+import com.google.common.base.Joiner;
 import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
-import org.apache.cassandra.db.RowPosition;
-import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
-import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
 
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.dht.ByteOrderedPartitioner.BytesToken;
+import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
+
+import static java.util.Arrays.asList;
 import static org.apache.cassandra.Util.range;
+import static org.junit.Assert.*;
 
 
 public class RangeTest
@@ -183,7 +189,7 @@ public class RangeTest
     }
 
     @SafeVarargs
-    static <T extends RingPosition<T>> void assertIntersection(Range<T> one, Range<T> two, Range<T> ... ranges)
+    static <T extends RingPosition<T>> void assertIntersection(Range<T> one, Range<T> two, Range<T>... ranges)
     {
         Set<Range<T>> correct = Range.rangeSet(ranges);
         Set<Range<T>> result1 = one.intersectionWith(two);
@@ -323,6 +329,59 @@ public class RangeTest
         assert t1.compareTo(t4) == 0;
     }
 
+    private Range<Token> makeRange(long token1, long token2)
+    {
+        return new Range<>(new Murmur3Partitioner.LongToken(token1), new Murmur3Partitioner.LongToken(token2));
+    }
+
+    private void assertRanges(Set<Range<Token>> result, Long ... tokens)
+    {
+        assert tokens.length % 2 ==0;
+
+        final Set<Range<Token>> expected = new HashSet<>();
+        for(int i=0; i < tokens.length; i+=2)
+        {
+            expected.add(makeRange(tokens[i], tokens[i+1]));
+        }
+
+        assert CollectionUtils.isEqualCollection(result, expected);
+
+    }
+
+    @Test
+    public void testSubtractAll()
+    {
+        Range<Token> range = new Range<Token>(new Murmur3Partitioner.LongToken(1L), new Murmur3Partitioner.LongToken(100L));
+
+        Collection<Range<Token>> collection = new HashSet<>();
+        collection.add(makeRange(1L, 10L));
+        assertRanges(range.subtractAll(collection), 10L, 100L);
+        collection.add(makeRange(90L, 100L));
+        assertRanges(range.subtractAll(collection), 10L, 90L);
+        collection.add(makeRange(54L, 60L));
+        assertRanges(range.subtractAll(collection), 10L, 54L, 60L, 90L);
+        collection.add(makeRange(80L, 95L));
+        assertRanges(range.subtractAll(collection), 10L, 54L, 60L, 80L);
+    }
+
+    @Test
+    public void testSubtractAllWithWrapAround()
+    {
+        Range<Token> range = new Range<Token>(new Murmur3Partitioner.LongToken(100L), new Murmur3Partitioner.LongToken(10L));
+
+        Collection<Range<Token>> collection = new HashSet<>();
+        collection.add(makeRange(20L, 30L));
+        assertRanges(range.subtractAll(collection), 100L, 10L);
+        collection.add(makeRange(200L, 500L));
+        assertRanges(range.subtractAll(collection), 100L, 200L, 500L, 10L);
+        collection.add(makeRange(1L, 10L));
+        assertRanges(range.subtractAll(collection), 100L, 200L, 500L, 1L);
+        collection.add(makeRange(0L, 1L));
+        assertRanges(range.subtractAll(collection), 100L, 200L, 500L, 0L);
+        collection.add(makeRange(1000L, 0));
+        assertRanges(range.subtractAll(collection), 100L, 200L, 500L, 1000L);
+    }
+    
     private Range<Token> makeRange(String token1, String token2)
     {
         return new Range<Token>(new BigIntegerToken(token1), new BigIntegerToken(token2));
@@ -479,7 +538,7 @@ public class RangeTest
     @Test
     public void testNormalizeNoop()
     {
-        List<Range<RowPosition>> l;
+        List<Range<PartitionPosition>> l;
 
         l = asList(range("1", "3"), range("4", "5"));
         assertNormalize(l, l);
@@ -488,7 +547,7 @@ public class RangeTest
     @Test
     public void testNormalizeSimpleOverlap()
     {
-        List<Range<RowPosition>> input, expected;
+        List<Range<PartitionPosition>> input, expected;
 
         input = asList(range("1", "4"), range("3", "5"));
         expected = asList(range("1", "5"));
@@ -502,7 +561,7 @@ public class RangeTest
     @Test
     public void testNormalizeSort()
     {
-        List<Range<RowPosition>> input, expected;
+        List<Range<PartitionPosition>> input, expected;
 
         input = asList(range("4", "5"), range("1", "3"));
         expected = asList(range("1", "3"), range("4", "5"));
@@ -512,7 +571,7 @@ public class RangeTest
     @Test
     public void testNormalizeUnwrap()
     {
-        List<Range<RowPosition>> input, expected;
+        List<Range<PartitionPosition>> input, expected;
 
         input = asList(range("9", "2"));
         expected = asList(range("", "2"), range("9", ""));
@@ -522,7 +581,7 @@ public class RangeTest
     @Test
     public void testNormalizeComplex()
     {
-        List<Range<RowPosition>> input, expected;
+        List<Range<PartitionPosition>> input, expected;
 
         input = asList(range("8", "2"), range("7", "9"), range("4", "5"));
         expected = asList(range("", "2"), range("4", "5"), range("7", ""));
@@ -539,5 +598,80 @@ public class RangeTest
         input = asList(range ("", "1"), range("1", "4"), range("4", "5"), range("5", ""));
         expected = asList(range("", ""));
         assertNormalize(input, expected);
+    }
+
+    @Test
+    public void testRandomOrderedRangeContainmentChecker()
+    {
+        Random r = new Random();
+        for (int j = 0; j < 1000; j++)
+        {
+            int numTokens = r.nextInt(300) + 1;
+            List<Range<Token>> ranges = new ArrayList<>(numTokens);
+            List<Token> tokens = new ArrayList<>(2 * numTokens);
+            for (int i = 0; i < 2 * numTokens; i++)
+                tokens.add(t(r.nextLong()));
+
+            Collections.sort(tokens);
+
+            for (int i = 0; i < tokens.size(); i++)
+            {
+                ranges.add(new Range<>(tokens.get(i), tokens.get(i + 1)));
+                i++;
+            }
+
+            List<Token> tokensToTest = new ArrayList<>();
+            for (int i = 0; i < 10000; i++)
+                tokensToTest.add(t(r.nextLong()));
+
+            tokensToTest.add(t(Long.MAX_VALUE));
+            tokensToTest.add(t(Long.MIN_VALUE));
+            tokensToTest.add(t(Long.MAX_VALUE - 1));
+            tokensToTest.add(t(Long.MIN_VALUE + 1));
+            Collections.sort(tokensToTest);
+
+            Range.OrderedRangeContainmentChecker checker = new Range.OrderedRangeContainmentChecker(ranges);
+            for (Token t : tokensToTest)
+            {
+                if (checker.contains(t) != Range.isInRanges(t, ranges)) // avoid running Joiner.on(..) every iteration
+                    fail(String.format("This should never flap! If it does, it is a bug (ranges = %s, token = %s)", Joiner.on(",").join(ranges), t));
+            }
+        }
+    }
+
+    @Test
+    public void testBoundariesORCC()
+    {
+        List<Range<Token>> ranges = asList(r(Long.MIN_VALUE, Long.MIN_VALUE + 1), r(Long.MAX_VALUE - 1, Long.MAX_VALUE));
+        Range.OrderedRangeContainmentChecker checker = new Range.OrderedRangeContainmentChecker(ranges);
+        assertFalse(checker.contains(t(Long.MIN_VALUE)));
+        assertTrue(checker.contains(t(Long.MIN_VALUE + 1)));
+        assertFalse(checker.contains(t(0)));
+        assertFalse(checker.contains(t(Long.MAX_VALUE - 1)));
+        assertTrue(checker.contains(t(Long.MAX_VALUE)));
+    }
+
+    private static Range<Token> r(long left, long right)
+    {
+        return new Range<>(t(left), t(right));
+    }
+    private static Token t(long t)
+    {
+        return new Murmur3Partitioner.LongToken(t);
+    }
+
+    @Test
+    public void testCompareTo_SameObject_WrapAround()
+    {
+        Range<Token> range = r(10, -10);
+        assertEquals(0, range.compareTo(range));
+    }
+
+    @Test
+    public void testCompareTo_BothWrapAround()
+    {
+        Range<Token> r0 = r(10, -10);
+        Range<Token> r1 = r(20, -5);
+        assertNotSame(r0.compareTo(r1), r1.compareTo(r0));
     }
 }

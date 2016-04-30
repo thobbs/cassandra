@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.utils;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+
 
 /**
  * The result of the computation of an MD5 digest.
@@ -50,7 +52,7 @@ public class MD5Digest
 
     public static MD5Digest compute(String toHash)
     {
-        return compute(toHash.getBytes());
+        return compute(toHash.getBytes(StandardCharsets.UTF_8));
     }
 
     @Override

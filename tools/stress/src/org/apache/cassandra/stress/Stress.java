@@ -22,6 +22,9 @@ import java.net.Socket;
 import java.net.SocketException;
 
 import org.apache.cassandra.stress.settings.StressSettings;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.WindowsTimer;
+import org.apache.cassandra.stress.util.MultiPrintStream;
 
 public final class Stress
 {
@@ -52,64 +55,95 @@ public final class Stress
 
     public static void main(String[] arguments) throws Exception
     {
-        final StressSettings settings;
+        if (FBUtilities.isWindows())
+            WindowsTimer.startTimerPeriod(1);
+
+        int exitCode = run(arguments);
+
+        if (FBUtilities.isWindows())
+            WindowsTimer.endTimerPeriod(1);
+
+        System.exit(exitCode);
+    }
+
+
+    private static int run(String[] arguments)
+    {
         try
         {
-            settings = StressSettings.parse(arguments);
-        }
-        catch (IllegalArgumentException e)
-        {
-            printHelpMessage();
-            e.printStackTrace();
-            return;
-        }
-
-        PrintStream logout = settings.log.getOutput();
-
-        if (settings.sendToDaemon != null)
-        {
-            Socket socket = new Socket(settings.sendToDaemon, 2159);
-
-            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-            BufferedReader inp = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-            Runtime.getRuntime().addShutdownHook(new ShutDown(socket, out));
-
-            out.writeObject(settings);
-
-            String line;
-
+            final StressSettings settings;
             try
             {
-                while (!socket.isClosed() && (line = inp.readLine()) != null)
-                {
-                    if (line.equals("END") || line.equals("FAILURE"))
-                    {
-                        out.writeInt(1);
-                        break;
-                    }
-
-                    logout.println(line);
-                }
+                settings = StressSettings.parse(arguments);
+                if (settings == null)
+                    return 0; // special settings action
             }
-            catch (SocketException e)
+            catch (IllegalArgumentException e)
             {
-                if (!stopped)
-                    e.printStackTrace();
+                System.out.printf("%s\n", e.getMessage());
+                printHelpMessage();
+                return 1;
             }
 
-            out.close();
-            inp.close();
+            MultiPrintStream logout = settings.log.getOutput();
+            if (settings.graph.inGraphMode()) {
+                logout.addStream(new PrintStream(settings.graph.temporaryLogFile));
+            }
 
-            socket.close();
+            if (settings.sendToDaemon != null)
+            {
+                Socket socket = new Socket(settings.sendToDaemon, 2159);
+
+                ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                BufferedReader inp = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+
+                Runtime.getRuntime().addShutdownHook(new ShutDown(socket, out));
+
+                out.writeObject(settings);
+
+                String line;
+
+                try
+                {
+                    while (!socket.isClosed() && (line = inp.readLine()) != null)
+                    {
+                        if (line.equals("END") || line.equals("FAILURE"))
+                        {
+                            out.writeInt(1);
+                            break;
+                        }
+
+                        logout.println(line);
+                    }
+                }
+                catch (SocketException e)
+                {
+                    if (!stopped)
+                        e.printStackTrace();
+                }
+
+                out.close();
+                inp.close();
+
+                socket.close();
+            }
+            else
+            {
+                StressAction stressAction = new StressAction(settings, logout);
+                stressAction.run();
+                logout.flush();
+                if (settings.graph.inGraphMode())
+                    new StressGraph(settings, arguments).generateGraph();
+            }
+
         }
-        else
+        catch (Throwable t)
         {
-            StressAction stressAction = new StressAction(settings, logout);
-            stressAction.run();
+            t.printStackTrace();
+            return 1;
         }
 
-        System.exit(0);
+        return 0;
     }
 
     /**

@@ -22,13 +22,17 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowPosition;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.IPartitioner;
-import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.io.util.Memory;
-import org.apache.cassandra.io.util.MemoryOutputStream;
+import org.apache.cassandra.io.util.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.WrappedSharedCloseable;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
@@ -46,6 +50,7 @@ import static org.apache.cassandra.io.sstable.Downsampling.BASE_SAMPLING_LEVEL;
  */
 public class IndexSummary extends WrappedSharedCloseable
 {
+    private static final Logger logger = LoggerFactory.getLogger(IndexSummary.class);
     public static final IndexSummarySerializer serializer = new IndexSummarySerializer();
 
     /**
@@ -105,9 +110,10 @@ public class IndexSummary extends WrappedSharedCloseable
 
     // binary search is notoriously more difficult to get right than it looks; this is lifted from
     // Harmony's Collections implementation
-    public int binarySearch(RowPosition key)
+    public int binarySearch(PartitionPosition key)
     {
-        ByteBuffer hollow = MemoryUtil.getHollowDirectByteBuffer();
+        // We will be comparing non-native Keys, so use a buffer with appropriate byte order
+        ByteBuffer hollow = MemoryUtil.getHollowDirectByteBuffer().order(ByteOrder.BIG_ENDIAN);
         int low = 0, mid = offsetCount, high = mid - 1, result = -1;
         while (low <= high)
         {
@@ -156,6 +162,13 @@ public class IndexSummary extends WrappedSharedCloseable
         long start = getPositionInSummary(index);
         int keySize = (int) (calculateEnd(index) - start - 8L);
         entries.setByteBuffer(buffer, start, keySize);
+    }
+
+    public void addTo(Ref.IdentityCollection identities)
+    {
+        super.addTo(identities);
+        identities.add(offsets);
+        identities.add(entries);
     }
 
     public long getPosition(int index)
@@ -283,6 +296,7 @@ public class IndexSummary extends WrappedSharedCloseable
             out.write(t.entries, 0, t.entriesLength);
         }
 
+        @SuppressWarnings("resource")
         public IndexSummary deserialize(DataInputStream in, IPartitioner partitioner, boolean haveSamplingLevel, int expectedMinIndexInterval, int maxIndexInterval) throws IOException
         {
             int minIndexInterval = in.readInt();
@@ -315,8 +329,17 @@ public class IndexSummary extends WrappedSharedCloseable
 
             Memory offsets = Memory.allocate(offsetCount * 4);
             Memory entries = Memory.allocate(offheapSize - offsets.size());
-            FBUtilities.copy(in, new MemoryOutputStream(offsets), offsets.size());
-            FBUtilities.copy(in, new MemoryOutputStream(entries), entries.size());
+            try
+            {
+                FBUtilities.copy(in, new MemoryOutputStream(offsets), offsets.size());
+                FBUtilities.copy(in, new MemoryOutputStream(entries), entries.size());
+            }
+            catch (IOException ioe)
+            {
+                offsets.free();
+                entries.free();
+                throw ioe;
+            }
             // our on-disk representation treats the offsets and the summary data as one contiguous structure,
             // in which the offsets are based from the start of the structure. i.e., if the offsets occupy
             // X bytes, the value of the first offset will be X. In memory we split the two regions up, so that
@@ -325,6 +348,27 @@ public class IndexSummary extends WrappedSharedCloseable
             for (int i = 0 ; i < offsets.size() ; i += 4)
                 offsets.setInt(i, (int) (offsets.getInt(i) - offsets.size()));
             return new IndexSummary(partitioner, offsets, offsetCount, entries, entries.size(), fullSamplingSummarySize, minIndexInterval, samplingLevel);
+        }
+
+        /**
+         * Deserializes the first and last key stored in the summary
+         *
+         * Only for use by offline tools like SSTableMetadataViewer, otherwise SSTable.first/last should be used.
+         */
+        public Pair<DecoratedKey, DecoratedKey> deserializeFirstLastKey(DataInputStream in, IPartitioner partitioner, boolean haveSamplingLevel) throws IOException
+        {
+            in.skipBytes(4); // minIndexInterval
+            int offsetCount = in.readInt();
+            long offheapSize = in.readLong();
+            if (haveSamplingLevel)
+                in.skipBytes(8); // samplingLevel, fullSamplingSummarySize
+
+            in.skip(offsetCount * 4);
+            in.skip(offheapSize - offsetCount * 4);
+
+            DecoratedKey first = partitioner.decorateKey(ByteBufferUtil.readWithLength(in));
+            DecoratedKey last = partitioner.decorateKey(ByteBufferUtil.readWithLength(in));
+            return Pair.create(first, last);
         }
     }
 }

@@ -89,7 +89,7 @@ public class CassandraAuthorizer implements IAuthorizer
         catch (RequestExecutionException e)
         {
             logger.warn("CassandraAuthorizer failed to authorize {} for {}", user, resource);
-            return Permission.NONE;
+            throw new RuntimeException(e);
         }
 
         return permissions;
@@ -417,7 +417,7 @@ public class CassandraAuthorizer implements IAuthorizer
                             return resource.applicablePermissions().contains(Permission.valueOf(s));
                         }
                     };
-                    SetSerializer<String> serializer = SetSerializer.getInstance(UTF8Serializer.instance);
+                    SetSerializer<String> serializer = SetSerializer.getInstance(UTF8Serializer.instance, UTF8Type.instance);
                     Set<String> originalPerms = serializer.deserialize(row.getBytes("permissions"));
                     Set<String> filteredPerms = ImmutableSet.copyOf(Iterables.filter(originalPerms, isApplicable));
                     insertStatement.execute(QueryState.forInternalCalls(),
@@ -439,7 +439,7 @@ public class CassandraAuthorizer implements IAuthorizer
         {
             logger.info("Unable to complete conversion of legacy permissions data (perhaps not enough nodes are upgraded yet). " +
                         "Conversion should not be considered complete");
-            logger.debug("Conversion error", e);
+            logger.trace("Conversion error", e);
         }
     }
 

@@ -20,8 +20,12 @@ package org.apache.cassandra.cql3.functions;
 import java.util.List;
 
 import com.google.common.base.Objects;
+import com.google.common.collect.ImmutableSet;
 
+import org.apache.cassandra.cql3.AssignmentTestable;
+import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.commons.lang3.text.StrBuilder;
 
 /**
  * Base class for our native/hardcoded functions.
@@ -66,9 +70,9 @@ public abstract class AbstractFunction implements Function
             && Objects.equal(this.returnType, that.returnType);
     }
 
-    public boolean usesFunction(String ksName, String functionName)
+    public Iterable<Function> getFunctions()
     {
-        return name.keyspace.equals(ksName) && name.name.equals(functionName);
+        return ImmutableSet.<Function>of(this);
     }
 
     public boolean hasReferenceTo(Function function)
@@ -80,6 +84,23 @@ public abstract class AbstractFunction implements Function
     public int hashCode()
     {
         return Objects.hashCode(name, argTypes, returnType);
+    }
+
+    public final AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+    {
+        // We should ignore the fact that the receiver type is frozen in our comparison as functions do not support
+        // frozen types for return type
+        AbstractType<?> returnType = returnType();
+        if (receiver.type.isFrozenCollection())
+            returnType = returnType.freeze();
+
+        if (receiver.type.equals(returnType))
+            return AssignmentTestable.TestResult.EXACT_MATCH;
+
+        if (receiver.type.isValueCompatibleWith(returnType))
+            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+
+        return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
     }
 
     @Override
@@ -95,5 +116,14 @@ public abstract class AbstractFunction implements Function
         }
         sb.append(") -> ").append(returnType.asCQL3Type());
         return sb.toString();
+    }
+
+    @Override
+    public String columnName(List<String> columnNames)
+    {
+        return new StrBuilder(name().toString()).append('(')
+                                                .appendWithSeparators(columnNames, ", ")
+                                                .append(')')
+                                                .toString();
     }
 }

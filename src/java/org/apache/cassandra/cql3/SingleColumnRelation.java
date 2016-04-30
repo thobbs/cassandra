@@ -34,10 +34,11 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkFalse;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkTrue;
+import static org.apache.cassandra.cql3.statements.RequestValidations.invalidRequest;
 
 /**
  * Relations encapsulate the relationship between an entity of some kind, and
- * a value (term). For example, <key> > "start" or "colname1" = "somevalue".
+ * a value (term). For example, {@code <key> > "start" or "colname1" = "somevalue"}.
  *
  */
 public final class SingleColumnRelation extends Relation
@@ -54,6 +55,9 @@ public final class SingleColumnRelation extends Relation
         this.relationType = type;
         this.value = value;
         this.inValues = inValues;
+
+        if (type == Operator.IS_NOT)
+            assert value == Constants.NULL_LITERAL;
     }
 
     /**
@@ -79,6 +83,16 @@ public final class SingleColumnRelation extends Relation
     public SingleColumnRelation(ColumnIdentifier.Raw entity, Operator type, Term.Raw value)
     {
         this(entity, null, type, value);
+    }
+
+    public Term.Raw getValue()
+    {
+        return value;
+    }
+
+    public List<? extends Term.Raw> getInValues()
+    {
+        return inValues;
     }
 
     public static SingleColumnRelation createInRelation(ColumnIdentifier.Raw entity, List<Term.Raw> inValues)
@@ -120,6 +134,13 @@ public final class SingleColumnRelation extends Relation
         }
     }
 
+    public Relation renameIdentifier(ColumnIdentifier.Raw from, ColumnIdentifier.Raw to)
+    {
+        return entity.equals(from)
+               ? new SingleColumnRelation(to, mapKey, operator(), value, inValues)
+               : this;
+    }
+
     @Override
     public String toString()
     {
@@ -129,6 +150,9 @@ public final class SingleColumnRelation extends Relation
 
         if (isIN())
             return String.format("%s IN %s", entityAsString, inValues);
+
+        if (isLIKE())
+            return String.format("%s %s", entityAsString, relationType);
 
         return String.format("%s %s %s", entityAsString, relationType, value);
     }
@@ -140,28 +164,28 @@ public final class SingleColumnRelation extends Relation
         ColumnDefinition columnDef = toColumnDefinition(cfm, entity);
         if (mapKey == null)
         {
-            Term term = toTerm(toReceivers(columnDef), value, cfm.ksName, boundNames);
-            return new SingleColumnRestriction.EQ(columnDef, term);
+            Term term = toTerm(toReceivers(columnDef, cfm.isDense()), value, cfm.ksName, boundNames);
+            return new SingleColumnRestriction.EQRestriction(columnDef, term);
         }
-        List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
+        List<? extends ColumnSpecification> receivers = toReceivers(columnDef, cfm.isDense());
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, cfm.ksName, boundNames);
         Term entryValue = toTerm(Collections.singletonList(receivers.get(1)), value, cfm.ksName, boundNames);
-        return new SingleColumnRestriction.Contains(columnDef, entryKey, entryValue);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, entryKey, entryValue);
     }
 
     @Override
     protected Restriction newINRestriction(CFMetaData cfm,
                                            VariableSpecifications boundNames) throws InvalidRequestException
     {
-        ColumnDefinition columnDef = cfm.getColumnDefinition(getEntity().prepare(cfm));
-        List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
+        ColumnDefinition columnDef = toColumnDefinition(cfm, entity);
+        List<? extends ColumnSpecification> receivers = toReceivers(columnDef, cfm.isDense());
         List<Term> terms = toTerms(receivers, inValues, cfm.ksName, boundNames);
         if (terms == null)
         {
             Term term = toTerm(receivers, value, cfm.ksName, boundNames);
-            return new SingleColumnRestriction.InWithMarker(columnDef, (Lists.Marker) term);
+            return new SingleColumnRestriction.InRestrictionWithMarker(columnDef, (Lists.Marker) term);
         }
-        return new SingleColumnRestriction.InWithValues(columnDef, terms);
+        return new SingleColumnRestriction.InRestrictionWithValues(columnDef, terms);
     }
 
     @Override
@@ -171,8 +195,8 @@ public final class SingleColumnRelation extends Relation
                                               boolean inclusive) throws InvalidRequestException
     {
         ColumnDefinition columnDef = toColumnDefinition(cfm, entity);
-        Term term = toTerm(toReceivers(columnDef), value, cfm.ksName, boundNames);
-        return new SingleColumnRestriction.Slice(columnDef, bound, inclusive, term);
+        Term term = toTerm(toReceivers(columnDef, cfm.isDense()), value, cfm.ksName, boundNames);
+        return new SingleColumnRestriction.SliceRestriction(columnDef, bound, inclusive, term);
     }
 
     @Override
@@ -181,24 +205,43 @@ public final class SingleColumnRelation extends Relation
                                                  boolean isKey) throws InvalidRequestException
     {
         ColumnDefinition columnDef = toColumnDefinition(cfm, entity);
-        Term term = toTerm(toReceivers(columnDef), value, cfm.ksName, boundNames);
-        return new SingleColumnRestriction.Contains(columnDef, term, isKey);
+        Term term = toTerm(toReceivers(columnDef, cfm.isDense()), value, cfm.ksName, boundNames);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey);
+    }
+
+    @Override
+    protected Restriction newIsNotRestriction(CFMetaData cfm,
+                                              VariableSpecifications boundNames) throws InvalidRequestException
+    {
+        ColumnDefinition columnDef = toColumnDefinition(cfm, entity);
+        // currently enforced by the grammar
+        assert value == Constants.NULL_LITERAL : "Expected null literal for IS NOT relation: " + this.toString();
+        return new SingleColumnRestriction.IsNotNullRestriction(columnDef);
+    }
+
+    @Override
+    protected Restriction newLikeRestriction(CFMetaData cfm, VariableSpecifications boundNames, Operator operator) throws InvalidRequestException
+    {
+        if (mapKey != null)
+            throw invalidRequest("%s can't be used with collections.", operator());
+
+        ColumnDefinition columnDef = toColumnDefinition(cfm, entity);
+        Term term = toTerm(toReceivers(columnDef, cfm.isDense()), value, cfm.ksName, boundNames);
+
+        return new SingleColumnRestriction.LikeRestriction(columnDef, operator, term);
     }
 
     /**
      * Returns the receivers for this relation.
      * @param columnDef the column definition
+     * @param isDense whether the table is a dense one
      *
      * @return the receivers for the specified relation.
      * @throws InvalidRequestException if the relation is invalid
      */
-    private List<? extends ColumnSpecification> toReceivers(ColumnDefinition columnDef) throws InvalidRequestException
+    private List<? extends ColumnSpecification> toReceivers(ColumnDefinition columnDef, boolean isDense) throws InvalidRequestException
     {
         ColumnSpecification receiver = columnDef;
-
-        checkFalse(columnDef.isCompactValue(),
-                   "Predicates on the non-primary-key column (%s) of a COMPACT table are not yet supported",
-                   columnDef.name);
 
         if (isIN())
         {
@@ -222,6 +265,7 @@ public final class SingleColumnRelation extends Relation
         }
 
         checkFalse(isContainsKey() && !(receiver.type instanceof MapType), "Cannot use CONTAINS KEY on non-map column %s", receiver.name);
+        checkFalse(isContains() && !(receiver.type.isCollection()), "Cannot use CONTAINS on non-collection column %s", receiver.name);
 
         if (mapKey != null)
         {
@@ -273,6 +317,6 @@ public final class SingleColumnRelation extends Relation
 
     private boolean canHaveOnlyOneValue()
     {
-        return isEQ() || (isIN() && inValues != null && inValues.size() == 1);
+        return isEQ() || isLIKE() || (isIN() && inValues != null && inValues.size() == 1);
     }
 }

@@ -84,7 +84,7 @@ public abstract class AbstractReplicationStrategy
             {
                 if (lastVersion > lastInvalidatedVersion)
                 {
-                    logger.debug("clearing cached endpoints");
+                    logger.trace("clearing cached endpoints");
                     cachedEndpoints.clear();
                     lastInvalidatedVersion = lastVersion;
                 }
@@ -297,6 +297,11 @@ public abstract class AbstractReplicationStrategy
             throw new ConfigurationException(String.format("Specified replication strategy class (%s) is not derived from AbstractReplicationStrategy", className));
         }
         return strategyClass;
+    }
+
+    public boolean hasSameSettings(AbstractReplicationStrategy other)
+    {
+        return getClass().equals(other.getClass()) && getReplicationFactor() == other.getReplicationFactor();
     }
 
     protected void validateReplicationFactor(String rf) throws ConfigurationException

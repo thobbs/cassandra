@@ -29,6 +29,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.GuidGenerator;
@@ -47,6 +48,20 @@ public class RandomPartitioner implements IPartitioner
     private static final int HEAP_SIZE = (int) ObjectSizes.measureDeep(new BigIntegerToken(FBUtilities.hashToBigInteger(ByteBuffer.allocate(1))));
 
     public static final RandomPartitioner instance = new RandomPartitioner();
+    public static final AbstractType<?> partitionOrdering = new PartitionerDefinedOrder(instance);
+
+    private final Splitter splitter = new Splitter(this)
+    {
+        public Token tokenForValue(BigInteger value)
+        {
+            return new BigIntegerToken(value);
+        }
+
+        public BigInteger valueForToken(Token token)
+        {
+            return ((BigIntegerToken)token).getTokenValue();
+        }
+    };
 
     public DecoratedKey decorateKey(ByteBuffer key)
     {
@@ -192,8 +207,24 @@ public class RandomPartitioner implements IPartitioner
         return ownerships;
     }
 
+    public Token getMaximumToken()
+    {
+        return new BigIntegerToken(MAXIMUM);
+    }
+
     public AbstractType<?> getTokenValidator()
     {
         return IntegerType.instance;
     }
+
+    public AbstractType<?> partitionOrdering()
+    {
+        return partitionOrdering;
+    }
+
+    public Optional<Splitter> splitter()
+    {
+        return Optional.of(splitter);
+    }
+
 }

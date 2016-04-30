@@ -21,11 +21,13 @@ package org.apache.cassandra.utils;
  */
 
 
-import org.apache.cassandra.db.marshal.TimeUUIDType;
-import org.junit.Test;
-
 import java.nio.ByteBuffer;
 import java.util.UUID;
+
+import org.junit.Test;
+
+import org.apache.cassandra.db.marshal.TimeUUIDType;
+import org.apache.cassandra.utils.UUIDGen;
 
 
 public class UUIDTests
@@ -46,13 +48,21 @@ public class UUIDTests
         assert one.timestamp() < two.timestamp();
     }
 
-
     @Test
     public void testDecomposeAndRaw()
     {
         UUID a = UUIDGen.getTimeUUID();
         byte[] decomposed = UUIDGen.decompose(a);
         UUID b = UUIDGen.getUUID(ByteBuffer.wrap(decomposed));
+        assert a.equals(b);
+    }
+
+    @Test
+    public void testToFromByteBuffer()
+    {
+        UUID a = UUIDGen.getTimeUUID();
+        ByteBuffer bb = UUIDGen.toByteBuffer(a);
+        UUID b = UUIDGen.getUUID(bb);
         assert a.equals(b);
     }
 

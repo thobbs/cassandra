@@ -27,10 +27,11 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
-import org.apache.cassandra.config.KSMetaData;
+import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.schema.CompactionParams;
+import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class LongLeveledCompactionStrategyTest
@@ -45,11 +46,9 @@ public class LongLeveledCompactionStrategyTest
         leveledOptions.put("sstable_size_in_mb", "1");
         SchemaLoader.prepareServer();
         SchemaLoader.createKeyspace(KEYSPACE1,
-                                    SimpleStrategy.class,
-                                    KSMetaData.optsWithRF(1),
+                                    KeyspaceParams.simple(1),
                                     SchemaLoader.standardCFMD(KEYSPACE1, CF_STANDARDLVL)
-                                                .compactionStrategyClass(LeveledCompactionStrategy.class)
-                                                .compactionStrategyOptions(leveledOptions));
+                                                .compaction(CompactionParams.lcs(leveledOptions)));
     }
 
     @Test
@@ -60,8 +59,8 @@ public class LongLeveledCompactionStrategyTest
         Keyspace keyspace = Keyspace.open(ksname);
         ColumnFamilyStore store = keyspace.getColumnFamilyStore(cfname);
         store.disableAutoCompaction();
-
-        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy)store.getCompactionStrategy();
+        CompactionStrategyManager mgr = store.getCompactionStrategyManager();
+        LeveledCompactionStrategy lcs = (LeveledCompactionStrategy) mgr.getStrategies().get(1).get(0);
 
         ByteBuffer value = ByteBuffer.wrap(new byte[100 * 1024]); // 100 KB value, make it easy to have multiple files
 
@@ -73,11 +72,11 @@ public class LongLeveledCompactionStrategyTest
         for (int r = 0; r < rows; r++)
         {
             DecoratedKey key = Util.dk(String.valueOf(r));
-            Mutation rm = new Mutation(ksname, key.getKey());
+            UpdateBuilder builder = UpdateBuilder.create(store.metadata, key);
             for (int c = 0; c < columns; c++)
-            {
-                rm.add(cfname, Util.cellname("column" + c), value, 0);
-            }
+                builder.newRow("column" + c).add("val", value);
+
+            Mutation rm = new Mutation(builder.build());
             rm.apply();
             store.forceBlockingFlush();
         }
@@ -91,14 +90,14 @@ public class LongLeveledCompactionStrategyTest
         {
             while (true)
             {
-                final AbstractCompactionTask t = lcs.getMaximalTask(Integer.MIN_VALUE).iterator().next();
-                if (t == null)
+                final AbstractCompactionTask nextTask = lcs.getNextBackgroundTask(Integer.MIN_VALUE);
+                if (nextTask == null)
                     break;
                 tasks.add(new Runnable()
                 {
                     public void run()
                     {
-                        t.execute(null);
+                        nextTask.execute(null);
                     }
                 });
             }
@@ -120,20 +119,19 @@ public class LongLeveledCompactionStrategyTest
         {
             List<SSTableReader> sstables = manifest.getLevel(level);
             // score check
-            assert (double) SSTableReader.getTotalBytes(sstables) / manifest.maxBytesForLevel(level) < 1.00;
+            assert (double) SSTableReader.getTotalBytes(sstables) / LeveledManifest.maxBytesForLevel(level, 1 * 1024 * 1024) < 1.00;
             // overlap check for levels greater than 0
-            if (level > 0)
+            for (SSTableReader sstable : sstables)
             {
-               for (SSTableReader sstable : sstables)
-               {
-                   Set<SSTableReader> overlaps = LeveledManifest.overlapping(sstable, sstables);
-                   assert overlaps.size() == 1 && overlaps.contains(sstable);
-               }
+                // level check
+                assert level == sstable.getSSTableLevel();
+
+                if (level > 0)
+                {// overlap check for levels greater than 0
+                    Set<SSTableReader> overlaps = LeveledManifest.overlapping(sstable, sstables);
+                    assert overlaps.size() == 1 && overlaps.contains(sstable);
+                }
             }
-        }
-        for (SSTableReader sstable : store.getSSTables())
-        {
-            assert sstable.getSSTableLevel() == sstable.getSSTableLevel();
         }
     }
 }

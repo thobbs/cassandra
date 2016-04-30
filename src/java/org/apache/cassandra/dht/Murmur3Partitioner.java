@@ -20,15 +20,13 @@ package org.apache.cassandra.dht;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PreHashedDecoratedKey;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.PartitionerDefinedOrder;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -48,6 +46,20 @@ public class Murmur3Partitioner implements IPartitioner
     private static final int HEAP_SIZE = (int) ObjectSizes.measureDeep(MINIMUM);
 
     public static final Murmur3Partitioner instance = new Murmur3Partitioner();
+    public static final AbstractType<?> partitionOrdering = new PartitionerDefinedOrder(instance);
+
+    private final Splitter splitter = new Splitter(this)
+    {
+        public Token tokenForValue(BigInteger value)
+        {
+            return new LongToken(value.longValue());
+        }
+
+        public BigInteger valueForToken(Token token)
+        {
+            return BigInteger.valueOf(((LongToken) token).token);
+        }
+    };
 
     public DecoratedKey decorateKey(ByteBuffer key)
     {
@@ -140,6 +152,21 @@ public class Murmur3Partitioner implements IPartitioner
         {
             return token;
         }
+
+        @Override
+        public double size(Token next)
+        {
+            LongToken n = (LongToken) next;
+            long v = n.token - token;  // Overflow acceptable and desired.
+            double d = Math.scalb((double) v, -Long.SIZE); // Scale so that the full range is 1.
+            return d > 0.0 ? d : (d + 1.0); // Adjust for signed long, also making sure t.size(t) == 1.
+        }
+
+        @Override
+        public Token increaseSlightly()
+        {
+            return new LongToken(token + 1);
+        }
     }
 
     /**
@@ -170,7 +197,12 @@ public class Murmur3Partitioner implements IPartitioner
 
     public LongToken getRandomToken()
     {
-        return new LongToken(normalize(ThreadLocalRandom.current().nextLong()));
+        return getRandomToken(ThreadLocalRandom.current());
+    }
+
+    public LongToken getRandomToken(Random r)
+    {
+        return new LongToken(normalize(r.nextLong()));
     }
 
     private long normalize(long v)
@@ -194,7 +226,7 @@ public class Murmur3Partitioner implements IPartitioner
             throw new RuntimeException("No nodes present in the cluster. Has this node finished starting up?");
         // 1-case
         if (sortedTokens.size() == 1)
-            ownerships.put((Token) i.next(), new Float(1.0));
+            ownerships.put(i.next(), new Float(1.0));
         // n-case
         else
         {
@@ -205,7 +237,7 @@ public class Murmur3Partitioner implements IPartitioner
 
             while (i.hasNext())
             {
-                t = (Token) i.next(); ti = BigInteger.valueOf(((LongToken) t).token); // The next token and its value
+                t = i.next(); ti = BigInteger.valueOf(((LongToken) t).token); // The next token and its value
                 float age = new BigDecimal(ti.subtract(tim1).add(ri).mod(ri)).divide(r, 6, BigDecimal.ROUND_HALF_EVEN).floatValue(); // %age = ((T(i) - T(i-1) + R) % R) / R
                 ownerships.put(t, age);                           // save (T(i) -> %age)
                 tim1 = ti;                                        // -> advance loop
@@ -270,5 +302,20 @@ public class Murmur3Partitioner implements IPartitioner
     public AbstractType<?> getTokenValidator()
     {
         return LongType.instance;
+    }
+
+    public Token getMaximumToken()
+    {
+        return new LongToken(Long.MAX_VALUE);
+    }
+
+    public AbstractType<?> partitionOrdering()
+    {
+        return partitionOrdering;
+    }
+
+    public Optional<Splitter> splitter()
+    {
+        return Optional.of(splitter);
     }
 }

@@ -18,12 +18,17 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 
-import org.apache.cassandra.db.ExpiringCell;
+import com.google.common.collect.Iterables;
+
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Utility class for the Parser to gather attributes for modification
@@ -31,6 +36,8 @@ import org.apache.cassandra.serializers.MarshalException;
  */
 public class Attributes
 {
+    public static final int MAX_TTL = 20 * 365 * 24 * 60 * 60; // 20 years in seconds
+
     private final Term timestamp;
     private final Term timeToLive;
 
@@ -45,10 +52,16 @@ public class Attributes
         this.timeToLive = timeToLive;
     }
 
-    public boolean usesFunction(String ksName, String functionName)
+    public Iterable<Function> getFunctions()
     {
-        return (timestamp != null && timestamp.usesFunction(ksName, functionName))
-            || (timeToLive != null && timeToLive.usesFunction(ksName, functionName));
+        if (timestamp != null && timeToLive != null)
+            return Iterables.concat(timestamp.getFunctions(), timeToLive.getFunctions());
+        else if (timestamp != null)
+            return timestamp.getFunctions();
+        else if (timeToLive != null)
+            return timeToLive.getFunctions();
+        else
+            return Collections.emptySet();
     }
 
     public boolean isTimestampSet()
@@ -70,6 +83,9 @@ public class Attributes
         if (tval == null)
             throw new InvalidRequestException("Invalid null value of timestamp");
 
+        if (tval == ByteBufferUtil.UNSET_BYTE_BUFFER)
+            return now;
+
         try
         {
             LongType.instance.validate(tval);
@@ -82,14 +98,17 @@ public class Attributes
         return LongType.instance.compose(tval);
     }
 
-    public int getTimeToLive(QueryOptions options) throws InvalidRequestException
+    public int getTimeToLive(QueryOptions options, int defaultTimeToLive) throws InvalidRequestException
     {
         if (timeToLive == null)
-            return 0;
+            return defaultTimeToLive;
 
         ByteBuffer tval = timeToLive.bindAndGet(options);
         if (tval == null)
             throw new InvalidRequestException("Invalid null value of TTL");
+
+        if (tval == ByteBufferUtil.UNSET_BYTE_BUFFER)
+            return defaultTimeToLive;
 
         try
         {
@@ -104,8 +123,11 @@ public class Attributes
         if (ttl < 0)
             throw new InvalidRequestException("A TTL must be greater or equal to 0, but was " + ttl);
 
-        if (ttl > ExpiringCell.MAX_TTL)
-            throw new InvalidRequestException(String.format("ttl is too large. requested (%d) maximum (%d)", ttl, ExpiringCell.MAX_TTL));
+        if (ttl > MAX_TTL)
+            throw new InvalidRequestException(String.format("ttl is too large. requested (%d) maximum (%d)", ttl, MAX_TTL));
+
+        if (defaultTimeToLive != LivenessInfo.NO_TTL && ttl == LivenessInfo.NO_TTL)
+            return LivenessInfo.NO_TTL;
 
         return ttl;
     }

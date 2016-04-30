@@ -24,25 +24,27 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
-import org.apache.cassandra.schema.LegacySchemaTables;
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.tracing.TraceKeyspace;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
-import org.apache.cassandra.utils.SemanticVersion;
+import org.apache.cassandra.utils.CassandraVersion;
 
 /**
  * State related to a client connection.
@@ -50,7 +52,7 @@ import org.apache.cassandra.utils.SemanticVersion;
 public class ClientState
 {
     private static final Logger logger = LoggerFactory.getLogger(ClientState.class);
-    public static final SemanticVersion DEFAULT_CQL_VERSION = org.apache.cassandra.cql3.QueryProcessor.CQL_VERSION;
+    public static final CassandraVersion DEFAULT_CQL_VERSION = org.apache.cassandra.cql3.QueryProcessor.CQL_VERSION;
 
     private static final Set<IResource> READABLE_SYSTEM_RESOURCES = new HashSet<>();
     private static final Set<IResource> PROTECTED_AUTH_RESOURCES = new HashSet<>();
@@ -60,12 +62,17 @@ public class ClientState
     {
         // We want these system cfs to be always readable to authenticated users since many tools rely on them
         // (nodetool, cqlsh, bulkloader, etc.)
-        for (String cf : Iterables.concat(Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS), LegacySchemaTables.ALL))
+        for (String cf : Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.PEERS))
             READABLE_SYSTEM_RESOURCES.add(DataResource.table(SystemKeyspace.NAME, cf));
 
-        PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthenticator().protectedResources());
-        PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthorizer().protectedResources());
-        PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getRoleManager().protectedResources());
+        SchemaKeyspace.ALL.forEach(table -> READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaKeyspace.NAME, table)));
+
+        if (!Config.isClientMode())
+        {
+            PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthenticator().protectedResources());
+            PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getAuthorizer().protectedResources());
+            PROTECTED_AUTH_RESOURCES.addAll(DatabaseDescriptor.getRoleManager().protectedResources());
+        }
 
         // allow users with sufficient privileges to alter KS level options on AUTH_KS and
         // TRACING_KS, and also to drop legacy tables (users, credentials, permissions) from
@@ -109,8 +116,9 @@ public class ClientState
     // The remote address of the client - null for internal clients.
     private final InetSocketAddress remoteAddress;
 
-    // The biggest timestamp that was returned by getTimestamp/assigned to a query
-    private final AtomicLong lastTimestampMicros = new AtomicLong(0);
+    // The biggest timestamp that was returned by getTimestamp/assigned to a query. This is global to the VM
+    // for the sake of paxos (see #9649).
+    private static final AtomicLong lastTimestampMicros = new AtomicLong(0);
 
     /**
      * Construct a new, empty ClientState for internal calls.
@@ -162,18 +170,18 @@ public class ClientState
     }
 
     /**
-     * Can be use when a timestamp has been assigned by a query, but that timestamp is
-     * not directly one returned by getTimestamp() (see SP.beginAndRepairPaxos()).
-     * This ensure following calls to getTimestamp() will return a timestamp strictly
-     * greated than the one provided to this method.
+     * This is the same than {@link #getTimestamp()} but this guarantees that the returned timestamp
+     * will not be smaller than the provided {@code minTimestampToUse}.
      */
-    public void updateLastTimestamp(long tstampMicros)
+    public long getTimestamp(long minTimestampToUse)
     {
         while (true)
         {
+            long current = Math.max(System.currentTimeMillis() * 1000, minTimestampToUse);
             long last = lastTimestampMicros.get();
-            if (tstampMicros <= last || lastTimestampMicros.compareAndSet(last, tstampMicros))
-                return;
+            long tstamp = last >= current ? last + 1 : current;
+            if (lastTimestampMicros.compareAndSet(last, tstamp))
+                return tstamp;
         }
     }
 
@@ -242,6 +250,12 @@ public class ClientState
         hasAccess(keyspace, perm, DataResource.table(keyspace, columnFamily));
     }
 
+    public void hasColumnFamilyAccess(CFMetaData cfm, Permission perm)
+    throws UnauthorizedException, InvalidRequestException
+    {
+        hasAccess(cfm.ksName, perm, cfm.resource);
+    }
+
     private void hasAccess(String keyspace, Permission perm, DataResource resource)
     throws UnauthorizedException, InvalidRequestException
     {
@@ -260,6 +274,36 @@ public class ClientState
 
     public void ensureHasPermission(Permission perm, IResource resource) throws UnauthorizedException
     {
+        if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
+            return;
+
+        // Access to built in functions is unrestricted
+        if(resource instanceof FunctionResource && resource.hasParent())
+            if (((FunctionResource)resource).getKeyspace().equals(SystemKeyspace.NAME))
+                return;
+
+        checkPermissionOnResourceChain(perm, resource);
+    }
+
+    // Convenience method called from checkAccess method of CQLStatement
+    // Also avoids needlessly creating lots of FunctionResource objects
+    public void ensureHasPermission(Permission permission, Function function)
+    {
+        // Save creating a FunctionResource is we don't need to
+        if (!DatabaseDescriptor.getAuthorizer().requireAuthorization())
+            return;
+
+        // built in functions are always available to all
+        if (function.isNative())
+            return;
+
+        checkPermissionOnResourceChain(permission, FunctionResource.function(function.name().keyspace,
+                                                                             function.name().name,
+                                                                             function.argTypes()));
+    }
+
+    private void checkPermissionOnResourceChain(Permission perm, IResource resource)
+    {
         for (IResource r : Resources.chain(resource))
             if (authorize(r).contains(perm))
                 return;
@@ -277,7 +321,7 @@ public class ClientState
             return;
 
         // prevent system keyspace modification
-        if (SystemKeyspace.NAME.equalsIgnoreCase(keyspace))
+        if (Schema.isSystemKeyspace(keyspace))
             throw new UnauthorizedException(keyspace + " keyspace is not user-modifiable.");
 
         // allow users with sufficient privileges to alter KS level options on AUTH_KS and
@@ -321,9 +365,9 @@ public class ClientState
         return user;
     }
 
-    public static SemanticVersion[] getCQLSupportedVersion()
+    public static CassandraVersion[] getCQLSupportedVersion()
     {
-        return new SemanticVersion[]{ QueryProcessor.CQL_VERSION };
+        return new CassandraVersion[]{ QueryProcessor.CQL_VERSION };
     }
 
     private Set<Permission> authorize(IResource resource)

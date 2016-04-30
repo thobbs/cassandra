@@ -104,7 +104,7 @@ public class FastByteOperations
         {
             String arch = System.getProperty("os.arch");
             boolean unaligned = arch.equals("i386") || arch.equals("x86")
-                                || arch.equals("amd64") || arch.equals("x86_64");
+                                || arch.equals("amd64") || arch.equals("x86_64") || arch.equals("s390x");
             if (!unaligned)
                 return new PureJavaOperations();
             try
@@ -333,7 +333,7 @@ public class FastByteOperations
          * @param memoryOffset2 Where to start comparing in the right buffer (pure memory address if buffer1 is null, or relative otherwise)
          * @param length1 How much to compare from the left buffer
          * @param length2 How much to compare from the right buffer
-         * @return 0 if equal, < 0 if left is less than right, etc.
+         * @return 0 if equal, {@code < 0} if left is less than right, etc.
          */
         @Inline
         public static int compareTo(Object buffer1, long memoryOffset1, int length1,
@@ -349,8 +349,8 @@ public class FastByteOperations
             int wordComparisons = minLength & ~7;
             for (int i = 0; i < wordComparisons ; i += Longs.BYTES)
             {
-                long lw = theUnsafe.getLong(buffer1, memoryOffset1 + (long) i);
-                long rw = theUnsafe.getLong(buffer2, memoryOffset2 + (long) i);
+                long lw = theUnsafe.getLong(buffer1, memoryOffset1 + i);
+                long rw = theUnsafe.getLong(buffer2, memoryOffset2 + i);
 
                 if (lw != rw)
                 {

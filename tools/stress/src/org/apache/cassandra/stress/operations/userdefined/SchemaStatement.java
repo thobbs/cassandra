@@ -20,48 +20,45 @@ package org.apache.cassandra.stress.operations.userdefined;
  * 
  */
 
-
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.ColumnDefinitions;
+import com.datastax.driver.core.DataType;
+import com.datastax.driver.core.LocalDate;
 import com.datastax.driver.core.PreparedStatement;
-import com.datastax.driver.core.ResultSet;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.stress.Operation;
 import org.apache.cassandra.stress.generate.Row;
+import org.apache.cassandra.stress.operations.PartitionOperation;
 import org.apache.cassandra.stress.settings.StressSettings;
-import org.apache.cassandra.stress.settings.ValidationType;
 import org.apache.cassandra.stress.util.JavaDriverClient;
 import org.apache.cassandra.stress.util.Timer;
-import org.apache.cassandra.thrift.CqlResult;
-import org.apache.cassandra.transport.SimpleClient;
 
-public abstract class SchemaStatement extends Operation
+public abstract class SchemaStatement extends PartitionOperation
 {
 
     final PreparedStatement statement;
     final Integer thriftId;
     final ConsistencyLevel cl;
-    final ValidationType validationType;
     final int[] argumentIndex;
     final Object[] bindBuffer;
+    final ColumnDefinitions definitions;
 
     public SchemaStatement(Timer timer, StressSettings settings, DataSpec spec,
-                           PreparedStatement statement, Integer thriftId, ConsistencyLevel cl, ValidationType validationType)
+                           PreparedStatement statement, Integer thriftId, ConsistencyLevel cl)
     {
         super(timer, settings, spec);
         this.statement = statement;
         this.thriftId = thriftId;
         this.cl = cl;
-        this.validationType = validationType;
         argumentIndex = new int[statement.getVariables().size()];
         bindBuffer = new Object[argumentIndex.length];
+        definitions = statement.getVariables();
         int i = 0;
-        for (ColumnDefinitions.Definition definition : statement.getVariables())
+        for (ColumnDefinitions.Definition definition : definitions)
             argumentIndex[i++] = spec.partitionGenerator.indexOf(definition.getName());
 
         statement.setConsistencyLevel(JavaDriverClient.from(cl));
@@ -71,7 +68,13 @@ public abstract class SchemaStatement extends Operation
     {
         for (int i = 0 ; i < argumentIndex.length ; i++)
         {
-            bindBuffer[i] = row.get(argumentIndex[i]);
+            Object value = row.get(argumentIndex[i]);
+            if (definitions.getType(i).getName().equals(DataType.date().getName()))
+            {
+                // the java driver only accepts com.datastax.driver.core.LocalDate for CQL type "DATE"
+                value= LocalDate.fromDaysSinceEpoch((Integer) value);
+            }
+            bindBuffer[i] = value;
             if (bindBuffer[i] == null && !spec.partitionGenerator.permitNulls(argumentIndex[i]))
                 throw new IllegalStateException();
         }
@@ -84,42 +87,6 @@ public abstract class SchemaStatement extends Operation
         for (int i : argumentIndex)
             args.add(spec.partitionGenerator.convert(i, row.get(i)));
         return args;
-    }
-
-    void validate(ResultSet rs)
-    {
-        switch (validationType)
-        {
-            case NOT_FAIL:
-                return;
-            case NON_ZERO:
-                if (rs.all().size() == 0)
-                    throw new IllegalStateException("Expected non-zero results");
-                break;
-            default:
-                throw new IllegalStateException("Unsupported validation type");
-        }
-    }
-
-    void validate(CqlResult rs)
-    {
-        switch (validationType)
-        {
-            case NOT_FAIL:
-                return;
-            case NON_ZERO:
-                if (rs.getRowsSize() == 0)
-                    throw new IllegalStateException("Expected non-zero results");
-                break;
-            default:
-                throw new IllegalStateException("Unsupported validation type");
-        }
-    }
-
-    @Override
-    public void run(SimpleClient client) throws IOException
-    {
-        throw new UnsupportedOperationException();
     }
 
     abstract class Runner implements RunOp

@@ -117,13 +117,14 @@ public class RangeStreamer
                          String description,
                          boolean useStrictConsistency,
                          IEndpointSnitch snitch,
-                         StreamStateStore stateStore)
+                         StreamStateStore stateStore,
+                         boolean connectSequentially)
     {
         this.metadata = metadata;
         this.tokens = tokens;
         this.address = address;
         this.description = description;
-        this.streamPlan = new StreamPlan(description, true);
+        this.streamPlan = new StreamPlan(description, true, connectSequentially);
         this.useStrictConsistency = useStrictConsistency;
         this.snitch = snitch;
         this.stateStore = stateStore;
@@ -146,18 +147,18 @@ public class RangeStreamer
         Multimap<Range<Token>, InetAddress> rangesForKeyspace = useStrictSourcesForRanges(keyspaceName)
                 ? getAllRangesWithStrictSourcesFor(keyspaceName, ranges) : getAllRangesWithSourcesFor(keyspaceName, ranges);
 
-        if (logger.isDebugEnabled())
+        if (logger.isTraceEnabled())
         {
             for (Map.Entry<Range<Token>, InetAddress> entry : rangesForKeyspace.entries())
-                logger.debug(String.format("%s: range %s exists on %s", description, entry.getKey(), entry.getValue()));
+                logger.trace(String.format("%s: range %s exists on %s", description, entry.getKey(), entry.getValue()));
         }
 
         for (Map.Entry<InetAddress, Collection<Range<Token>>> entry : getRangeFetchMap(rangesForKeyspace, sourceFilters, keyspaceName).asMap().entrySet())
         {
-            if (logger.isDebugEnabled())
+            if (logger.isTraceEnabled())
             {
                 for (Range<Token> r : entry.getValue())
-                    logger.debug(String.format("%s: range %s from source %s for keyspace %s", description, r, entry.getKey(), keyspaceName));
+                    logger.trace(String.format("%s: range %s from source %s for keyspace %s", description, r, entry.getKey(), keyspaceName));
             }
             toFetch.put(keyspaceName, entry);
         }
@@ -333,14 +334,14 @@ public class RangeStreamer
             Collection<Range<Token>> ranges = entry.getValue().getValue();
 
             // filter out already streamed ranges
-            Set<Range<Token>> availableRanges = stateStore.getAvailableRanges(keyspace, StorageService.getPartitioner());
+            Set<Range<Token>> availableRanges = stateStore.getAvailableRanges(keyspace, StorageService.instance.getTokenMetadata().partitioner);
             if (ranges.removeAll(availableRanges))
             {
                 logger.info("Some ranges of {} are already available. Skipping streaming those ranges.", availableRanges);
             }
 
-            if (logger.isDebugEnabled())
-                logger.debug("{}ing from {} ranges {}", description, source, StringUtils.join(ranges, ", "));
+            if (logger.isTraceEnabled())
+                logger.trace("{}ing from {} ranges {}", description, source, StringUtils.join(ranges, ", "));
             /* Send messages to respective folks to stream data over to me */
             streamPlan.requestRanges(source, preferred, keyspace, ranges);
         }

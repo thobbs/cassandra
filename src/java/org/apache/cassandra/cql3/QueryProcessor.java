@@ -18,56 +18,48 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.*;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Predicate;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
-import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
-import com.googlecode.concurrentlinkedhashmap.EntryWeigher;
-import com.googlecode.concurrentlinkedhashmap.EvictionListener;
-
-import org.antlr.runtime.*;
-import org.apache.cassandra.exceptions.CassandraException;
-import org.apache.cassandra.service.MigrationListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap;
+import com.googlecode.concurrentlinkedhashmap.EntryWeigher;
+import com.googlecode.concurrentlinkedhashmap.EvictionListener;
+import org.antlr.runtime.*;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
-import org.apache.cassandra.cql3.functions.*;
-
+import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.cql3.statements.*;
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.composites.CType;
-import org.apache.cassandra.db.composites.CellName;
-import org.apache.cassandra.db.composites.CellNameType;
-import org.apache.cassandra.db.composites.Composite;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.exceptions.RequestExecutionException;
-import org.apache.cassandra.exceptions.RequestValidationException;
-import org.apache.cassandra.exceptions.SyntaxException;
+import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.metrics.CQLMetrics;
-import org.apache.cassandra.service.ClientState;
-import org.apache.cassandra.service.MigrationManager;
-import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.pager.QueryPager;
-import org.apache.cassandra.service.pager.QueryPagers;
 import org.apache.cassandra.thrift.ThriftClientState;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.Server;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MD5Digest;
-import org.apache.cassandra.utils.SemanticVersion;
+import org.apache.cassandra.utils.*;
 import org.github.jamm.MemoryMeter;
 
 public class QueryProcessor implements QueryHandler
 {
-    public static final SemanticVersion CQL_VERSION = new SemanticVersion("3.2.0");
+    public static final CassandraVersion CQL_VERSION = new CassandraVersion("3.4.0");
 
     public static final QueryProcessor instance = new QueryProcessor();
 
@@ -192,6 +184,8 @@ public class QueryProcessor implements QueryHandler
         {
             throw new InvalidRequestException("Key may not be empty");
         }
+        if (key == ByteBufferUtil.UNSET_BYTE_BUFFER)
+            throw new InvalidRequestException("Key may not be unset");
 
         // check that key can be handled by FBUtilities.writeShortByteArray
         if (key.remaining() > FBUtilities.MAX_UNSIGNED_SHORT)
@@ -199,28 +193,6 @@ public class QueryProcessor implements QueryHandler
             throw new InvalidRequestException("Key length of " + key.remaining() +
                                               " is longer than maximum of " + FBUtilities.MAX_UNSIGNED_SHORT);
         }
-    }
-
-    public static void validateCellNames(Iterable<CellName> cellNames, CellNameType type) throws InvalidRequestException
-    {
-        for (CellName name : cellNames)
-            validateCellName(name, type);
-    }
-
-    public static void validateCellName(CellName name, CellNameType type) throws InvalidRequestException
-    {
-        validateComposite(name, type);
-        if (name.isEmpty())
-            throw new InvalidRequestException("Invalid empty value for clustering column of COMPACT TABLE");
-    }
-
-    public static void validateComposite(Composite name, CType type) throws InvalidRequestException
-    {
-        long serializedSize = type.serializer().serializedSize(name, TypeSizes.NATIVE);
-        if (serializedSize > Cell.MAX_NAME_LENGTH)
-            throw new InvalidRequestException(String.format("The sum of all clustering columns is too long (%s > %s)",
-                                                            serializedSize,
-                                                            Cell.MAX_NAME_LENGTH));
     }
 
     public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options)
@@ -241,7 +213,11 @@ public class QueryProcessor implements QueryHandler
         return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()));
     }
 
-    public ResultMessage process(String query, QueryState state, QueryOptions options, Map<String, byte[]> customPayload) throws RequestExecutionException, RequestValidationException
+    public ResultMessage process(String query,
+                                 QueryState state,
+                                 QueryOptions options,
+                                 Map<String, ByteBuffer> customPayload)
+                                         throws RequestExecutionException, RequestValidationException
     {
         return process(query, state, options);
     }
@@ -268,7 +244,12 @@ public class QueryProcessor implements QueryHandler
 
     public static UntypedResultSet process(String query, ConsistencyLevel cl) throws RequestExecutionException
     {
-        ResultMessage result = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()));
+        return process(query, cl, Collections.<ByteBuffer>emptyList());
+    }
+
+    public static UntypedResultSet process(String query, ConsistencyLevel cl, List<ByteBuffer> values) throws RequestExecutionException
+    {
+        ResultMessage result = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values));
         if (result instanceof ResultMessage.Rows)
             return UntypedResultSet.create(((ResultMessage.Rows)result).result);
         else
@@ -276,6 +257,11 @@ public class QueryProcessor implements QueryHandler
     }
 
     private static QueryOptions makeInternalOptions(ParsedStatement.Prepared prepared, Object[] values)
+    {
+        return makeInternalOptions(prepared, values, ConsistencyLevel.ONE);
+    }
+
+    private static QueryOptions makeInternalOptions(ParsedStatement.Prepared prepared, Object[] values, ConsistencyLevel cl)
     {
         if (prepared.boundNames.size() != values.length)
             throw new IllegalArgumentException(String.format("Invalid number of values. Expecting %d but got %d", prepared.boundNames.size(), values.length));
@@ -287,7 +273,7 @@ public class QueryProcessor implements QueryHandler
             AbstractType type = prepared.boundNames.get(i).type;
             boundValues.add(value instanceof ByteBuffer || value == null ? (ByteBuffer)value : type.decompose(value));
         }
-        return QueryOptions.forInternalCalls(boundValues);
+        return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
     private static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
@@ -313,6 +299,24 @@ public class QueryProcessor implements QueryHandler
             return null;
     }
 
+    public static UntypedResultSet execute(String query, ConsistencyLevel cl, QueryState state, Object... values)
+    throws RequestExecutionException
+    {
+        try
+        {
+            ParsedStatement.Prepared prepared = prepareInternal(query);
+            ResultMessage result = prepared.statement.execute(state, makeInternalOptions(prepared, values));
+            if (result instanceof ResultMessage.Rows)
+                return UntypedResultSet.create(((ResultMessage.Rows)result).result);
+            else
+                return null;
+        }
+        catch (RequestValidationException e)
+        {
+            throw new RuntimeException("Error validating " + query, e);
+        }
+    }
+
     public static UntypedResultSet executeInternalWithPaging(String query, int pageSize, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
@@ -320,7 +324,7 @@ public class QueryProcessor implements QueryHandler
             throw new IllegalArgumentException("Only SELECTs can be paged");
 
         SelectStatement select = (SelectStatement)prepared.statement;
-        QueryPager pager = QueryPagers.localPager(select.getPageableCommand(makeInternalOptions(prepared, values)));
+        QueryPager pager = select.getQuery(makeInternalOptions(prepared, values), FBUtilities.nowInSeconds()).getPager(null, Server.CURRENT_VERSION);
         return UntypedResultSet.create(select, pager, pageSize);
     }
 
@@ -339,19 +343,24 @@ public class QueryProcessor implements QueryHandler
             return null;
     }
 
-    public static UntypedResultSet resultify(String query, Row row)
+    public static UntypedResultSet resultify(String query, RowIterator partition)
     {
-        return resultify(query, Collections.singletonList(row));
+        return resultify(query, PartitionIterators.singletonIterator(partition));
     }
 
-    public static UntypedResultSet resultify(String query, List<Row> rows)
+    public static UntypedResultSet resultify(String query, PartitionIterator partitions)
     {
-        SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
-        ResultSet cqlRows = ss.process(rows);
-        return UntypedResultSet.create(cqlRows);
+        try (PartitionIterator iter = partitions)
+        {
+            SelectStatement ss = (SelectStatement) getStatement(query, null).statement;
+            ResultSet cqlRows = ss.process(iter, FBUtilities.nowInSeconds());
+            return UntypedResultSet.create(cqlRows);
+        }
     }
 
-    public ResultMessage.Prepared prepare(String query, QueryState state, Map<String, byte[]> customPayload) throws RequestValidationException
+    public ResultMessage.Prepared prepare(String query,
+                                          QueryState state,
+                                          Map<String, ByteBuffer> customPayload) throws RequestValidationException
     {
         return prepare(query, state);
     }
@@ -431,7 +440,11 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public ResultMessage processPrepared(CQLStatement statement, QueryState state, QueryOptions options, Map<String, byte[]> customPayload) throws RequestExecutionException, RequestValidationException
+    public ResultMessage processPrepared(CQLStatement statement,
+                                         QueryState state,
+                                         QueryOptions options,
+                                         Map<String, ByteBuffer> customPayload)
+                                                 throws RequestExecutionException, RequestValidationException
     {
         return processPrepared(statement, state, options);
     }
@@ -459,7 +472,11 @@ public class QueryProcessor implements QueryHandler
         return processStatement(statement, queryState, options);
     }
 
-    public ResultMessage processBatch(BatchStatement statement, QueryState state, BatchQueryOptions options, Map<String, byte[]> customPayload) throws RequestExecutionException, RequestValidationException
+    public ResultMessage processBatch(BatchStatement statement,
+                                      QueryState state,
+                                      BatchQueryOptions options,
+                                      Map<String, ByteBuffer> customPayload)
+                                              throws RequestExecutionException, RequestValidationException
     {
         return processBatch(statement, state, options);
     }
@@ -492,24 +509,7 @@ public class QueryProcessor implements QueryHandler
     {
         try
         {
-            // Lexer and parser
-            ErrorCollector errorCollector = new ErrorCollector(queryStr);
-            CharStream stream = new ANTLRStringStream(queryStr);
-            CqlLexer lexer = new CqlLexer(stream);
-            lexer.addErrorListener(errorCollector);
-
-            TokenStream tokenStream = new CommonTokenStream(lexer);
-            CqlParser parser = new CqlParser(tokenStream);
-            parser.addErrorListener(errorCollector);
-
-            // Parse the query string to a statement instance
-            ParsedStatement statement = parser.query();
-
-            // The errorCollector has queue up any errors that the lexer and parser may have encountered
-            // along the way, if necessary, we turn the last error into exceptions here.
-            errorCollector.throwFirstSyntaxError();
-
-            return statement;
+            return CQLFragmentParser.parseAnyUnhandled(CqlParser::query, queryStr);
         }
         catch (CassandraException ce)
         {
@@ -532,6 +532,15 @@ public class QueryProcessor implements QueryHandler
     private static long measure(Object key)
     {
         return meter.measureDeep(key);
+    }
+
+    /**
+     * Clear our internal statmeent cache for test purposes.
+     */
+    @VisibleForTesting
+    public static void clearInternalStatementsCache()
+    {
+        internalStatements.clear();
     }
 
     private static class MigrationSubscriber extends MigrationListener
@@ -587,60 +596,84 @@ public class QueryProcessor implements QueryHandler
             return ksName.equals(statementKsName) && (cfName == null || cfName.equals(statementCfName));
         }
 
-        public void onCreateFunction(String ksName, String functionName, List<AbstractType<?>> argTypes) {
-            if (Functions.getOverloadCount(new FunctionName(ksName, functionName)) > 1)
-            {
-                // in case there are other overloads, we have to remove all overloads since argument type
-                // matching may change (due to type casting)
-                removeInvalidPreparedStatementsForFunction(preparedStatements.values().iterator(), ksName, functionName);
-                removeInvalidPreparedStatementsForFunction(thriftPreparedStatements.values().iterator(), ksName, functionName);
-            }
-        }
-        public void onCreateAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes) {
-            if (Functions.getOverloadCount(new FunctionName(ksName, aggregateName)) > 1)
-            {
-                // in case there are other overloads, we have to remove all overloads since argument type
-                // matching may change (due to type casting)
-                removeInvalidPreparedStatementsForFunction(preparedStatements.values().iterator(), ksName, aggregateName);
-                removeInvalidPreparedStatementsForFunction(thriftPreparedStatements.values().iterator(), ksName, aggregateName);
-            }
+        public void onCreateFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
+        {
+            onCreateFunctionInternal(ksName, functionName, argTypes);
         }
 
-        public void onUpdateColumnFamily(String ksName, String cfName, boolean columnsDidChange)
+        public void onCreateAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
         {
-            logger.info("Column definitions for {}.{} changed, invalidating related prepared statements", ksName, cfName);
-            if (columnsDidChange)
+            onCreateFunctionInternal(ksName, aggregateName, argTypes);
+        }
+
+        private static void onCreateFunctionInternal(String ksName, String functionName, List<AbstractType<?>> argTypes)
+        {
+            // in case there are other overloads, we have to remove all overloads since argument type
+            // matching may change (due to type casting)
+            if (Schema.instance.getKSMetaData(ksName).functions.get(new FunctionName(ksName, functionName)).size() > 1)
+                removeAllInvalidPreparedStatementsForFunction(ksName, functionName);
+        }
+
+        public void onUpdateColumnFamily(String ksName, String cfName, boolean affectsStatements)
+        {
+            logger.trace("Column definitions for {}.{} changed, invalidating related prepared statements", ksName, cfName);
+            if (affectsStatements)
                 removeInvalidPreparedStatements(ksName, cfName);
+        }
+
+        public void onUpdateFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
+        {
+            // Updating a function may imply we've changed the body of the function, so we need to invalid statements so that
+            // the new definition is picked (the function is resolved at preparation time).
+            // TODO: if the function has multiple overload, we could invalidate only the statement refering to the overload
+            // that was updated. This requires a few changes however and probably doesn't matter much in practice.
+            removeAllInvalidPreparedStatementsForFunction(ksName, functionName);
+        }
+
+        public void onUpdateAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
+        {
+            // Updating a function may imply we've changed the body of the function, so we need to invalid statements so that
+            // the new definition is picked (the function is resolved at preparation time).
+            // TODO: if the function has multiple overload, we could invalidate only the statement refering to the overload
+            // that was updated. This requires a few changes however and probably doesn't matter much in practice.
+            removeAllInvalidPreparedStatementsForFunction(ksName, aggregateName);
         }
 
         public void onDropKeyspace(String ksName)
         {
-            logger.info("Keyspace {} was dropped, invalidating related prepared statements", ksName);
+            logger.trace("Keyspace {} was dropped, invalidating related prepared statements", ksName);
             removeInvalidPreparedStatements(ksName, null);
         }
 
         public void onDropColumnFamily(String ksName, String cfName)
         {
-            logger.info("Table {}.{} was dropped, invalidating related prepared statements", ksName, cfName);
+            logger.trace("Table {}.{} was dropped, invalidating related prepared statements", ksName, cfName);
             removeInvalidPreparedStatements(ksName, cfName);
         }
 
-        public void onDropFunction(String ksName, String functionName, List<AbstractType<?>> argTypes) {
+        public void onDropFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
+        {
+            removeAllInvalidPreparedStatementsForFunction(ksName, functionName);
+        }
+
+        public void onDropAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
+        {
+            removeAllInvalidPreparedStatementsForFunction(ksName, aggregateName);
+        }
+
+        private static void removeAllInvalidPreparedStatementsForFunction(String ksName, String functionName)
+        {
+            removeInvalidPreparedStatementsForFunction(internalStatements.values().iterator(), ksName, functionName);
             removeInvalidPreparedStatementsForFunction(preparedStatements.values().iterator(), ksName, functionName);
             removeInvalidPreparedStatementsForFunction(thriftPreparedStatements.values().iterator(), ksName, functionName);
         }
-        public void onDropAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
-        {
-            removeInvalidPreparedStatementsForFunction(preparedStatements.values().iterator(), ksName, aggregateName);
-            removeInvalidPreparedStatementsForFunction(thriftPreparedStatements.values().iterator(), ksName, aggregateName);
-        }
 
-        private static void removeInvalidPreparedStatementsForFunction(Iterator<ParsedStatement.Prepared> iterator,
-                                                                String ksName, String functionName)
+        private static void removeInvalidPreparedStatementsForFunction(Iterator<ParsedStatement.Prepared> statements,
+                                                                       final String ksName,
+                                                                       final String functionName)
         {
-            while (iterator.hasNext())
-                if (iterator.next().statement.usesFunction(ksName, functionName))
-                    iterator.remove();
+            Predicate<Function> matchesFunction = f -> ksName.equals(f.name().keyspace) && functionName.equals(f.name().name);
+            Iterators.removeIf(statements, statement -> Iterables.any(statement.statement.getFunctions(), matchesFunction));
         }
     }
 }

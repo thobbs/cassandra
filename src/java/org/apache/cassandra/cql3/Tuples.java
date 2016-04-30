@@ -18,15 +18,20 @@
 package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.Term.MultiColumnRaw;
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.serializers.MarshalException;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /**
  * Static helper methods and classes for tuples.
@@ -49,7 +54,7 @@ public class Tuples
      * A raw, literal tuple.  When prepared, this will become a Tuples.Value or Tuples.DelayedValue, depending
      * on whether the tuple holds NonTerminals.
      */
-    public static class Literal implements Term.MultiColumnRaw
+    public static class Literal extends Term.MultiColumnRaw
     {
         private final List<Term.Raw> elements;
 
@@ -129,10 +134,9 @@ public class Tuples
             }
         }
 
-        @Override
-        public String toString()
+        public String getText()
         {
-            return tupleToString(elements);
+            return elements.stream().map(Term.Raw::getText).collect(Collectors.joining(", ", "(", ")"));
         }
     }
 
@@ -153,7 +157,7 @@ public class Tuples
             return new Value(type.split(bytes));
         }
 
-        public ByteBuffer get(QueryOptions options)
+        public ByteBuffer get(int protocolVersion)
         {
             return TupleType.buildValue(elements);
         }
@@ -195,16 +199,13 @@ public class Tuples
 
         private ByteBuffer[] bindInternal(QueryOptions options) throws InvalidRequestException
         {
-            int version = options.getProtocolVersion();
-
             ByteBuffer[] buffers = new ByteBuffer[elements.size()];
             for (int i = 0; i < elements.size(); i++)
             {
                 buffers[i] = elements.get(i).bindAndGet(options);
-                // Inside tuples, we must force the serialization of collections to v3 whatever protocol
-                // version is in use since we're going to store directly that serialized value.
-                if (version < 3 && type.type(i).isCollection())
-                    buffers[i] = ((CollectionType)type.type(i)).getSerializer().reserializeToV3(buffers[i]);
+                // Since A tuple value is always written in its entirety Cassandra can't preserve a pre-existing value by 'not setting' the new value. Reject the query.
+                if (buffers[i] == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                    throw new InvalidRequestException(String.format("Invalid unset value for tuple field number %d", i));
             }
             return buffers;
         }
@@ -225,6 +226,11 @@ public class Tuples
         public String toString()
         {
             return tupleToString(elements);
+        }
+
+        public Iterable<Function> getFunctions()
+        {
+            return Terms.getFunctions(elements);
         }
     }
 
@@ -247,7 +253,7 @@ public class Tuples
             {
                 // Collections have this small hack that validate cannot be called on a serialized object,
                 // but the deserialization does the validation (so we're fine).
-                List<?> l = (List<?>)type.getSerializer().deserializeForNativeProtocol(value, options.getProtocolVersion());
+                List<?> l = type.getSerializer().deserializeForNativeProtocol(value, options.getProtocolVersion());
 
                 assert type.getElementsType() instanceof TupleType;
                 TupleType tupleType = (TupleType) type.getElementsType();
@@ -264,7 +270,7 @@ public class Tuples
             }
         }
 
-        public ByteBuffer get(QueryOptions options)
+        public ByteBuffer get(int protocolVersion)
         {
             throw new UnsupportedOperationException();
         }
@@ -281,7 +287,7 @@ public class Tuples
      * For example, "SELECT ... WHERE (col1, col2) > ?".
      * }
      */
-    public static class Raw extends AbstractMarker.Raw implements Term.MultiColumnRaw
+    public static class Raw extends AbstractMarker.MultiColumnRaw
     {
         public Raw(int bindIndex)
         {
@@ -311,18 +317,12 @@ public class Tuples
         {
             return new Tuples.Marker(bindIndex, makeReceiver(receivers));
         }
-
-        @Override
-        public AbstractMarker prepare(String keyspace, ColumnSpecification receiver)
-        {
-            throw new AssertionError("Tuples.Raw.prepare() requires a list of receivers");
-        }
     }
 
     /**
      * A raw marker for an IN list of tuples, like "SELECT ... WHERE (a, b, c) IN ?"
      */
-    public static class INRaw extends AbstractMarker.Raw implements MultiColumnRaw
+    public static class INRaw extends AbstractMarker.MultiColumnRaw
     {
         public INRaw(int bindIndex)
         {
@@ -356,12 +356,6 @@ public class Tuples
         {
             return new InMarker(bindIndex, makeInReceiver(receivers));
         }
-
-        @Override
-        public AbstractMarker prepare(String keyspace, ColumnSpecification receiver)
-        {
-            throw new AssertionError("Tuples.INRaw.prepare() requires a list of receivers");
-        }
     }
 
     /**
@@ -379,6 +373,8 @@ public class Tuples
         public Value bind(QueryOptions options) throws InvalidRequestException
         {
             ByteBuffer value = options.getValues().get(bindIndex);
+            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                throw new InvalidRequestException(String.format("Invalid unset value for tuple %s", receiver.name));
             return value == null ? null : Value.fromSerialized(value, (TupleType)receiver.type);
         }
     }
@@ -397,6 +393,8 @@ public class Tuples
         public InValue bind(QueryOptions options) throws InvalidRequestException
         {
             ByteBuffer value = options.getValues().get(bindIndex);
+            if (value == ByteBufferUtil.UNSET_BYTE_BUFFER)
+                throw new InvalidRequestException(String.format("Invalid unset value for %s", receiver.name));
             return value == null ? null : InValue.fromSerialized(value, (ListType)receiver.type, options);
         }
     }

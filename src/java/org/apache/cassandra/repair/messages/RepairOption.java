@@ -19,13 +19,17 @@ package org.apache.cassandra.repair.messages;
 
 import java.util.*;
 
+import com.google.common.base.Joiner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.repair.RepairParallelism;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Repair options.
@@ -41,6 +45,7 @@ public class RepairOption
     public static final String DATACENTERS_KEY = "dataCenters";
     public static final String HOSTS_KEY = "hosts";
     public static final String TRACE_KEY = "trace";
+    public static final String SUB_RANGE_REPAIR_KEY = "sub_range_repair";
 
     // we don't want to push nodes too much for repair
     public static final int MAX_JOB_THREADS = 4;
@@ -53,6 +58,7 @@ public class RepairOption
      * Available options are:
      *
      * <table>
+     *     <caption>Repair Options</caption>
      *     <thead>
      *         <tr>
      *             <th>key</th>
@@ -139,6 +145,10 @@ public class RepairOption
         Set<Range<Token>> ranges = new HashSet<>();
         if (rangesStr != null)
         {
+            if (incremental)
+                logger.warn("Incremental repair can't be requested with subrange repair " +
+                            "because each subrange repair would generate an anti-compacted table. " +
+                            "The repair will occur but without anti-compaction.");
             StringTokenizer tokenizer = new StringTokenizer(rangesStr, ",");
             while (tokenizer.hasMoreTokens())
             {
@@ -153,7 +163,7 @@ public class RepairOption
             }
         }
 
-        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges);
+        RepairOption option = new RepairOption(parallelism, primaryRange, incremental, trace, jobThreads, ranges, !ranges.isEmpty());
 
         // data centers
         String dataCentersStr = options.get(DATACENTERS_KEY);
@@ -212,20 +222,31 @@ public class RepairOption
     private final boolean incremental;
     private final boolean trace;
     private final int jobThreads;
+    private final boolean isSubrangeRepair;
 
     private final Collection<String> columnFamilies = new HashSet<>();
     private final Collection<String> dataCenters = new HashSet<>();
     private final Collection<String> hosts = new HashSet<>();
     private final Collection<Range<Token>> ranges = new HashSet<>();
 
-    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads, Collection<Range<Token>> ranges)
+    public RepairOption(RepairParallelism parallelism, boolean primaryRange, boolean incremental, boolean trace, int jobThreads, Collection<Range<Token>> ranges, boolean isSubrangeRepair)
     {
-        this.parallelism = parallelism;
+        if (FBUtilities.isWindows() &&
+            (DatabaseDescriptor.getDiskAccessMode() != Config.DiskAccessMode.standard || DatabaseDescriptor.getIndexAccessMode() != Config.DiskAccessMode.standard) &&
+            parallelism == RepairParallelism.SEQUENTIAL)
+        {
+            logger.warn("Sequential repair disabled when memory-mapped I/O is configured on Windows. Reverting to parallel.");
+            this.parallelism = RepairParallelism.PARALLEL;
+        }
+        else
+            this.parallelism = parallelism;
+
         this.primaryRange = primaryRange;
         this.incremental = incremental;
         this.trace = trace;
         this.jobThreads = jobThreads;
         this.ranges.addAll(ranges);
+        this.isSubrangeRepair = isSubrangeRepair;
     }
 
     public RepairParallelism getParallelism()
@@ -273,6 +294,16 @@ public class RepairOption
         return hosts;
     }
 
+    public boolean isGlobal()
+    {
+        return dataCenters.isEmpty() && hosts.isEmpty() && !isSubrangeRepair();
+    }
+
+    public boolean isSubrangeRepair()
+    {
+        return isSubrangeRepair;
+    }
+
     @Override
     public String toString()
     {
@@ -286,5 +317,21 @@ public class RepairOption
                        ", hosts: " + hosts +
                        ", # of ranges: " + ranges.size() +
                        ')';
+    }
+
+    public Map<String, String> asMap()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(PARALLELISM_KEY, parallelism.toString());
+        options.put(PRIMARY_RANGE_KEY, Boolean.toString(primaryRange));
+        options.put(INCREMENTAL_KEY, Boolean.toString(incremental));
+        options.put(JOB_THREADS_KEY, Integer.toString(jobThreads));
+        options.put(COLUMNFAMILIES_KEY, Joiner.on(",").join(columnFamilies));
+        options.put(DATACENTERS_KEY, Joiner.on(",").join(dataCenters));
+        options.put(HOSTS_KEY, Joiner.on(",").join(hosts));
+        options.put(SUB_RANGE_REPAIR_KEY, Boolean.toString(isSubrangeRepair));
+        options.put(TRACE_KEY, Boolean.toString(trace));
+        options.put(RANGES_KEY, Joiner.on(",").join(ranges));
+        return options;
     }
 }

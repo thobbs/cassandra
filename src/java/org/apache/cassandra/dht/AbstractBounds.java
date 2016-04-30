@@ -20,13 +20,15 @@ package org.apache.cassandra.dht;
 import java.io.DataInput;
 import java.io.IOException;
 import java.io.Serializable;
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.RowPosition;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.Pair;
 
 public abstract class AbstractBounds<T extends RingPosition<T>> implements Serializable
@@ -34,8 +36,8 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
     private static final long serialVersionUID = 1L;
     public static final IPartitionerDependentSerializer<AbstractBounds<Token>> tokenSerializer =
             new AbstractBoundsSerializer<Token>(Token.serializer);
-    public static final IPartitionerDependentSerializer<AbstractBounds<RowPosition>> rowPositionSerializer =
-            new AbstractBoundsSerializer<RowPosition>(RowPosition.serializer);
+    public static final IPartitionerDependentSerializer<AbstractBounds<PartitionPosition>> rowPositionSerializer =
+            new AbstractBoundsSerializer<PartitionPosition>(PartitionPosition.serializer);
 
     private enum Type
     {
@@ -70,6 +72,30 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
     public abstract Pair<AbstractBounds<T>, AbstractBounds<T>> split(T position);
     public abstract boolean inclusiveLeft();
     public abstract boolean inclusiveRight();
+
+    /**
+     * Whether {@code left} and {@code right} forms a wrapping interval, that is if unwrapping wouldn't be a no-op.
+     * <p>
+     * Note that the semantic is slightly different from {@link Range#isWrapAround()} in the sense that if both
+     * {@code right} are minimal (for the partitioner), this methods return false (doesn't wrap) while
+     * {@link Range#isWrapAround()} returns true (does wrap). This is confusing and we should fix it by
+     * refactoring/rewriting the whole AbstractBounds hierarchy with cleaner semantics, but we don't want to risk
+     * breaking something by changing {@link Range#isWrapAround()} in the meantime.
+     */
+    public static <T extends RingPosition<T>> boolean strictlyWrapsAround(T left, T right)
+    {
+        return !(left.compareTo(right) <= 0 || right.isMinimum());
+    }
+
+    public static <T extends RingPosition<T>> boolean noneStrictlyWrapsAround(Collection<AbstractBounds<T>> bounds)
+    {
+        for (AbstractBounds<T> b : bounds)
+        {
+            if (strictlyWrapsAround(b.left, b.right))
+                return false;
+        }
+        return true;
+    }
 
     @Override
     public int hashCode()
@@ -112,18 +138,39 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
     protected abstract String getOpeningString();
     protected abstract String getClosingString();
 
+    public abstract boolean isStartInclusive();
+    public abstract boolean isEndInclusive();
+
     public abstract AbstractBounds<T> withNewRight(T newRight);
 
     public static class AbstractBoundsSerializer<T extends RingPosition<T>> implements IPartitionerDependentSerializer<AbstractBounds<T>>
     {
+        private static final int IS_TOKEN_FLAG        = 0x01;
+        private static final int START_INCLUSIVE_FLAG = 0x02;
+        private static final int END_INCLUSIVE_FLAG   = 0x04;
+
         IPartitionerDependentSerializer<T> serializer;
 
+        // Use for pre-3.0 protocol
         private static int kindInt(AbstractBounds<?> ab)
         {
             int kind = ab instanceof Range ? Type.RANGE.ordinal() : Type.BOUNDS.ordinal();
             if (!(ab.left instanceof Token))
                 kind = -(kind + 1);
             return kind;
+        }
+
+        // For from 3.0 onwards
+        private static int kindFlags(AbstractBounds<?> ab)
+        {
+            int flags = 0;
+            if (ab.left instanceof Token)
+                flags |= IS_TOKEN_FLAG;
+            if (ab.isStartInclusive())
+                flags |= START_INCLUSIVE_FLAG;
+            if (ab.isEndInclusive())
+                flags |= END_INCLUSIVE_FLAG;
+            return flags;
         }
 
         public AbstractBoundsSerializer(IPartitionerDependentSerializer<T> serializer)
@@ -137,30 +184,51 @@ public abstract class AbstractBounds<T extends RingPosition<T>> implements Seria
              * The first int tells us if it's a range or bounds (depending on the value) _and_ if it's tokens or keys (depending on the
              * sign). We use negative kind for keys so as to preserve the serialization of token from older version.
              */
-            out.writeInt(kindInt(range));
+            if (version < MessagingService.VERSION_30)
+                out.writeInt(kindInt(range));
+            else
+                out.writeByte(kindFlags(range));
             serializer.serialize(range.left, out, version);
             serializer.serialize(range.right, out, version);
         }
 
         public AbstractBounds<T> deserialize(DataInput in, IPartitioner p, int version) throws IOException
         {
-            int kind = in.readInt();
-            boolean isToken = kind >= 0;
-            if (!isToken)
-                kind = -(kind+1);
+            boolean isToken, startInclusive, endInclusive;
+            if (version < MessagingService.VERSION_30)
+            {
+                int kind = in.readInt();
+                isToken = kind >= 0;
+                if (!isToken)
+                    kind = -(kind+1);
+
+                // Pre-3.0, everything that wasa not a Range was (wrongly) serialized as a Bound;
+                startInclusive = kind != Type.RANGE.ordinal();
+                endInclusive = true;
+            }
+            else
+            {
+                int flags = in.readUnsignedByte();
+                isToken = (flags & IS_TOKEN_FLAG) != 0;
+                startInclusive = (flags & START_INCLUSIVE_FLAG) != 0;
+                endInclusive = (flags & END_INCLUSIVE_FLAG) != 0;
+            }
 
             T left = serializer.deserialize(in, p, version);
             T right = serializer.deserialize(in, p, version);
             assert isToken == left instanceof Token;
 
-            if (kind == Type.RANGE.ordinal())
-                return new Range<T>(left, right);
-            return new Bounds<T>(left, right);
+            if (startInclusive)
+                return endInclusive ? new Bounds<T>(left, right) : new IncludingExcludingBounds<T>(left, right);
+            else
+                return endInclusive ? new Range<T>(left, right) : new ExcludingBounds<T>(left, right);
         }
 
         public long serializedSize(AbstractBounds<T> ab, int version)
         {
-            int size = TypeSizes.NATIVE.sizeof(kindInt(ab));
+            int size = version < MessagingService.VERSION_30
+                     ? TypeSizes.sizeof(kindInt(ab))
+                     : 1;
             size += serializer.serializedSize(ab.left, version);
             size += serializer.serializedSize(ab.right, version);
             return size;

@@ -17,21 +17,21 @@
  */
 package org.apache.cassandra.utils;
 
-import java.io.DataInput;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 
 import com.google.common.base.Joiner;
-import com.google.common.collect.AbstractIterator;
+import org.apache.cassandra.utils.AbstractIterator;
 import com.google.common.collect.Iterators;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.ISerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.AsymmetricOrdering.Op;
 
@@ -67,7 +67,7 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
     @SuppressWarnings("unchecked")
     public static <C extends Comparable<? super C>, D, I extends Interval<C, D>> IntervalTree<C, D, I> emptyTree()
     {
-        return (IntervalTree<C, D, I>)EMPTY_TREE;
+        return EMPTY_TREE;
     }
 
     public int intervalCount()
@@ -272,20 +272,21 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
 
         protected I computeNext()
         {
-            if (current != null && current.hasNext())
-                return current.next();
+            while (true)
+            {
+                if (current != null && current.hasNext())
+                    return current.next();
 
-            IntervalNode node = stack.pollFirst();
-            if (node == null)
-                return endOfData();
+                IntervalNode node = stack.pollFirst();
+                if (node == null)
+                    return endOfData();
 
-            current = node.intersectsLeft.iterator();
+                current = node.intersectsLeft.iterator();
 
-            // We know this is the smaller not returned yet, but before doing
-            // its parent, we must do everyone on it's right.
-            gotoMinOf(node.right);
-
-            return computeNext();
+                // We know this is the smaller not returned yet, but before doing
+                // its parent, we must do everyone on it's right.
+                gotoMinOf(node.right);
+            }
         }
 
         private void gotoMinOf(IntervalNode node)
@@ -329,12 +330,12 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
          * tree is to use a custom comparator, as the comparator is *not*
          * serialized.
          */
-        public IntervalTree<C, D, I> deserialize(DataInput in, int version) throws IOException
+        public IntervalTree<C, D, I> deserialize(DataInputPlus in, int version) throws IOException
         {
             return deserialize(in, version, null);
         }
 
-        public IntervalTree<C, D, I> deserialize(DataInput in, int version, Comparator<C> comparator) throws IOException
+        public IntervalTree<C, D, I> deserialize(DataInputPlus in, int version, Comparator<C> comparator) throws IOException
         {
             try
             {
@@ -349,35 +350,22 @@ public class IntervalTree<C extends Comparable<? super C>, D, I extends Interval
                 }
                 return new IntervalTree<C, D, I>(intervals);
             }
-            catch (InstantiationException e)
+            catch (InstantiationException | InvocationTargetException | IllegalAccessException e)
             {
                 throw new RuntimeException(e);
             }
-            catch (InvocationTargetException e)
-            {
-                throw new RuntimeException(e);
-            }
-            catch (IllegalAccessException e)
-            {
-                throw new RuntimeException(e);
-            }
-        }
-
-        public long serializedSize(IntervalTree<C, D, I> it, TypeSizes typeSizes, int version)
-        {
-            long size = typeSizes.sizeof(0);
-            for (Interval<C, D> interval : it)
-            {
-                size += pointSerializer.serializedSize(interval.min, typeSizes);
-                size += pointSerializer.serializedSize(interval.max, typeSizes);
-                size += dataSerializer.serializedSize(interval.data, typeSizes);
-            }
-            return size;
         }
 
         public long serializedSize(IntervalTree<C, D, I> it, int version)
         {
-            return serializedSize(it, TypeSizes.NATIVE, version);
+            long size = TypeSizes.sizeof(0);
+            for (Interval<C, D> interval : it)
+            {
+                size += pointSerializer.serializedSize(interval.min);
+                size += pointSerializer.serializedSize(interval.max);
+                size += dataSerializer.serializedSize(interval.data);
+            }
+            return size;
         }
     }
 }

@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.exceptions.RequestValidationException;
 
 public abstract class ParsedStatement
@@ -36,6 +37,11 @@ public abstract class ParsedStatement
     public void setBoundVariables(List<ColumnIdentifier> boundNames)
     {
         this.variables = new VariableSpecifications(boundNames);
+    }
+
+    public void setBoundVariables(VariableSpecifications variables)
+    {
+        this.variables = variables;
     }
 
     public abstract Prepared prepare() throws RequestValidationException;
@@ -64,8 +70,8 @@ public abstract class ParsedStatement
         }
     }
 
-    public boolean usesFunction(String ksName, String functionName)
+    public Iterable<Function> getFunctions()
     {
-        return false;
+        return Collections.emptyList();
     }
 }

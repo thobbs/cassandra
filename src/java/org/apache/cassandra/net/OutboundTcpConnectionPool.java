@@ -44,6 +44,8 @@ public class OutboundTcpConnectionPool
     private final CountDownLatch started;
     public final OutboundTcpConnection smallMessages;
     public final OutboundTcpConnection largeMessages;
+    public final OutboundTcpConnection gossipMessages;
+
     // pointer to the reset Address.
     private InetAddress resetEndpoint;
     private ConnectionMetrics metrics;
@@ -56,6 +58,7 @@ public class OutboundTcpConnectionPool
 
         smallMessages = new OutboundTcpConnection(this);
         largeMessages = new OutboundTcpConnection(this);
+        gossipMessages = new OutboundTcpConnection(this);
     }
 
     /**
@@ -64,6 +67,8 @@ public class OutboundTcpConnectionPool
      */
     OutboundTcpConnection getConnection(MessageOut msg)
     {
+        if (Stage.GOSSIP == msg.getStage())
+            return gossipMessages;
         return msg.payloadSize(smallMessages.getTargetVersion()) > LARGE_MESSAGE_THRESHOLD
                ? largeMessages
                : smallMessages;
@@ -71,13 +76,13 @@ public class OutboundTcpConnectionPool
 
     void reset()
     {
-        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages })
+        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
             conn.closeSocket(false);
     }
 
     public void resetToNewerVersion(int version)
     {
-        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages })
+        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
         {
             if (version > conn.getTargetVersion())
                 conn.softCloseSocket();
@@ -93,7 +98,7 @@ public class OutboundTcpConnectionPool
     {
         SystemKeyspace.updatePreferredIP(id, remoteEP);
         resetEndpoint = remoteEP;
-        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages })
+        for (OutboundTcpConnection conn : new OutboundTcpConnection[] { smallMessages, largeMessages, gossipMessages })
             conn.softCloseSocket();
 
         // release previous metrics and create new one with reset address
@@ -117,6 +122,7 @@ public class OutboundTcpConnectionPool
         return newSocket(endPoint());
     }
 
+    @SuppressWarnings("resource") // Closing the socket will close the underlying channel.
     public static Socket newSocket(InetAddress endpoint) throws IOException
     {
         // zero means 'bind on any available port.'
@@ -129,10 +135,11 @@ public class OutboundTcpConnectionPool
         }
         else
         {
-            Socket socket = SocketChannel.open(new InetSocketAddress(endpoint, DatabaseDescriptor.getStoragePort())).socket();
-            if (Config.getOutboundBindAny() && !socket.isBound())
-                socket.bind(new InetSocketAddress(FBUtilities.getLocalAddress(), 0));
-            return socket;
+            SocketChannel channel = SocketChannel.open();
+            if (!Config.getOutboundBindAny())
+                channel.bind(new InetSocketAddress(FBUtilities.getLocalAddress(), 0));
+            channel.connect(new InetSocketAddress(endpoint, DatabaseDescriptor.getStoragePort()));
+            return channel.socket();
         }
     }
 
@@ -170,6 +177,7 @@ public class OutboundTcpConnectionPool
     {
         smallMessages.start();
         largeMessages.start();
+        gossipMessages.start();
 
         metrics = new ConnectionMetrics(id, this);
 
@@ -203,6 +211,8 @@ public class OutboundTcpConnectionPool
             largeMessages.closeSocket(true);
         if (smallMessages != null)
             smallMessages.closeSocket(true);
+        if (gossipMessages != null)
+            gossipMessages.closeSocket(true);
 
         metrics.release();
     }

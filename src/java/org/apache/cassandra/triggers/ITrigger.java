@@ -24,11 +24,11 @@ package org.apache.cassandra.triggers;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 
-import org.apache.cassandra.db.ColumnFamily;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.partitions.Partition;
 
 /**
- * Trigger interface, For every Mutation received by the coordinator {@link #augment(ByteBuffer, ColumnFamily)}
+ * Trigger interface, For every partition update received by the coordinator {@link #augment(Partition)}
  * is called.<p>
  *
  * <b> Contract:</b><br>
@@ -36,7 +36,7 @@ import org.apache.cassandra.db.Mutation;
  * 2) ITrigger implementation can be instantiated multiple times during the server life time.
  *      (Depends on the number of times trigger folder is updated.)<br>
  * 3) ITrigger implementation should be state-less (avoid dependency on instance variables).<br>
- * 
+ *
  * <br><b>The API is still beta and can change.</b>
  */
 public interface ITrigger
@@ -44,9 +44,8 @@ public interface ITrigger
     /**
      * Called exactly once per CF update, returned mutations are atomically updated.
      *
-     * @param partitionKey - partition Key for the update.
      * @param update - update received for the CF
-     * @return modifications to be applied, null if no action to be performed.
+     * @return additional modifications to be applied along with the supplied update
      */
-    public Collection<Mutation> augment(ByteBuffer partitionKey, ColumnFamily update);
+    public Collection<Mutation> augment(Partition update);
 }

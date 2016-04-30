@@ -19,19 +19,16 @@ package org.apache.cassandra.tracing;
 
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.common.base.Stopwatch;
 import org.slf4j.helpers.MessageFormatter;
 
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.WrappedRunnable;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventNotifier;
 import org.apache.cassandra.utils.progress.ProgressListener;
@@ -40,7 +37,7 @@ import org.apache.cassandra.utils.progress.ProgressListener;
  * ThreadLocal state for a tracing session. The presence of an instance of this class as a ThreadLocal denotes that an
  * operation is being traced.
  */
-public class TraceState implements ProgressEventNotifier
+public abstract class TraceState implements ProgressEventNotifier
 {
     public final UUID sessionId;
     public final InetAddress coordinator;
@@ -50,7 +47,7 @@ public class TraceState implements ProgressEventNotifier
     public final int ttl;
 
     private boolean notify;
-    private List<ProgressListener> listeners = new ArrayList<>();
+    private final List<ProgressListener> listeners = new CopyOnWriteArrayList<>();
     private String tag;
 
     public enum Status
@@ -60,18 +57,13 @@ public class TraceState implements ProgressEventNotifier
         STOPPED
     }
 
-    private Status status;
+    private volatile Status status;
 
     // Multiple requests can use the same TraceState at a time, so we need to reference count.
     // See CASSANDRA-7626 for more details.
     private final AtomicInteger references = new AtomicInteger(1);
 
-    public TraceState(InetAddress coordinator, UUID sessionId)
-    {
-        this(coordinator, sessionId, Tracing.TraceType.QUERY);
-    }
-
-    public TraceState(InetAddress coordinator, UUID sessionId, Tracing.TraceType traceType)
+    protected TraceState(InetAddress coordinator, UUID sessionId, Tracing.TraceType traceType)
     {
         assert coordinator != null;
         assert sessionId != null;
@@ -151,7 +143,7 @@ public class TraceState implements ProgressEventNotifier
         return status;
     }
 
-    private synchronized void notifyActivity()
+    protected synchronized void notifyActivity()
     {
         status = Status.ACTIVE;
         notifyAll();
@@ -177,7 +169,7 @@ public class TraceState implements ProgressEventNotifier
         if (notify)
             notifyActivity();
 
-        TraceState.mutateWithTracing(sessionIdBytes, message, elapsed(), ttl);
+        traceImpl(message);
 
         for (ProgressListener listener : listeners)
         {
@@ -185,18 +177,7 @@ public class TraceState implements ProgressEventNotifier
         }
     }
 
-    public static void mutateWithTracing(final ByteBuffer sessionId, final String message, final int elapsed, final int ttl)
-    {
-        final String threadName = Thread.currentThread().getName();
-
-        StageManager.getStage(Stage.TRACING).execute(new WrappedRunnable()
-        {
-            public void runMayThrow()
-            {
-                Tracing.mutateWithCatch(TraceKeyspace.makeEventMutation(sessionId, message, elapsed, threadName, ttl));
-            }
-        });
-    }
+    protected abstract void traceImpl(String message);
 
     public boolean acquireReference()
     {

@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.Collections;
+
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -45,10 +48,15 @@ public abstract class AbstractMarker extends Term.NonTerminal
         return true;
     }
 
+    public Iterable<Function> getFunctions()
+    {
+        return Collections.emptySet();
+    }
+
     /**
      * A parsed, but non prepared, bind marker.
      */
-    public static class Raw implements Term.Raw
+    public static class Raw extends Term.Raw
     {
         protected final int bindIndex;
 
@@ -57,7 +65,7 @@ public abstract class AbstractMarker extends Term.NonTerminal
             this.bindIndex = bindIndex;
         }
 
-        public AbstractMarker prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
+        public NonTerminal prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
             if (!(receiver.type instanceof CollectionType))
                 return new Constants.Marker(bindIndex, receiver);
@@ -77,7 +85,34 @@ public abstract class AbstractMarker extends Term.NonTerminal
         }
 
         @Override
-        public String toString()
+        public String getText()
+        {
+            return "?";
+        }
+    }
+
+    /** A MultiColumnRaw version of AbstractMarker.Raw */
+    public static abstract class MultiColumnRaw extends Term.MultiColumnRaw
+    {
+        protected final int bindIndex;
+
+        public MultiColumnRaw(int bindIndex)
+        {
+            this.bindIndex = bindIndex;
+        }
+
+        public NonTerminal prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
+        {
+            throw new AssertionError("MultiColumnRaw..prepare() requires a list of receivers");
+        }
+
+        public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+        {
+            return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
+        }
+
+        @Override
+        public String getText()
         {
             return "?";
         }

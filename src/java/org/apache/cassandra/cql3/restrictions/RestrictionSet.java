@@ -19,12 +19,15 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.*;
 
+import com.google.common.collect.Iterables;
+
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction.Contains;
-import org.apache.cassandra.db.IndexExpression;
-import org.apache.cassandra.db.index.SecondaryIndexManager;
+import org.apache.cassandra.cql3.functions.Function;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction.ContainsRestriction;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.SecondaryIndexManager;
 
 /**
  * Sets of column restrictions.
@@ -63,40 +66,43 @@ final class RestrictionSet implements Restrictions, Iterable<Restriction>
     }
 
     @Override
-    public final void addIndexExpressionTo(List<IndexExpression> expressions,
-                                           SecondaryIndexManager indexManager,
-                                           QueryOptions options) throws InvalidRequestException
+    public final void addRowFilterTo(RowFilter filter, SecondaryIndexManager indexManager, QueryOptions options) throws InvalidRequestException
     {
         for (Restriction restriction : restrictions.values())
-            restriction.addIndexExpressionTo(expressions, indexManager, options);
+            restriction.addRowFilterTo(filter, indexManager, options);
     }
 
     @Override
-    public final Set<ColumnDefinition> getColumnDefs()
+    public final List<ColumnDefinition> getColumnDefs()
     {
-        return restrictions.keySet();
+        return new ArrayList<>(restrictions.keySet());
     }
 
     @Override
-    public boolean usesFunction(String ksName, String functionName)
+    public Iterable<Function> getFunctions()
     {
-        for (Restriction restriction : restrictions.values())
-            if (restriction.usesFunction(ksName, functionName))
-                return true;
+        com.google.common.base.Function<Restriction, Iterable<Function>> transform =
+            new com.google.common.base.Function<Restriction, Iterable<Function>>()
+        {
+            public Iterable<Function> apply(Restriction restriction)
+            {
+                return restriction.getFunctions();
+            }
+        };
 
-        return false;
+        return Iterables.concat(Iterables.transform(restrictions.values(), transform));
     }
 
     @Override
     public final boolean isEmpty()
     {
-        return getColumnDefs().isEmpty();
+        return restrictions.isEmpty();
     }
 
     @Override
     public final int size()
     {
-        return getColumnDefs().size();
+        return restrictions.size();
     }
 
     /**
@@ -237,7 +243,7 @@ final class RestrictionSet implements Restrictions, Iterable<Restriction>
         {
             if (restriction.isContains())
             {
-                Contains contains = (Contains) restriction;
+                ContainsRestriction contains = (ContainsRestriction) restriction;
                 numberOfContains += (contains.numberOfValues() + contains.numberOfKeys() + contains.numberOfEntries());
             }
         }

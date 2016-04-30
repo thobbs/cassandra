@@ -17,10 +17,19 @@
  */
 package org.apache.cassandra.dht;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 
-import org.apache.cassandra.db.RowPosition;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import com.google.common.collect.PeekingIterator;
+import com.google.common.collect.Sets;
+
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.utils.Pair;
 
 /**
@@ -32,7 +41,7 @@ public class Bounds<T extends RingPosition<T>> extends AbstractBounds<T>
     {
         super(left, right);
         // unlike a Range, a Bounds may not wrap
-        assert left.compareTo(right) <= 0 || right.isMinimum() : "[" + left + "," + right + "]";
+        assert !strictlyWrapsAround(left, right) : "[" + left + "," + right + "]";
     }
 
     public boolean contains(T position)
@@ -102,16 +111,79 @@ public class Bounds<T extends RingPosition<T>> extends AbstractBounds<T>
         return "]";
     }
 
+    public static <T extends RingPosition<T>> boolean isInBounds(T token, Iterable<Bounds<T>> bounds)
+    {
+        assert bounds != null;
+
+        for (Bounds<T> bound : bounds)
+        {
+            if (bound.contains(token))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean isStartInclusive()
+    {
+        return true;
+    }
+
+    public boolean isEndInclusive()
+    {
+        return true;
+    }
+
     /**
      * Compute a bounds of keys corresponding to a given bounds of token.
      */
-    public static Bounds<RowPosition> makeRowBounds(Token left, Token right)
+    public static Bounds<PartitionPosition> makeRowBounds(Token left, Token right)
     {
-        return new Bounds<RowPosition>(left.minKeyBound(), right.maxKeyBound());
+        return new Bounds<PartitionPosition>(left.minKeyBound(), right.maxKeyBound());
     }
 
     public AbstractBounds<T> withNewRight(T newRight)
     {
         return new Bounds<T>(left, newRight);
+    }
+
+    /**
+     * Retrieves non-overlapping bounds for the list of input bounds
+     *
+     * Assume we have the following bounds
+     * (brackets representing left/right bound):
+     * [   ] [   ]    [   ]   [  ]
+     * [   ]         [       ]
+     * This method will return the following bounds:
+     * [         ]    [          ]
+     *
+     * @param bounds unsorted bounds to find overlaps
+     * @return the non-overlapping bounds
+     */
+    public static <T extends RingPosition<T>> Set<Bounds<T>> getNonOverlappingBounds(Iterable<Bounds<T>> bounds)
+    {
+        ArrayList<Bounds<T>> sortedBounds = Lists.newArrayList(bounds);
+        Collections.sort(sortedBounds, new Comparator<Bounds<T>>()
+        {
+            public int compare(Bounds<T> o1, Bounds<T> o2)
+            {
+                return o1.left.compareTo(o2.left);
+            }
+        });
+
+        Set<Bounds<T>> nonOverlappingBounds = Sets.newHashSet();
+
+        PeekingIterator<Bounds<T>> it = Iterators.peekingIterator(sortedBounds.iterator());
+        while (it.hasNext())
+        {
+            Bounds<T> beginBound = it.next();
+            Bounds<T> endBound = beginBound;
+            while (it.hasNext() && endBound.right.compareTo(it.peek().left) >= 0)
+                endBound = it.next();
+            nonOverlappingBounds.add(new Bounds<>(beginBound.left, endBound.right));
+        }
+
+        return nonOverlappingBounds;
     }
 }

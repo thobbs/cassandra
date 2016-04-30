@@ -18,13 +18,16 @@
 package org.apache.cassandra.cql3.selection;
 
 import java.nio.ByteBuffer;
+import java.util.Collections;
 
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.selection.Selection.ResultSetBuilder;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 
 /**
@@ -40,9 +43,9 @@ public abstract class Selector implements AssignmentTestable
      */
     public static abstract class Factory
     {
-        public boolean usesFunction(String ksName, String functionName)
+        public Iterable<Function> getFunctions()
         {
-            return false;
+            return Collections.emptySet();
         }
 
         /**
@@ -56,7 +59,7 @@ public abstract class Selector implements AssignmentTestable
         {
             return new ColumnSpecification(cfm.ksName,
                                            cfm.cfName,
-                                           new ColumnIdentifier(getColumnName(), true),
+                                           ColumnIdentifier.getInterned(getColumnName(), true),
                                            getReturnType());
         }
 
@@ -101,6 +104,18 @@ public abstract class Selector implements AssignmentTestable
         }
 
         /**
+         * Checks if this factory creates <code>Selector</code>s that simply return the specified column.
+         *
+         * @param index the column index
+         * @return <code>true</code> if this factory creates <code>Selector</code>s that simply return
+         * the specified column, <code>false</code> otherwise.
+         */
+        public boolean isSimpleSelectorFactory(int index)
+        {
+            return false;
+        }
+
+        /**
          * Returns the name of the column corresponding to the output value of the selector instances created by
          * this factory.
          *
@@ -115,6 +130,18 @@ public abstract class Selector implements AssignmentTestable
          */
         protected abstract AbstractType<?> getReturnType();
 
+        /**
+         * Record a mapping between the ColumnDefinitions that are used by the selector
+         * instances created by this factory and a column in the ResultSet.Metadata
+         * returned with a query. In most cases, this is likely to be a 1:1 mapping,
+         * but some selector instances may utilise multiple columns (or none at all)
+         * to produce a value (i.e. functions).
+         *
+         * @param mapping the instance of the column mapping belonging to the current query's Selection
+         * @param resultsColumn the column in the ResultSet.Metadata to which the ColumnDefinitions used
+         *                      by the Selector are to be mapped
+         */
+        protected abstract void addColumnMapping(SelectionColumnMapping mapping, ColumnSpecification resultsColumn);
     }
 
     /**
@@ -158,13 +185,23 @@ public abstract class Selector implements AssignmentTestable
      */
     public abstract void reset();
 
-    public AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
+    public final AssignmentTestable.TestResult testAssignment(String keyspace, ColumnSpecification receiver)
     {
-        if (receiver.type.equals(getType()))
+        // We should ignore the fact that the output type is frozen in our comparison as functions do not support
+        // frozen types for arguments
+        AbstractType<?> receiverType = receiver.type;
+        if (getType().isFrozenCollection())
+            receiverType = receiverType.freeze();
+
+        if (getType().isReversed())
+            receiverType = ReversedType.getInstance(receiverType);
+
+        if (receiverType.equals(getType()))
             return AssignmentTestable.TestResult.EXACT_MATCH;
-        else if (receiver.type.isValueCompatibleWith(getType()))
+
+        if (receiverType.isValueCompatibleWith(getType()))
             return AssignmentTestable.TestResult.WEAKLY_ASSIGNABLE;
-        else
-            return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
+
+        return AssignmentTestable.TestResult.NOT_ASSIGNABLE;
     }
 }

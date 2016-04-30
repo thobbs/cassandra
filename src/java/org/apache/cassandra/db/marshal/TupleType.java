@@ -18,12 +18,15 @@
 package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import com.google.common.base.Objects;
 
-import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.serializers.*;
@@ -35,10 +38,20 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  */
 public class TupleType extends AbstractType<ByteBuffer>
 {
+    private static final String COLON = ":";
+    private static final Pattern COLON_PAT = Pattern.compile(COLON);
+    private static final String ESCAPED_COLON = "\\\\:";
+    private static final Pattern ESCAPED_COLON_PAT = Pattern.compile(ESCAPED_COLON);
+    private static final String AT = "@";
+    private static final Pattern AT_PAT = Pattern.compile(AT);
+    private static final String ESCAPED_AT = "\\\\@";
+    private static final Pattern ESCAPED_AT_PAT = Pattern.compile(ESCAPED_AT);
+    
     protected final List<AbstractType<?>> types;
 
     public TupleType(List<AbstractType<?>> types)
     {
+        super(ComparisonType.CUSTOM);
         for (int i = 0; i < types.size(); i++)
             types.set(i, types.get(i).freeze());
         this.types = types;
@@ -50,6 +63,12 @@ public class TupleType extends AbstractType<ByteBuffer>
         for (int i = 0; i < types.size(); i++)
             types.set(i, types.get(i).freeze());
         return new TupleType(types);
+    }
+
+    @Override
+    public boolean referencesUserType(String name)
+    {
+        return allTypes().stream().anyMatch(f -> f.referencesUserType(name));
     }
 
     public AbstractType<?> type(int i)
@@ -67,7 +86,7 @@ public class TupleType extends AbstractType<ByteBuffer>
         return types;
     }
 
-    public int compare(ByteBuffer o1, ByteBuffer o2)
+    public int compareCustom(ByteBuffer o1, ByteBuffer o2)
     {
         if (!o1.hasRemaining() || !o2.hasRemaining())
             return o1.hasRemaining() ? 1 : o2.hasRemaining() ? -1 : 0;
@@ -201,7 +220,9 @@ public class TupleType extends AbstractType<ByteBuffer>
 
             ByteBuffer field = ByteBufferUtil.readBytes(input, size);
             // We use ':' as delimiter, and @ to represent null, so escape them in the generated string
-            sb.append(type.getString(field).replaceAll(":", "\\\\:").replaceAll("@", "\\\\@"));
+            String fld = COLON_PAT.matcher(type.getString(field)).replaceAll(ESCAPED_COLON);
+            fld = AT_PAT.matcher(fld).replaceAll(ESCAPED_AT);
+            sb.append(fld);
         }
         return sb.toString();
     }
@@ -210,6 +231,11 @@ public class TupleType extends AbstractType<ByteBuffer>
     {
         // Split the input on non-escaped ':' characters
         List<String> fieldStrings = AbstractCompositeType.split(source);
+
+        if (fieldStrings.size() > size())
+            throw new MarshalException(String.format("Invalid tuple literal: too many elements. Type %s expects %d but got %d",
+                                                     asCQL3Type(), size(), fieldStrings.size()));
+
         ByteBuffer[] fields = new ByteBuffer[fieldStrings.size()];
         for (int i = 0; i < fieldStrings.size(); i++)
         {
@@ -219,9 +245,64 @@ public class TupleType extends AbstractType<ByteBuffer>
                 continue;
 
             AbstractType<?> type = type(i);
-            fields[i] = type.fromString(fieldString.replaceAll("\\\\:", ":").replaceAll("\\\\@", "@"));
+            fieldString = ESCAPED_COLON_PAT.matcher(fieldString).replaceAll(COLON);
+            fieldString = ESCAPED_AT_PAT.matcher(fieldString).replaceAll(AT);
+            fields[i] = type.fromString(fieldString);
         }
         return buildValue(fields);
+    }
+
+    @Override
+    public Term fromJSONObject(Object parsed) throws MarshalException
+    {
+        if (parsed instanceof String)
+            parsed = Json.decodeJson((String) parsed);
+
+        if (!(parsed instanceof List))
+            throw new MarshalException(String.format(
+                    "Expected a list representation of a tuple, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+
+        List list = (List) parsed;
+
+        if (list.size() > types.size())
+            throw new MarshalException(String.format("Tuple contains extra items (expected %s): %s", types.size(), parsed));
+        else if (types.size() > list.size())
+            throw new MarshalException(String.format("Tuple is missing items (expected %s): %s", types.size(), parsed));
+
+        List<Term> terms = new ArrayList<>(list.size());
+        Iterator<AbstractType<?>> typeIterator = types.iterator();
+        for (Object element : list)
+        {
+            if (element == null)
+            {
+                typeIterator.next();
+                terms.add(Constants.NULL_VALUE);
+            }
+            else
+            {
+                terms.add(typeIterator.next().fromJSONObject(element));
+            }
+        }
+
+        return new Tuples.DelayedValue(this, terms);
+    }
+
+    @Override
+    public String toJSONString(ByteBuffer buffer, int protocolVersion)
+    {
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < types.size(); i++)
+        {
+            if (i > 0)
+                sb.append(", ");
+
+            ByteBuffer value = CollectionSerializer.readValue(buffer, protocolVersion);
+            if (value == null)
+                sb.append("null");
+            else
+                sb.append(types.get(i).toJSONString(value, protocolVersion));
+        }
+        return sb.append("]").toString();
     }
 
     public TypeSerializer<ByteBuffer> getSerializer()

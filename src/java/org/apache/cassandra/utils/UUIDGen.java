@@ -26,6 +26,7 @@ import java.util.Random;
 import java.util.UUID;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Charsets;
 
 
 /**
@@ -82,16 +83,37 @@ public class UUIDGen
         return new UUID(createTime(fromUnixTimestamp(when)), clockSeqAndNode);
     }
 
-    @VisibleForTesting
-    public static UUID getTimeUUID(long when, long clockSeqAndNode)
+    public static UUID getTimeUUIDFromMicros(long whenInMicros)
     {
-        return new UUID(createTime(fromUnixTimestamp(when)), clockSeqAndNode);
+        long whenInMillis = whenInMicros / 1000;
+        long nanos = (whenInMicros - (whenInMillis * 1000)) * 10;
+        return getTimeUUID(whenInMillis, nanos);
+    }
+
+    public static UUID getTimeUUID(long when, long nanos)
+    {
+        return new UUID(createTime(fromUnixTimestamp(when, nanos)), clockSeqAndNode);
+    }
+
+    @VisibleForTesting
+    public static UUID getTimeUUID(long when, long nanos, long clockSeqAndNode)
+    {
+        return new UUID(createTime(fromUnixTimestamp(when, nanos)), clockSeqAndNode);
     }
 
     /** creates a type 1 uuid from raw bytes. */
     public static UUID getUUID(ByteBuffer raw)
     {
         return new UUID(raw.getLong(raw.position()), raw.getLong(raw.position() + 8));
+    }
+
+    public static ByteBuffer toByteBuffer(UUID uuid)
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(16);
+        buffer.putLong(uuid.getMostSignificantBits());
+        buffer.putLong(uuid.getLeastSignificantBits());
+        buffer.flip();
+        return buffer;
     }
 
     /** decomposes a uuid into raw bytes. */
@@ -169,7 +191,12 @@ public class UUIDGen
      * @return
      */
     private static long fromUnixTimestamp(long timestamp) {
-        return (timestamp - START_EPOCH) * 10000;
+        return fromUnixTimestamp(timestamp, 0L);
+    }
+
+    private static long fromUnixTimestamp(long timestamp, long nanos)
+    {
+        return ((timestamp - START_EPOCH) * 10000) + nanos;
     }
 
     /**
@@ -177,7 +204,7 @@ public class UUIDGen
      * of a type 1 UUID (a time-based UUID).
      *
      * To specify a 100-nanoseconds precision timestamp, one should provide a milliseconds timestamp and
-     * a number 0 <= n < 10000 such that n*100 is the number of nanoseconds within that millisecond.
+     * a number {@code 0 <= n < 10000} such that n*100 is the number of nanoseconds within that millisecond.
      *
      * <p><i><b>Warning:</b> This method is not guaranteed to return unique UUIDs; Multiple
      * invocations using identical timestamps will result in identical UUIDs.</i></p>
@@ -292,9 +319,20 @@ public class UUIDGen
     {
         try
         {
+            // Identify the host.
             MessageDigest messageDigest = MessageDigest.getInstance("MD5");
             for(InetAddress addr : data)
                 messageDigest.update(addr.getAddress());
+
+            // Identify the process on the load: we use both the PID and class loader hash.
+            long pid = SigarLibrary.instance.getPid();
+            if (pid < 0)
+                pid = new Random(System.currentTimeMillis()).nextLong();
+            FBUtilities.updateWithLong(messageDigest, pid);
+
+            ClassLoader loader = UUIDGen.class.getClassLoader();
+            int loaderId = loader != null ? System.identityHashCode(loader) : 0;
+            FBUtilities.updateWithInt(messageDigest, loaderId);
 
             return messageDigest.digest();
         }

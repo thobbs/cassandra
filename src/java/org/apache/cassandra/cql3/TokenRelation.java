@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.google.common.base.Joiner;
 
@@ -30,7 +31,6 @@ import org.apache.cassandra.cql3.restrictions.Restriction;
 import org.apache.cassandra.cql3.restrictions.TokenRestriction;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.service.StorageService;
 
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkContainsNoDuplicates;
 import static org.apache.cassandra.cql3.statements.RequestValidations.checkContainsOnly;
@@ -64,12 +64,22 @@ public final class TokenRelation extends Relation
         return true;
     }
 
+    public Term.Raw getValue()
+    {
+        return value;
+    }
+
+    public List<? extends Term.Raw> getInValues()
+    {
+        return null;
+    }
+
     @Override
     protected Restriction newEQRestriction(CFMetaData cfm, VariableSpecifications boundNames) throws InvalidRequestException
     {
         List<ColumnDefinition> columnDefs = getColumnDefinitions(cfm);
         Term term = toTerm(toReceivers(cfm, columnDefs), value, cfm.ksName, boundNames);
-        return new TokenRestriction.EQ(cfm.getKeyValidatorAsCType(), columnDefs, term);
+        return new TokenRestriction.EQRestriction(cfm, columnDefs, term);
     }
 
     @Override
@@ -86,13 +96,25 @@ public final class TokenRelation extends Relation
     {
         List<ColumnDefinition> columnDefs = getColumnDefinitions(cfm);
         Term term = toTerm(toReceivers(cfm, columnDefs), value, cfm.ksName, boundNames);
-        return new TokenRestriction.Slice(cfm.getKeyValidatorAsCType(), columnDefs, bound, inclusive, term);
+        return new TokenRestriction.SliceRestriction(cfm, columnDefs, bound, inclusive, term);
     }
 
     @Override
     protected Restriction newContainsRestriction(CFMetaData cfm, VariableSpecifications boundNames, boolean isKey) throws InvalidRequestException
     {
         throw invalidRequest("%s cannot be used with the token function", operator());
+    }
+
+    @Override
+    protected Restriction newIsNotRestriction(CFMetaData cfm, VariableSpecifications boundNames) throws InvalidRequestException
+    {
+        throw invalidRequest("%s cannot be used with the token function", operator());
+    }
+
+    @Override
+    protected Restriction newLikeRestriction(CFMetaData cfm, VariableSpecifications boundNames, Operator operator) throws InvalidRequestException
+    {
+        throw invalidRequest("%s cannot be used with the token function", operator);
     }
 
     @Override
@@ -106,10 +128,19 @@ public final class TokenRelation extends Relation
         return term;
     }
 
+    public Relation renameIdentifier(ColumnIdentifier.Raw from, ColumnIdentifier.Raw to)
+    {
+        if (!entities.contains(from))
+            return this;
+
+        List<ColumnIdentifier.Raw> newEntities = entities.stream().map(e -> e.equals(from) ? to : e).collect(Collectors.toList());
+        return new TokenRelation(newEntities, operator(), value);
+    }
+
     @Override
     public String toString()
     {
-        return String.format("token(%s) %s %s", Tuples.tupleToString(entities), relationType, value);
+        return String.format("token%s %s %s", Tuples.tupleToString(entities), relationType, value);
     }
 
     /**
@@ -159,6 +190,6 @@ public final class TokenRelation extends Relation
         return Collections.singletonList(new ColumnSpecification(firstColumn.ksName,
                                                                  firstColumn.cfName,
                                                                  new ColumnIdentifier("partition key token", true),
-                                                                 StorageService.getPartitioner().getTokenValidator()));
+                                                                 cfm.partitioner.getTokenValidator()));
     }
 }

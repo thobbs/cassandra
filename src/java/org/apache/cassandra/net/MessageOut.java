@@ -33,10 +33,6 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.UUIDGen;
-
-import static org.apache.cassandra.tracing.Tracing.TRACE_HEADER;
-import static org.apache.cassandra.tracing.Tracing.TRACE_TYPE;
 import static org.apache.cassandra.tracing.Tracing.isTracing;
 
 public class MessageOut<T>
@@ -61,8 +57,7 @@ public class MessageOut<T>
              payload,
              serializer,
              isTracing()
-                 ? ImmutableMap.of(TRACE_HEADER, UUIDGen.decompose(Tracing.instance.getSessionId()),
-                                   TRACE_TYPE, new byte[] { Tracing.TraceType.serialize(Tracing.instance.getTraceType()) })
+                 ? Tracing.instance.getTraceHeaders()
                  : Collections.<String, byte[]>emptyMap());
     }
 
@@ -88,7 +83,7 @@ public class MessageOut<T>
         return new MessageOut<T>(verb, payload, serializer, builder.build());
     }
 
-    private Stage getStage()
+    public Stage getStage()
     {
         return MessagingService.verbStages.get(verb);
     }
@@ -129,18 +124,18 @@ public class MessageOut<T>
     {
         int size = CompactEndpointSerializationHelper.serializedSize(from);
 
-        size += TypeSizes.NATIVE.sizeof(verb.ordinal());
-        size += TypeSizes.NATIVE.sizeof(parameters.size());
+        size += TypeSizes.sizeof(verb.ordinal());
+        size += TypeSizes.sizeof(parameters.size());
         for (Map.Entry<String, byte[]> entry : parameters.entrySet())
         {
-            size += TypeSizes.NATIVE.sizeof(entry.getKey());
-            size += TypeSizes.NATIVE.sizeof(entry.getValue().length);
+            size += TypeSizes.sizeof(entry.getKey());
+            size += TypeSizes.sizeof(entry.getValue().length);
             size += entry.getValue().length;
         }
 
         long longSize = payloadSize(version);
         assert longSize <= Integer.MAX_VALUE; // larger values are supported in sstables but not messages
-        size += TypeSizes.NATIVE.sizeof((int) longSize);
+        size += TypeSizes.sizeof((int) longSize);
         size += longSize;
         return size;
     }

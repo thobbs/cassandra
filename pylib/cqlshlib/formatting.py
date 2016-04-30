@@ -14,19 +14,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import binascii
 import calendar
+import datetime
 import math
+import os
 import re
-import time
 import sys
+import platform
+import wcwidth
+
 from collections import defaultdict
-from . import wcwidth
-from .displaying import colorme, FormattedValue, DEFAULT_VALUE_COLORS
-from datetime import datetime, timedelta
+from displaying import colorme, get_str, FormattedValue, DEFAULT_VALUE_COLORS, NO_COLOR_MAP
 from cassandra.cqltypes import EMPTY
+from cassandra.util import datetime_from_timestamp
+from util import UTC
+
+is_win = platform.system() == 'Windows'
 
 unicode_controlchars_re = re.compile(r'[\x00-\x31\x7f-\xa0]')
 controlchars_re = re.compile(r'[\x00-\x31\x7f-\xff]')
+
 
 def _show_control_chars(match):
     txt = repr(match.group(0))
@@ -37,6 +45,7 @@ def _show_control_chars(match):
     return txt
 
 bits_to_turn_red_re = re.compile(r'\\([^uUx]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|U[0-9a-fA-F]{8})')
+
 
 def _make_turn_bits_red_f(color1, color2):
     def _turn_bits_red(match):
@@ -51,8 +60,10 @@ default_float_precision = 3
 default_colormap = DEFAULT_VALUE_COLORS
 empty_colormap = defaultdict(lambda: '')
 
-def format_by_type(cqltype, val, encoding, colormap=None, addcolor=False,
-                   nullval=None, date_time_format=None, float_precision=None):
+
+def format_by_type(val, cqltype, encoding, colormap=None, addcolor=False,
+                   nullval=None, date_time_format=None, float_precision=None,
+                   decimal_sep=None, thousands_sep=None, boolean_styles=None):
     if nullval is None:
         nullval = default_null_placeholder
     if val is None:
@@ -65,9 +76,11 @@ def format_by_type(cqltype, val, encoding, colormap=None, addcolor=False,
         date_time_format = DateTimeFormat()
     if float_precision is None:
         float_precision = default_float_precision
-    return format_value(cqltype, val, encoding=encoding, colormap=colormap,
+    return format_value(val, cqltype=cqltype, encoding=encoding, colormap=colormap,
                         date_time_format=date_time_format, float_precision=float_precision,
-                        nullval=nullval)
+                        nullval=nullval, decimal_sep=decimal_sep, thousands_sep=thousands_sep,
+                        boolean_styles=boolean_styles)
+
 
 def color_text(bval, colormap, displaywidth=None):
     # note that here, we render natural backslashes as just backslashes,
@@ -78,7 +91,6 @@ def color_text(bval, colormap, displaywidth=None):
     # adding the smarts to handle that in to FormattedValue, we just
     # make an explicit check to see if a null colormap is being used or
     # not.
-
     if displaywidth is None:
         displaywidth = len(bval)
     tbr = _make_turn_bits_red_f(colormap['blob'], colormap['text'])
@@ -89,41 +101,142 @@ def color_text(bval, colormap, displaywidth=None):
 
 DEFAULT_NANOTIME_FORMAT = '%H:%M:%S.%N'
 DEFAULT_DATE_FORMAT = '%Y-%m-%d'
-DEFAULT_TIMESTAMP_FORMAT = '%Y-%m-%d %H:%M:%S%z'
 
-class DateTimeFormat():
-    def __init__(self, timestamp_format=DEFAULT_TIMESTAMP_FORMAT, date_format=DEFAULT_DATE_FORMAT, nanotime_format=DEFAULT_NANOTIME_FORMAT):
-        self.timestamp_format=timestamp_format
-        self.date_format=date_format
-        self.nanotime_format=nanotime_format
+DEFAULT_TIMESTAMP_FORMAT = os.environ.get('CQLSH_DEFAULT_TIMESTAMP_FORMAT', '')
+if not DEFAULT_TIMESTAMP_FORMAT:
+    DEFAULT_TIMESTAMP_FORMAT = '%Y-%m-%d %H:%M:%S.%f%z'
+
+
+class DateTimeFormat:
+
+    def __init__(self, timestamp_format=DEFAULT_TIMESTAMP_FORMAT, date_format=DEFAULT_DATE_FORMAT,
+                 nanotime_format=DEFAULT_NANOTIME_FORMAT, timezone=None):
+        self.timestamp_format = timestamp_format
+        self.date_format = date_format
+        self.nanotime_format = nanotime_format
+        self.timezone = timezone
+
+
+class CqlType(object):
+    """
+    A class for converting a string into a cql type name that can match a formatter
+    and a list of its sub-types, if any.
+    """
+    pattern = re.compile('^([^<]*)<(.*)>$')  # *<*>
+
+    def __init__(self, typestring, ksmeta=None):
+        self.type_name, self.sub_types, self.formatter = self.parse(typestring, ksmeta)
+
+    def __str__(self):
+        return "%s%s" % (self.type_name, self.sub_types or '')
+
+    __repr__ = __str__
+
+    def get_n_sub_types(self, num):
+        """
+        Return the sub-types if the requested number matches the length of the sub-types (tuples)
+        or the first sub-type times the number requested if the length of the sub-types is one (list, set),
+        otherwise raise an exception
+        """
+        if len(self.sub_types) == num:
+            return self.sub_types
+        elif len(self.sub_types) == 1:
+            return [self.sub_types[0]] * num
+        else:
+            raise Exception("Unexpected number of subtypes %d - %s" % (num, self.sub_types))
+
+    def parse(self, typestring, ksmeta):
+        """
+        Parse the typestring by looking at this pattern: *<*>. If there is no match then the type
+        is either a simple type or a user type, otherwise it must be a composite type
+        for which we need to look-up the sub-types. For user types the sub types can be extracted
+        from the keyspace metadata.
+        """
+        while True:
+            m = self.pattern.match(typestring)
+            if not m:  # no match, either a simple or a user type
+                name = typestring
+                if ksmeta and name in ksmeta.user_types:  # a user type, look at ks meta for sub types
+                    sub_types = [CqlType(t, ksmeta) for t in ksmeta.user_types[name].field_types]
+                    return name, sub_types, format_value_utype
+                else:
+                    return name, [], self._get_formatter(name)
+            else:
+                if m.group(1) == 'frozen':  # ignore frozen<>
+                    typestring = m.group(2)
+                    continue
+
+                name = m.group(1)  # a composite type, parse sub types
+                return name, self.parse_sub_types(m.group(2), ksmeta), self._get_formatter(name)
+
+    @staticmethod
+    def _get_formatter(name):
+        return _formatters.get(name.lower())
+
+    @staticmethod
+    def parse_sub_types(val, ksmeta):
+        """
+        Split val into sub-strings separated by commas but only if not within a <> pair
+        Return a list of CqlType instances where each instance is initialized with the sub-strings
+        that were found.
+        """
+        last = 0
+        level = 0
+        ret = []
+        for i, c in enumerate(val):
+            if c == '<':
+                level += 1
+            elif c == '>':
+                level -= 1
+            elif c == ',' and level == 0:
+                ret.append(val[last:i].strip())
+                last = i + 1
+
+        if last < len(val) - 1:
+            ret.append(val[last:].strip())
+
+        return [CqlType(r, ksmeta) for r in ret]
+
 
 def format_value_default(val, colormap, **_):
     val = str(val)
     escapedval = val.replace('\\', '\\\\')
     bval = controlchars_re.sub(_show_control_chars, escapedval)
-    return color_text(bval, colormap)
+    return bval if colormap is NO_COLOR_MAP else color_text(bval, colormap)
 
 # Mapping cql type base names ("int", "map", etc) to formatter functions,
 # making format_value a generic function
 _formatters = {}
 
-def format_value(type, val, **kwargs):
+
+def format_value(val, cqltype, **kwargs):
     if val == EMPTY:
         return format_value_default('', **kwargs)
-    formatter = _formatters.get(type.__name__, format_value_default)
-    return formatter(val, **kwargs)
+
+    formatter = get_formatter(val, cqltype)
+    return formatter(val, cqltype=cqltype, **kwargs)
+
+
+def get_formatter(val, cqltype):
+    if cqltype and cqltype.formatter:
+        return cqltype.formatter
+
+    return _formatters.get(type(val).__name__.lower(), format_value_default)
+
 
 def formatter_for(typname):
     def registrator(f):
-        _formatters[typname] = f
+        _formatters[typname.lower()] = f
         return f
     return registrator
 
+
 @formatter_for('bytearray')
 def format_value_blob(val, colormap, **_):
-    bval = '0x' + ''.join('%02x' % c for c in val)
+    bval = '0x' + binascii.hexlify(val)
     return colorme(bval, colormap, 'blob')
 formatter_for('buffer')(format_value_blob)
+formatter_for('blob')(format_value_blob)
 
 
 def format_python_formatted_type(val, colormap, color, quote=False):
@@ -132,73 +245,124 @@ def format_python_formatted_type(val, colormap, color, quote=False):
         bval = "'%s'" % bval
     return colorme(bval, colormap, color)
 
+
 @formatter_for('Decimal')
-def format_value_decimal(val, colormap, **_):
+def format_value_decimal(val, float_precision, colormap, decimal_sep=None, thousands_sep=None, **_):
+    if (decimal_sep and decimal_sep != '.') or thousands_sep:
+        return format_floating_point_type(val, colormap, float_precision, decimal_sep, thousands_sep)
     return format_python_formatted_type(val, colormap, 'decimal')
+
 
 @formatter_for('UUID')
 def format_value_uuid(val, colormap, **_):
     return format_python_formatted_type(val, colormap, 'uuid')
+
+formatter_for('timeuuid')(format_value_uuid)
 
 
 @formatter_for('inet')
 def formatter_value_inet(val, colormap, quote=False, **_):
     return format_python_formatted_type(val, colormap, 'inet', quote=quote)
 
+
 @formatter_for('bool')
-def format_value_boolean(val, colormap, **_):
+def format_value_boolean(val, colormap, boolean_styles=None, **_):
+    if boolean_styles:
+        val = boolean_styles[0] if val else boolean_styles[1]
     return format_python_formatted_type(val, colormap, 'boolean')
 
-def format_floating_point_type(val, colormap, float_precision, **_):
+formatter_for('boolean')(format_value_boolean)
+
+
+def format_floating_point_type(val, colormap, float_precision, decimal_sep=None, thousands_sep=None, **_):
     if math.isnan(val):
         bval = 'NaN'
     elif math.isinf(val):
-        bval = 'Infinity'
+        bval = 'Infinity' if val > 0 else '-Infinity'
     else:
-        bval = '%.*g' % (float_precision, val)
+        if thousands_sep:
+            dpart, ipart = math.modf(val)
+            bval = format_integer_with_thousands_sep(ipart, thousands_sep)
+            dpart_str = ('%.*f' % (float_precision, math.fabs(dpart)))[2:].rstrip('0')
+            if dpart_str:
+                bval += '%s%s' % ('.' if not decimal_sep else decimal_sep, dpart_str)
+        else:
+            exponent = int(math.log10(abs(val))) if abs(val) > sys.float_info.epsilon else -sys.maxsize - 1
+            if -4 <= exponent < float_precision:
+                # when this is true %g will not use scientific notation,
+                # increasing precision should not change this decision
+                # so we increase the precision to take into account the
+                # digits to the left of the decimal point
+                float_precision = float_precision + exponent + 1
+            bval = '%.*g' % (float_precision, val)
+            if decimal_sep:
+                bval = bval.replace('.', decimal_sep)
+
     return colorme(bval, colormap, 'float')
 
 formatter_for('float')(format_floating_point_type)
+formatter_for('double')(format_floating_point_type)
 
-def format_integer_type(val, colormap, **_):
+
+def format_integer_type(val, colormap, thousands_sep=None, **_):
     # base-10 only for now; support others?
-    bval = str(val)
+    bval = format_integer_with_thousands_sep(val, thousands_sep) if thousands_sep else str(val)
     return colorme(bval, colormap, 'int')
+
+# We can get rid of this in cassandra-2.2
+if sys.version_info >= (2, 7):
+    def format_integer_with_thousands_sep(val, thousands_sep=','):
+        return "{:,.0f}".format(val).replace(',', thousands_sep)
+else:
+    def format_integer_with_thousands_sep(val, thousands_sep=','):
+        if val < 0:
+            return '-' + format_integer_with_thousands_sep(-val, thousands_sep)
+        result = ''
+        while val >= 1000:
+            val, r = divmod(val, 1000)
+            result = "%s%03d%s" % (thousands_sep, r, result)
+        return "%d%s" % (val, result)
 
 formatter_for('long')(format_integer_type)
 formatter_for('int')(format_integer_type)
+formatter_for('bigint')(format_integer_type)
+formatter_for('varint')(format_integer_type)
+
 
 @formatter_for('datetime')
 def format_value_timestamp(val, colormap, date_time_format, quote=False, **_):
-    bval = strftime(date_time_format.timestamp_format, calendar.timegm(val.utctimetuple()))
+    if isinstance(val, datetime.datetime):
+        bval = strftime(date_time_format.timestamp_format,
+                        calendar.timegm(val.utctimetuple()),
+                        microseconds=val.microsecond,
+                        timezone=date_time_format.timezone)
+    else:
+        bval = str(val)
+
     if quote:
         bval = "'%s'" % bval
     return colorme(bval, colormap, 'timestamp')
 
-def strftime(time_format, seconds):
-    local = time.localtime(seconds)
-    formatted = time.strftime(time_format, local)
-    if local.tm_isdst != 0:
-        offset = -time.altzone
-    else:
-        offset = -time.timezone
-    if formatted[-4:] != '0000' or time_format[-2:] != '%z' or offset == 0:
-        return formatted
-    # deal with %z on platforms where it isn't supported. see CASSANDRA-4746.
-    if offset < 0:
-        sign = '-'
-    else:
-        sign = '+'
-    hours, minutes = divmod(abs(offset) / 60, 60)
-    return formatted[:-5] + sign + '{0:0=2}{1:0=2}'.format(hours, minutes)
+formatter_for('timestamp')(format_value_timestamp)
 
-@formatter_for('date')
-def format_value_uuid(val, colormap, **_):
+
+def strftime(time_format, seconds, microseconds=0, timezone=None):
+    ret_dt = datetime_from_timestamp(seconds) + datetime.timedelta(microseconds=microseconds)
+    ret_dt = ret_dt.replace(tzinfo=UTC())
+    if timezone:
+        ret_dt = ret_dt.astimezone(timezone)
+    return ret_dt.strftime(time_format)
+
+
+@formatter_for('Date')
+def format_value_date(val, colormap, **_):
     return format_python_formatted_type(val, colormap, 'date')
+
 
 @formatter_for('Time')
 def format_value_time(val, colormap, **_):
     return format_python_formatted_type(val, colormap, 'time')
+
 
 @formatter_for('str')
 def format_value_text(val, encoding, colormap, quote=False, **_):
@@ -209,80 +373,111 @@ def format_value_text(val, encoding, colormap, quote=False, **_):
     bval = escapedval.encode(encoding, 'backslashreplace')
     if quote:
         bval = "'%s'" % bval
-    displaywidth = wcwidth.wcswidth(bval.decode(encoding))
-    return color_text(bval, colormap, displaywidth)
+
+    return bval if colormap is NO_COLOR_MAP else color_text(bval, colormap, wcwidth.wcswidth(bval.decode(encoding)))
 
 # name alias
 formatter_for('unicode')(format_value_text)
+formatter_for('text')(format_value_text)
+formatter_for('ascii')(format_value_text)
 
-def format_simple_collection(val, lbracket, rbracket, encoding,
-                             colormap, date_time_format, float_precision, nullval):
-    subs = [format_value(type(sval), sval, encoding=encoding, colormap=colormap,
+
+def format_simple_collection(val, cqltype, lbracket, rbracket, encoding,
+                             colormap, date_time_format, float_precision, nullval,
+                             decimal_sep, thousands_sep, boolean_styles):
+    subs = [format_value(sval, cqltype=stype, encoding=encoding, colormap=colormap,
                          date_time_format=date_time_format, float_precision=float_precision,
-                         nullval=nullval, quote=True)
-            for sval in val]
-    bval = lbracket + ', '.join(sval.strval for sval in subs) + rbracket
+                         nullval=nullval, quote=True, decimal_sep=decimal_sep,
+                         thousands_sep=thousands_sep, boolean_styles=boolean_styles)
+            for sval, stype in zip(val, cqltype.get_n_sub_types(len(val)))]
+    bval = lbracket + ', '.join(get_str(sval) for sval in subs) + rbracket
+    if colormap is NO_COLOR_MAP:
+        return bval
+
     lb, sep, rb = [colormap['collection'] + s + colormap['reset']
                    for s in (lbracket, ', ', rbracket)]
     coloredval = lb + sep.join(sval.coloredval for sval in subs) + rb
     displaywidth = 2 * len(subs) + sum(sval.displaywidth for sval in subs)
     return FormattedValue(bval, coloredval, displaywidth)
 
+
 @formatter_for('list')
-def format_value_list(val, encoding, colormap, date_time_format, float_precision, nullval, **_):
-    return format_simple_collection(val, '[', ']', encoding, colormap,
-                                    date_time_format, float_precision, nullval)
+def format_value_list(val, cqltype, encoding, colormap, date_time_format, float_precision, nullval,
+                      decimal_sep, thousands_sep, boolean_styles, **_):
+    return format_simple_collection(val, cqltype, '[', ']', encoding, colormap,
+                                    date_time_format, float_precision, nullval,
+                                    decimal_sep, thousands_sep, boolean_styles)
+
 
 @formatter_for('tuple')
-def format_value_tuple(val, encoding, colormap, date_time_format, float_precision, nullval, **_):
-    return format_simple_collection(val, '(', ')', encoding, colormap,
-                                    date_time_format, float_precision, nullval)
+def format_value_tuple(val, cqltype, encoding, colormap, date_time_format, float_precision, nullval,
+                       decimal_sep, thousands_sep, boolean_styles, **_):
+    return format_simple_collection(val, cqltype, '(', ')', encoding, colormap,
+                                    date_time_format, float_precision, nullval,
+                                    decimal_sep, thousands_sep, boolean_styles)
+
 
 @formatter_for('set')
-def format_value_set(val, encoding, colormap, date_time_format, float_precision, nullval, **_):
-    return format_simple_collection(sorted(val), '{', '}', encoding, colormap,
-                                    date_time_format, float_precision, nullval)
+def format_value_set(val, cqltype, encoding, colormap, date_time_format, float_precision, nullval,
+                     decimal_sep, thousands_sep, boolean_styles, **_):
+    return format_simple_collection(sorted(val), cqltype, '{', '}', encoding, colormap,
+                                    date_time_format, float_precision, nullval,
+                                    decimal_sep, thousands_sep, boolean_styles)
 formatter_for('frozenset')(format_value_set)
 formatter_for('sortedset')(format_value_set)
+formatter_for('SortedSet')(format_value_set)
 
 
 @formatter_for('dict')
-def format_value_map(val, encoding, colormap, date_time_format, float_precision, nullval, **_):
-    def subformat(v):
-        return format_value(type(v), v, encoding=encoding, colormap=colormap,
+def format_value_map(val, cqltype, encoding, colormap, date_time_format, float_precision, nullval,
+                     decimal_sep, thousands_sep, boolean_styles, **_):
+    def subformat(v, t):
+        return format_value(v, cqltype=t, encoding=encoding, colormap=colormap,
                             date_time_format=date_time_format, float_precision=float_precision,
-                            nullval=nullval, quote=True)
+                            nullval=nullval, quote=True, decimal_sep=decimal_sep,
+                            thousands_sep=thousands_sep, boolean_styles=boolean_styles)
 
-    subs = [(subformat(k), subformat(v)) for (k, v) in sorted(val.items())]
-    bval = '{' + ', '.join(k.strval + ': ' + v.strval for (k, v) in subs) + '}'
+    subs = [(subformat(k, cqltype.sub_types[0]), subformat(v, cqltype.sub_types[1])) for (k, v) in sorted(val.items())]
+    bval = '{' + ', '.join(get_str(k) + ': ' + get_str(v) for (k, v) in subs) + '}'
+    if colormap is NO_COLOR_MAP:
+        return bval
+
     lb, comma, colon, rb = [colormap['collection'] + s + colormap['reset']
                             for s in ('{', ', ', ': ', '}')]
     coloredval = lb \
-               + comma.join(k.coloredval + colon + v.coloredval for (k, v) in subs) \
-               + rb
+        + comma.join(k.coloredval + colon + v.coloredval for (k, v) in subs) \
+        + rb
     displaywidth = 4 * len(subs) + sum(k.displaywidth + v.displaywidth for (k, v) in subs)
     return FormattedValue(bval, coloredval, displaywidth)
 formatter_for('OrderedDict')(format_value_map)
 formatter_for('OrderedMap')(format_value_map)
+formatter_for('OrderedMapSerializedKey')(format_value_map)
+formatter_for('map')(format_value_map)
 
 
-def format_value_utype(val, encoding, colormap, date_time_format, float_precision, nullval, **_):
-    def format_field_value(v):
+def format_value_utype(val, cqltype, encoding, colormap, date_time_format, float_precision, nullval,
+                       decimal_sep, thousands_sep, boolean_styles, **_):
+    def format_field_value(v, t):
         if v is None:
             return colorme(nullval, colormap, 'error')
-        return format_value(type(v), v, encoding=encoding, colormap=colormap,
+        return format_value(v, cqltype=t, encoding=encoding, colormap=colormap,
                             date_time_format=date_time_format, float_precision=float_precision,
-                            nullval=nullval, quote=True)
+                            nullval=nullval, quote=True, decimal_sep=decimal_sep,
+                            thousands_sep=thousands_sep, boolean_styles=boolean_styles)
 
     def format_field_name(name):
         return format_value_text(name, encoding=encoding, colormap=colormap, quote=False)
 
-    subs = [(format_field_name(k), format_field_value(v)) for (k, v) in val._asdict().items()]
-    bval = '{' + ', '.join(k.strval + ': ' + v.strval for (k, v) in subs) + '}'
+    subs = [(format_field_name(k), format_field_value(v, t)) for ((k, v), t) in zip(val._asdict().items(),
+                                                                                    cqltype.sub_types)]
+    bval = '{' + ', '.join(get_str(k) + ': ' + get_str(v) for (k, v) in subs) + '}'
+    if colormap is NO_COLOR_MAP:
+        return bval
+
     lb, comma, colon, rb = [colormap['collection'] + s + colormap['reset']
                             for s in ('{', ', ', ': ', '}')]
     coloredval = lb \
-                 + comma.join(k.coloredval + colon + v.coloredval for (k, v) in subs) \
-                 + rb
+        + comma.join(k.coloredval + colon + v.coloredval for (k, v) in subs) \
+        + rb
     displaywidth = 4 * len(subs) + sum(k.displaywidth + v.displaywidth for (k, v) in subs)
     return FormattedValue(bval, coloredval, displaywidth)

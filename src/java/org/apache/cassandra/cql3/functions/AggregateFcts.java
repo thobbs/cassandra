@@ -20,21 +20,68 @@ package org.apache.cassandra.cql3.functions;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 
-import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.DecimalType;
-import org.apache.cassandra.db.marshal.DoubleType;
-import org.apache.cassandra.db.marshal.FloatType;
-import org.apache.cassandra.db.marshal.Int32Type;
-import org.apache.cassandra.db.marshal.IntegerType;
-import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.db.marshal.*;
 
 /**
  * Factory methods for aggregate functions.
  */
 public abstract class AggregateFcts
 {
+    public static Collection<AggregateFunction> all()
+    {
+        Collection<AggregateFunction> functions = new ArrayList<>();
+
+        functions.add(countRowsFunction);
+
+        // sum for primitives
+        functions.add(sumFunctionForByte);
+        functions.add(sumFunctionForShort);
+        functions.add(sumFunctionForInt32);
+        functions.add(sumFunctionForLong);
+        functions.add(sumFunctionForFloat);
+        functions.add(sumFunctionForDouble);
+        functions.add(sumFunctionForDecimal);
+        functions.add(sumFunctionForVarint);
+        functions.add(sumFunctionForCounter);
+
+        // avg for primitives
+        functions.add(avgFunctionForByte);
+        functions.add(avgFunctionForShort);
+        functions.add(avgFunctionForInt32);
+        functions.add(avgFunctionForLong);
+        functions.add(avgFunctionForFloat);
+        functions.add(avgFunctionForDouble);
+        functions.add(avgFunctionForDecimal);
+        functions.add(avgFunctionForVarint);
+        functions.add(avgFunctionForCounter);
+
+        // count, max, and min for all standard types
+        for (CQL3Type type : CQL3Type.Native.values())
+        {
+            if (type != CQL3Type.Native.VARCHAR) // varchar and text both mapping to UTF8Type
+            {
+                functions.add(AggregateFcts.makeCountFunction(type.getType()));
+                if (type != CQL3Type.Native.COUNTER)
+                {
+                    functions.add(AggregateFcts.makeMaxFunction(type.getType()));
+                    functions.add(AggregateFcts.makeMinFunction(type.getType()));
+                }
+                else
+                {
+                    functions.add(AggregateFcts.maxFunctionForCounter);
+                    functions.add(AggregateFcts.minFunctionForCounter);
+                }
+            }
+        }
+
+        return functions;
+    }
+
     /**
      * The function used to count the number of rows of a result set. This function is called when COUNT(*) or COUNT(1)
      * is specified.
@@ -55,7 +102,7 @@ public abstract class AggregateFcts
 
                         public ByteBuffer compute(int protocolVersion)
                         {
-                            return ((LongType) returnType()).decompose(Long.valueOf(count));
+                            return ((LongType) returnType()).decompose(count);
                         }
 
                         public void addInput(int protocolVersion, List<ByteBuffer> values)
@@ -63,6 +110,12 @@ public abstract class AggregateFcts
                             count++;
                         }
                     };
+                }
+
+                @Override
+                public String columnName(List<String> columnNames)
+                {
+                    return "count";
                 }
             };
 
@@ -228,6 +281,162 @@ public abstract class AggregateFcts
     /**
      * The SUM function for int32 values.
      */
+    public static final AggregateFunction sumFunctionForByte =
+            new NativeAggregateFunction("sum", ByteType.instance, ByteType.instance)
+            {
+                public Aggregate newAggregate()
+                {
+                    return new Aggregate()
+                    {
+                        private byte sum;
+
+                        public void reset()
+                        {
+                            sum = 0;
+                        }
+
+                        public ByteBuffer compute(int protocolVersion)
+                        {
+                            return ((ByteType) returnType()).decompose(sum);
+                        }
+
+                        public void addInput(int protocolVersion, List<ByteBuffer> values)
+                        {
+                            ByteBuffer value = values.get(0);
+
+                            if (value == null)
+                                return;
+
+                            Number number = ((Number) argTypes().get(0).compose(value));
+                            sum += number.byteValue();
+                        }
+                    };
+                }
+            };
+
+    /**
+     * AVG function for int32 values.
+     */
+    public static final AggregateFunction avgFunctionForByte =
+            new NativeAggregateFunction("avg", ByteType.instance, ByteType.instance)
+            {
+                public Aggregate newAggregate()
+                {
+                    return new Aggregate()
+                    {
+                        private byte sum;
+
+                        private int count;
+
+                        public void reset()
+                        {
+                            count = 0;
+                            sum = 0;
+                        }
+
+                        public ByteBuffer compute(int protocolVersion)
+                        {
+                            int avg = count == 0 ? 0 : sum / count;
+
+                            return ((ByteType) returnType()).decompose((byte) avg);
+                        }
+
+                        public void addInput(int protocolVersion, List<ByteBuffer> values)
+                        {
+                            ByteBuffer value = values.get(0);
+
+                            if (value == null)
+                                return;
+
+                            count++;
+                            Number number = ((Number) argTypes().get(0).compose(value));
+                            sum += number.byteValue();
+                        }
+                    };
+                }
+            };
+
+    /**
+     * The SUM function for int32 values.
+     */
+    public static final AggregateFunction sumFunctionForShort =
+            new NativeAggregateFunction("sum", ShortType.instance, ShortType.instance)
+            {
+                public Aggregate newAggregate()
+                {
+                    return new Aggregate()
+                    {
+                        private short sum;
+
+                        public void reset()
+                        {
+                            sum = 0;
+                        }
+
+                        public ByteBuffer compute(int protocolVersion)
+                        {
+                            return ((ShortType) returnType()).decompose(sum);
+                        }
+
+                        public void addInput(int protocolVersion, List<ByteBuffer> values)
+                        {
+                            ByteBuffer value = values.get(0);
+
+                            if (value == null)
+                                return;
+
+                            Number number = ((Number) argTypes().get(0).compose(value));
+                            sum += number.shortValue();
+                        }
+                    };
+                }
+            };
+
+    /**
+     * AVG function for int32 values.
+     */
+    public static final AggregateFunction avgFunctionForShort =
+            new NativeAggregateFunction("avg", ShortType.instance, ShortType.instance)
+            {
+                public Aggregate newAggregate()
+                {
+                    return new Aggregate()
+                    {
+                        private short sum;
+
+                        private int count;
+
+                        public void reset()
+                        {
+                            count = 0;
+                            sum = 0;
+                        }
+
+                        public ByteBuffer compute(int protocolVersion)
+                        {
+                            int avg = count == 0 ? 0 : sum / count;
+
+                            return ((ShortType) returnType()).decompose((short) avg);
+                        }
+
+                        public void addInput(int protocolVersion, List<ByteBuffer> values)
+                        {
+                            ByteBuffer value = values.get(0);
+
+                            if (value == null)
+                                return;
+
+                            count++;
+                            Number number = ((Number) argTypes().get(0).compose(value));
+                            sum += number.shortValue();
+                        }
+                    };
+                }
+            };
+
+    /**
+     * The SUM function for int32 values.
+     */
     public static final AggregateFunction sumFunctionForInt32 =
             new NativeAggregateFunction("sum", Int32Type.instance, Int32Type.instance)
             {
@@ -311,31 +520,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new Aggregate()
-                    {
-                        private long sum;
-
-                        public void reset()
-                        {
-                            sum = 0;
-                        }
-
-                        public ByteBuffer compute(int protocolVersion)
-                        {
-                            return ((LongType) returnType()).decompose(sum);
-                        }
-
-                        public void addInput(int protocolVersion, List<ByteBuffer> values)
-                        {
-                            ByteBuffer value = values.get(0);
-
-                            if (value == null)
-                                return;
-
-                            Number number = ((Number) argTypes().get(0).compose(value));
-                            sum += number.longValue();
-                        }
-                    };
+                    return new LongSumAggregate();
                 }
             };
 
@@ -347,37 +532,7 @@ public abstract class AggregateFcts
             {
                 public Aggregate newAggregate()
                 {
-                    return new Aggregate()
-                    {
-                        private long sum;
-
-                        private int count;
-
-                        public void reset()
-                        {
-                            count = 0;
-                            sum = 0;
-                        }
-
-                        public ByteBuffer compute(int protocolVersion)
-                        {
-                            long avg = count == 0 ? 0 : sum / count;
-
-                            return ((LongType) returnType()).decompose(avg);
-                        }
-
-                        public void addInput(int protocolVersion, List<ByteBuffer> values)
-                        {
-                            ByteBuffer value = values.get(0);
-
-                            if (value == null)
-                                return;
-
-                            count++;
-                            Number number = ((Number) argTypes().get(0).compose(value));
-                            sum += number.longValue();
-                        }
-                    };
+                    return new LongAvgAggregate();
                 }
             };
 
@@ -538,6 +693,106 @@ public abstract class AggregateFcts
             };
 
     /**
+     * The SUM function for counter column values.
+     */
+    public static final AggregateFunction sumFunctionForCounter =
+    new NativeAggregateFunction("sum", CounterColumnType.instance, CounterColumnType.instance)
+    {
+        public Aggregate newAggregate()
+        {
+            return new LongSumAggregate();
+        }
+    };
+
+    /**
+     * AVG function for counter column values.
+     */
+    public static final AggregateFunction avgFunctionForCounter =
+    new NativeAggregateFunction("avg", CounterColumnType.instance, CounterColumnType.instance)
+    {
+        public Aggregate newAggregate()
+        {
+            return new LongAvgAggregate();
+        }
+    };
+
+    /**
+     * The MIN function for counter column values.
+     */
+    public static final AggregateFunction minFunctionForCounter =
+    new NativeAggregateFunction("min", CounterColumnType.instance, CounterColumnType.instance)
+    {
+        public Aggregate newAggregate()
+        {
+            return new Aggregate()
+            {
+                private Long min;
+
+                public void reset()
+                {
+                    min = null;
+                }
+
+                public ByteBuffer compute(int protocolVersion)
+                {
+                    return min != null ? LongType.instance.decompose(min) : null;
+                }
+
+                public void addInput(int protocolVersion, List<ByteBuffer> values)
+                {
+                    ByteBuffer value = values.get(0);
+
+                    if (value == null)
+                        return;
+
+                    long lval = LongType.instance.compose(value);
+
+                    if (min == null || lval < min)
+                        min = lval;
+                }
+            };
+        }
+    };
+
+    /**
+     * AVG function for counter column values.
+     */
+    public static final AggregateFunction maxFunctionForCounter =
+    new NativeAggregateFunction("max", CounterColumnType.instance, CounterColumnType.instance)
+    {
+        public Aggregate newAggregate()
+        {
+            return new Aggregate()
+            {
+                private Long max;
+
+                public void reset()
+                {
+                    max = null;
+                }
+
+                public ByteBuffer compute(int protocolVersion)
+                {
+                    return max != null ? LongType.instance.decompose(max) : null;
+                }
+
+                public void addInput(int protocolVersion, List<ByteBuffer> values)
+                {
+                    ByteBuffer value = values.get(0);
+
+                    if (value == null)
+                        return;
+
+                    long lval = LongType.instance.compose(value);
+
+                    if (max == null || lval > max)
+                        max = lval;
+                }
+            };
+        }
+    };
+
+    /**
      * Creates a MAX function for the specified type.
      *
      * @param inputType the function input and output type
@@ -657,5 +912,63 @@ public abstract class AggregateFcts
                 };
             }
         };
+    }
+
+    private static class LongSumAggregate implements AggregateFunction.Aggregate
+    {
+        private long sum;
+
+        public void reset()
+        {
+            sum = 0;
+        }
+
+        public ByteBuffer compute(int protocolVersion)
+        {
+            return LongType.instance.decompose(sum);
+        }
+
+        public void addInput(int protocolVersion, List<ByteBuffer> values)
+        {
+            ByteBuffer value = values.get(0);
+
+            if (value == null)
+                return;
+
+            Number number = LongType.instance.compose(value);
+            sum += number.longValue();
+        }
+    }
+
+    private static class LongAvgAggregate implements AggregateFunction.Aggregate
+    {
+        private long sum;
+
+        private int count;
+
+        public void reset()
+        {
+            count = 0;
+            sum = 0;
+        }
+
+        public ByteBuffer compute(int protocolVersion)
+        {
+            long avg = count == 0 ? 0 : sum / count;
+
+            return LongType.instance.decompose(avg);
+        }
+
+        public void addInput(int protocolVersion, List<ByteBuffer> values)
+        {
+            ByteBuffer value = values.get(0);
+
+            if (value == null)
+                return;
+
+            count++;
+            Number number = LongType.instance.compose(value);
+            sum += number.longValue();
+        }
     }
 }

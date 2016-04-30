@@ -23,6 +23,7 @@ import java.util.Set;
 
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -56,6 +57,8 @@ public class SSTableLevelResetter
             System.exit(1);
         }
 
+        Util.initDatabaseDescriptor();
+
         // TODO several daemon threads will run from here.
         // So we have to explicitly call System.exit.
         try
@@ -75,7 +78,7 @@ public class SSTableLevelResetter
             Keyspace keyspace = Keyspace.openWithoutSSTables(keyspaceName);
             ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(columnfamily);
             boolean foundSSTable = false;
-            for (Map.Entry<Descriptor, Set<Component>> sstable : cfs.directories.sstableLister().list().entrySet())
+            for (Map.Entry<Descriptor, Set<Component>> sstable : cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().entrySet())
             {
                 if (sstable.getValue().contains(Component.STATS))
                 {

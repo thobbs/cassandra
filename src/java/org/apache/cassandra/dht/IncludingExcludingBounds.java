@@ -23,7 +23,7 @@ import java.util.List;
 import org.apache.cassandra.utils.Pair;
 
 /**
- * AbstractBounds containing only its left endpoint: [left, right).  Used by CQL key >= X AND key < Y range scans.
+ * AbstractBounds containing only its left endpoint: [left, right).  Used by {@code CQL key >= X AND key < Y} range scans.
  */
 public class IncludingExcludingBounds<T extends RingPosition<T>> extends AbstractBounds<T>
 {
@@ -32,7 +32,7 @@ public class IncludingExcludingBounds<T extends RingPosition<T>> extends Abstrac
         super(left, right);
         // unlike a Range, an IncludingExcludingBounds may not wrap, nor have
         // right == left unless the right is the min token
-        assert left.compareTo(right) < 0 || right.isMinimum() : "[" + left + "," + right + ")";
+        assert !strictlyWrapsAround(left, right) && (right.isMinimum() || left.compareTo(right) != 0) : "(" + left + "," + right + ")";
     }
 
     public boolean contains(T position)
@@ -87,6 +87,16 @@ public class IncludingExcludingBounds<T extends RingPosition<T>> extends Abstrac
     protected String getClosingString()
     {
         return ")";
+    }
+
+    public boolean isStartInclusive()
+    {
+        return true;
+    }
+
+    public boolean isEndInclusive()
+    {
+        return false;
     }
 
     public AbstractBounds<T> withNewRight(T newRight)

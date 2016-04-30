@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.transport.messages;
 
-import java.nio.ByteBuffer;
-import java.util.List;
 import java.util.UUID;
 
 import com.google.common.collect.ImmutableMap;
@@ -28,7 +26,6 @@ import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
-import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
@@ -45,16 +42,7 @@ public class ExecuteMessage extends Message.Request
         public ExecuteMessage decode(ByteBuf body, int version)
         {
             byte[] id = CBUtil.readBytes(body);
-            if (version == 1)
-            {
-                List<ByteBuffer> values = CBUtil.readValueList(body);
-                ConsistencyLevel consistency = CBUtil.readConsistencyLevel(body);
-                return new ExecuteMessage(MD5Digest.wrap(id), QueryOptions.fromProtocolV1(consistency, values));
-            }
-            else
-            {
-                return new ExecuteMessage(MD5Digest.wrap(id), QueryOptions.codec.decode(body, version));
-            }
+            return new ExecuteMessage(MD5Digest.wrap(id), QueryOptions.codec.decode(body, version));
         }
 
         public void encode(ExecuteMessage msg, ByteBuf dest, int version)
@@ -122,17 +110,24 @@ public class ExecuteMessage extends Message.Request
 
             if (state.traceNextQuery())
             {
-                state.createTracingSession();
+                state.createTracingSession(getCustomPayload());
 
                 ImmutableMap.Builder<String, String> builder = ImmutableMap.builder();
                 if (options.getPageSize() > 0)
                     builder.put("page_size", Integer.toString(options.getPageSize()));
+                if(options.getConsistency() != null)
+                    builder.put("consistency_level", options.getConsistency().name());
+                if(options.getSerialConsistency() != null)
+                    builder.put("serial_consistency_level", options.getSerialConsistency().name());
 
                 // TODO we don't have [typed] access to CQL bind variables here.  CASSANDRA-4560 is open to add support.
                 Tracing.instance.begin("Execute CQL3 prepared query", state.getClientAddress(), builder.build());
             }
 
-            Message.Response response = handler.processPrepared(statement, state, options, getCustomPayload());
+            // Some custom QueryHandlers are interested by the bound names. We provide them this information
+            // by wrapping the QueryOptions.
+            QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
+            Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload());
             if (options.skipMetadata() && response instanceof ResultMessage.Rows)
                 ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
 

@@ -21,12 +21,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -42,7 +37,7 @@ public class TypeParser
     private int idx;
 
     // A cache of parsed string, specially useful for DynamicCompositeType
-    private static final Map<String, AbstractType<?>> cache = new HashMap<String, AbstractType<?>>();
+    private static final Map<String, AbstractType<?>> cache = new HashMap<>();
 
     public static final TypeParser EMPTY_PARSER = new TypeParser("", 0);
 
@@ -98,11 +93,6 @@ public class TypeParser
         return parse(compareWith == null ? null : compareWith.toString());
     }
 
-    public static String getShortName(AbstractType<?> type)
-    {
-        return type.getClass().getSimpleName();
-    }
-
     /**
      * Parse an AbstractType from current position of this parser.
      */
@@ -126,7 +116,7 @@ public class TypeParser
         if (str.charAt(idx) != '(')
             throw new IllegalStateException();
 
-        Map<String, String> map = new HashMap<String, String>();
+        Map<String, String> map = new HashMap<>();
         ++idx; // skipping '('
 
         while (skipBlankAndComma())
@@ -157,7 +147,7 @@ public class TypeParser
 
     public List<AbstractType<?>> getTypeParameters() throws SyntaxException, ConfigurationException
     {
-        List<AbstractType<?>> list = new ArrayList<AbstractType<?>>();
+        List<AbstractType<?>> list = new ArrayList<>();
 
         if (isEOS())
             return list;
@@ -191,7 +181,7 @@ public class TypeParser
 
     public Map<Byte, AbstractType<?>> getAliasParameters() throws SyntaxException, ConfigurationException
     {
-        Map<Byte, AbstractType<?>> map = new HashMap<Byte, AbstractType<?>>();
+        Map<Byte, AbstractType<?>> map = new HashMap<>();
 
         if (isEOS())
             return map;
@@ -347,12 +337,7 @@ public class TypeParser
             Field field = typeClass.getDeclaredField("instance");
             return (AbstractType<?>) field.get(null);
         }
-        catch (NoSuchFieldException e)
-        {
-            // Trying with empty parser
-            return getRawAbstractType(typeClass, EMPTY_PARSER);
-        }
-        catch (IllegalAccessException e)
+        catch (NoSuchFieldException | IllegalAccessException e)
         {
             // Trying with empty parser
             return getRawAbstractType(typeClass, EMPTY_PARSER);
@@ -368,13 +353,7 @@ public class TypeParser
             Method method = typeClass.getDeclaredMethod("getInstance", TypeParser.class);
             return (AbstractType<?>) method.invoke(null, parser);
         }
-        catch (NoSuchMethodException e)
-        {
-            // Trying to see if we have an instance field and apply the default parameter to it
-            AbstractType<?> type = getRawAbstractType(typeClass);
-            return AbstractType.parseDefaultParameters(type, parser);
-        }
-        catch (IllegalAccessException e)
+        catch (NoSuchMethodException | IllegalAccessException e)
         {
             // Trying to see if we have an instance field and apply the default parameter to it
             AbstractType<?> type = getRawAbstractType(typeClass);
@@ -395,11 +374,7 @@ public class TypeParser
             Field field = typeClass.getDeclaredField("instance");
             return (AbstractType<?>) field.get(null);
         }
-        catch (NoSuchFieldException e)
-        {
-            throw new ConfigurationException("Invalid comparator class " + typeClass.getName() + ": must define a public static instance field or a public static method getInstance(TypeParser).");
-        }
-        catch (IllegalAccessException e)
+        catch (NoSuchFieldException | IllegalAccessException e)
         {
             throw new ConfigurationException("Invalid comparator class " + typeClass.getName() + ": must define a public static instance field or a public static method getInstance(TypeParser).");
         }
@@ -412,11 +387,7 @@ public class TypeParser
             Method method = typeClass.getDeclaredMethod("getInstance", TypeParser.class);
             return (AbstractType<?>) method.invoke(null, parser);
         }
-        catch (NoSuchMethodException e)
-        {
-            throw new ConfigurationException("Invalid comparator class " + typeClass.getName() + ": must define a public static instance field or a public static method getInstance(TypeParser).");
-        }
-        catch (IllegalAccessException e)
+        catch (NoSuchMethodException | IllegalAccessException e)
         {
             throw new ConfigurationException("Invalid comparator class " + typeClass.getName() + ": must define a public static instance field or a public static method getInstance(TypeParser).");
         }
@@ -502,12 +473,6 @@ public class TypeParser
             ++idx;
 
         return str.substring(i, idx);
-    }
-
-    public char readNextChar()
-    {
-        skipBlank();
-        return str.charAt(idx++);
     }
 
     /**

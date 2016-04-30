@@ -24,6 +24,8 @@ import java.util.regex.Pattern;
 import com.google.common.primitives.UnsignedLongs;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.Constants;
+import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.serializers.TypeSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.serializers.UUIDSerializer;
@@ -46,9 +48,15 @@ public class UUIDType extends AbstractType<UUID>
 
     UUIDType()
     {
+        super(ComparisonType.CUSTOM);
     }
 
-    public int compare(ByteBuffer b1, ByteBuffer b2)
+    public boolean isEmptyValueMeaningless()
+    {
+        return true;
+    }
+
+    public int compareCustom(ByteBuffer b1, ByteBuffer b2)
     {
         // Compare for length
         int s1 = b1.position(), s2 = b2.position();
@@ -107,7 +115,7 @@ public class UUIDType extends AbstractType<UUID>
         if (parsed != null)
             return parsed;
 
-        throw new MarshalException(String.format("unable to coerce '%s' to UUID", source));
+        throw new MarshalException(String.format("Unable to make UUID from '%s'", source));
     }
 
     @Override
@@ -132,18 +140,39 @@ public class UUIDType extends AbstractType<UUID>
         {
             try
             {
-                return ByteBuffer.wrap(UUIDGen.decompose(UUID.fromString(source)));
+                return UUIDGen.toByteBuffer(UUID.fromString(source));
             }
             catch (IllegalArgumentException e)
             {
-                throw new MarshalException(String.format("unable to make UUID from '%s'", source), e);
+                throw new MarshalException(String.format("Unable to make UUID from '%s'", source), e);
             }
         }
+
         return null;
+    }
+
+    @Override
+    public Term fromJSONObject(Object parsed) throws MarshalException
+    {
+        try
+        {
+            return new Constants.Value(fromString((String) parsed));
+        }
+        catch (ClassCastException exc)
+        {
+            throw new MarshalException(String.format(
+                    "Expected a string representation of a uuid, but got a %s: %s", parsed.getClass().getSimpleName(), parsed));
+        }
     }
 
     static int version(ByteBuffer uuid)
     {
         return (uuid.get(6) & 0xf0) >> 4;
+    }
+
+    @Override
+    protected int valueLengthIfFixed()
+    {
+        return 16;
     }
 }

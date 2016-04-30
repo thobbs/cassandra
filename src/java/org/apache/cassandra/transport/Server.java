@@ -22,9 +22,8 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.EnumMap;
-import java.util.Map;
 import java.util.List;
-import java.util.concurrent.Callable;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
@@ -34,10 +33,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
-import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
+import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -51,10 +51,10 @@ import io.netty.util.internal.logging.Slf4JLoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.transport.messages.EventMessage;
+import org.apache.cassandra.utils.FBUtilities;
 
 public class Server implements CassandraDaemon.Server
 {
@@ -64,13 +64,12 @@ public class Server implements CassandraDaemon.Server
     }
 
     private static final Logger logger = LoggerFactory.getLogger(Server.class);
-    private static final boolean enableEpoll = Boolean.valueOf(System.getProperty("cassandra.native.epoll.enabled", "true"));
+    private static final boolean useEpoll = NativeTransportService.useEpoll();
 
-    public static final int VERSION_1 = 1;
-    public static final int VERSION_2 = 2;
     public static final int VERSION_3 = 3;
     public static final int VERSION_4 = 4;
     public static final int CURRENT_VERSION = VERSION_4;
+    public static final int MIN_SUPPORTED_VERSION = VERSION_3;
 
     private final ConnectionTracker connectionTracker = new ConnectionTracker();
 
@@ -83,41 +82,32 @@ public class Server implements CassandraDaemon.Server
     };
 
     public final InetSocketAddress socket;
+    public boolean useSSL = false;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
     private EventLoopGroup workerGroup;
     private EventExecutor eventExecutorGroup;
 
-    public Server(InetSocketAddress socket)
+    private Server (Builder builder)
     {
-        this.socket = socket;
+        this.socket = builder.getSocket();
+        this.useSSL = builder.useSSL;
+        if (builder.workerGroup != null)
+        {
+            workerGroup = builder.workerGroup;
+        }
+        else
+        {
+            if (useEpoll)
+                workerGroup = new EpollEventLoopGroup();
+            else
+                workerGroup = new NioEventLoopGroup();
+        }
+        if (builder.eventExecutorGroup != null)
+            eventExecutorGroup = builder.eventExecutorGroup;
         EventNotifier notifier = new EventNotifier(this);
         StorageService.instance.register(notifier);
         MigrationManager.instance.register(notifier);
-        registerMetrics();
-    }
-
-    public Server(String hostname, int port)
-    {
-        this(new InetSocketAddress(hostname, port));
-    }
-
-    public Server(InetAddress host, int port)
-    {
-        this(new InetSocketAddress(host, port));
-    }
-
-    public Server(int port)
-    {
-        this(new InetSocketAddress(port));
-    }
-
-    public void start()
-    {
-	    if(!isRunning())
-	    {
-            run();
-	    }
     }
 
     public void stop()
@@ -131,39 +121,36 @@ public class Server implements CassandraDaemon.Server
         return isRunning.get();
     }
 
-    private void run()
+    public synchronized void start()
     {
+        if(isRunning()) 
+            return;
+
         // Configure the server.
-        eventExecutorGroup = new RequestThreadPoolExecutor();
-
-
-        boolean hasEpoll = enableEpoll ? Epoll.isAvailable() : false;
-        if (hasEpoll)
-        {
-            workerGroup = new EpollEventLoopGroup();
-            logger.info("Netty using native Epoll event loop");
-        }
-        else
-        {
-            workerGroup = new NioEventLoopGroup();
-            logger.info("Netty using Java NIO event loop");
-        }
-
         ServerBootstrap bootstrap = new ServerBootstrap()
-                                    .group(workerGroup)
-                                    .channel(hasEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
+                                    .channel(useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class)
                                     .childOption(ChannelOption.TCP_NODELAY, true)
                                     .childOption(ChannelOption.SO_LINGER, 0)
                                     .childOption(ChannelOption.SO_KEEPALIVE, DatabaseDescriptor.getRpcKeepAlive())
                                     .childOption(ChannelOption.ALLOCATOR, CBUtil.allocator)
                                     .childOption(ChannelOption.WRITE_BUFFER_HIGH_WATER_MARK, 32 * 1024)
                                     .childOption(ChannelOption.WRITE_BUFFER_LOW_WATER_MARK, 8 * 1024);
+        if (workerGroup != null)
+            bootstrap = bootstrap.group(workerGroup);
 
         final EncryptionOptions.ClientEncryptionOptions clientEnc = DatabaseDescriptor.getClientEncryptionOptions();
-        if (clientEnc.enabled)
+        if (this.useSSL)
         {
-            logger.info("Enabling encrypted CQL connections between client and server");
-            bootstrap.childHandler(new SecureInitializer(this, clientEnc));
+            if (clientEnc.optional)
+            {
+                logger.info("Enabling optionally encrypted CQL connections between client and server");
+                bootstrap.childHandler(new OptionalSecureInitializer(this, clientEnc));
+            }
+            else
+            {
+                logger.info("Enabling encrypted CQL connections between client and server");
+                bootstrap.childHandler(new SecureInitializer(this, clientEnc));
+            }
         }
         else
         {
@@ -172,7 +159,7 @@ public class Server implements CassandraDaemon.Server
 
         // Bind and start to accept incoming connections.
         logger.info("Using Netty Version: {}", Version.identify().entrySet());
-        logger.info("Starting listening for CQL clients on {}...", socket);
+        logger.info("Starting listening for CQL clients on {} ({})...", socket, this.useSSL ? "encrypted" : "unencrypted");
 
         ChannelFuture bindFuture = bootstrap.bind(socket);
         if (!bindFuture.awaitUninterruptibly().isSuccess())
@@ -180,36 +167,83 @@ public class Server implements CassandraDaemon.Server
 
         connectionTracker.allChannels.add(bindFuture.channel());
         isRunning.set(true);
-
-        StorageService.instance.setRpcReady(true);
     }
 
-    private void registerMetrics()
+    public int getConnectedClients()
     {
-        ClientMetrics.instance.addCounter("connectedNativeClients", new Callable<Integer>()
-        {
-            @Override
-            public Integer call() throws Exception
-            {
-                return connectionTracker.getConnectedClients();
-            }
-        });
+        return connectionTracker.getConnectedClients();
     }
-
+    
     private void close()
     {
         // Close opened connections
         connectionTracker.closeAll();
-        workerGroup.shutdownGracefully();
-        workerGroup = null;
-
-        eventExecutorGroup.shutdown();
-        eventExecutorGroup = null;
+        
         logger.info("Stop listening for CQL clients");
-
-        StorageService.instance.setRpcReady(false);
     }
 
+    public static class Builder
+    {
+        private EventLoopGroup workerGroup;
+        private EventExecutor eventExecutorGroup;
+        private boolean useSSL = false;
+        private InetAddress hostAddr;
+        private int port = -1;
+        private InetSocketAddress socket;
+
+        public Builder withSSL(boolean useSSL)
+        {
+            this.useSSL = useSSL;
+            return this;
+        }
+
+        public Builder withEventLoopGroup(EventLoopGroup eventLoopGroup)
+        {
+            this.workerGroup = eventLoopGroup;
+            return this;
+        }
+
+        public Builder withEventExecutor(EventExecutor eventExecutor)
+        {
+            this.eventExecutorGroup = eventExecutor;
+            return this;
+        }
+
+        public Builder withHost(InetAddress host)
+        {
+            this.hostAddr = host;
+            this.socket = null;
+            return this;
+        }
+
+        public Builder withPort(int port)
+        {
+            this.port = port;
+            this.socket = null;
+            return this;
+        }
+
+        public Server build()
+        {
+            return new Server(this);
+        }
+
+        private InetSocketAddress getSocket()
+        {
+            if (this.socket != null)
+                return this.socket;
+            else
+            {
+                if (this.port == -1)
+                    throw new IllegalStateException("Missing port number");
+                if (this.hostAddr != null)
+                    this.socket = new InetSocketAddress(this.hostAddr, this.port);
+                else
+                    throw new IllegalStateException("Missing host");
+                return this.socket;
+            }
+        }
+    }
 
     public static class ConnectionTracker implements Connection.Tracker
     {
@@ -233,12 +267,6 @@ public class Server implements CassandraDaemon.Server
             groups.get(type).add(ch);
         }
 
-        public void unregister(Channel ch)
-        {
-            for (ChannelGroup group : groups.values())
-                group.remove(ch);
-        }
-
         public void send(Event event)
         {
             groups.get(event.type).writeAndFlush(new EventMessage(event));
@@ -260,7 +288,7 @@ public class Server implements CassandraDaemon.Server
         }
     }
 
-    private static class Initializer extends ChannelInitializer
+    private static class Initializer extends ChannelInitializer<Channel>
     {
         // Stateless handlers
         private static final Message.ProtocolDecoder messageDecoder = new Message.ProtocolDecoder();
@@ -301,16 +329,19 @@ public class Server implements CassandraDaemon.Server
             pipeline.addLast("messageDecoder", messageDecoder);
             pipeline.addLast("messageEncoder", messageEncoder);
 
-            pipeline.addLast(server.eventExecutorGroup, "executor", dispatcher);
+            if (server.eventExecutorGroup != null)
+                pipeline.addLast(server.eventExecutorGroup, "executor", dispatcher);
+            else
+                pipeline.addLast("executor", dispatcher);
         }
     }
 
-    private static class SecureInitializer extends Initializer
+    protected abstract static class AbstractSecureIntializer extends Initializer
     {
         private final SSLContext sslContext;
         private final EncryptionOptions encryptionOptions;
 
-        public SecureInitializer(Server server, EncryptionOptions encryptionOptions)
+        protected AbstractSecureIntializer(Server server, EncryptionOptions encryptionOptions)
         {
             super(server);
             this.encryptionOptions = encryptionOptions;
@@ -324,14 +355,65 @@ public class Server implements CassandraDaemon.Server
             }
         }
 
-        protected void initChannel(Channel channel) throws Exception
-        {
+        protected final SslHandler createSslHandler() {
             SSLEngine sslEngine = sslContext.createSSLEngine();
             sslEngine.setUseClientMode(false);
-            sslEngine.setEnabledCipherSuites(encryptionOptions.cipher_suites);
+            String[] suites = SSLFactory.filterCipherSuites(sslEngine.getSupportedCipherSuites(), encryptionOptions.cipher_suites);
+            sslEngine.setEnabledCipherSuites(suites);
             sslEngine.setNeedClientAuth(encryptionOptions.require_client_auth);
-            sslEngine.setEnabledProtocols(SSLFactory.ACCEPTED_PROTOCOLS);
-            SslHandler sslHandler = new SslHandler(sslEngine);
+            return new SslHandler(sslEngine);
+        }
+    }
+
+    private static class OptionalSecureInitializer extends AbstractSecureIntializer
+    {
+        public OptionalSecureInitializer(Server server, EncryptionOptions encryptionOptions)
+        {
+            super(server, encryptionOptions);
+        }
+
+        protected void initChannel(final Channel channel) throws Exception
+        {
+            super.initChannel(channel);
+            channel.pipeline().addFirst("sslDetectionHandler", new ByteToMessageDecoder()
+            {
+                @Override
+                protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf byteBuf, List<Object> list) throws Exception
+                {
+                    if (byteBuf.readableBytes() < 5)
+                    {
+                        // To detect if SSL must be used we need to have at least 5 bytes, so return here and try again
+                        // once more bytes a ready.
+                        return;
+                    }
+                    if (SslHandler.isEncrypted(byteBuf))
+                    {
+                        // Connection uses SSL/TLS, replace the detection handler with a SslHandler and so use
+                        // encryption.
+                        SslHandler sslHandler = createSslHandler();
+                        channelHandlerContext.pipeline().replace(this, "ssl", sslHandler);
+                    }
+                    else
+                    {
+                        // Connection use no TLS/SSL encryption, just remove the detection handler and continue without
+                        // SslHandler in the pipeline.
+                        channelHandlerContext.pipeline().remove(this);
+                    }
+                }
+            });
+        }
+    }
+
+    private static class SecureInitializer extends AbstractSecureIntializer
+    {
+        public SecureInitializer(Server server, EncryptionOptions encryptionOptions)
+        {
+            super(server, encryptionOptions);
+        }
+
+        protected void initChannel(Channel channel) throws Exception
+        {
+            SslHandler sslHandler = createSslHandler();
             super.initChannel(channel);
             channel.pipeline().addFirst("ssl", sslHandler);
         }
@@ -416,6 +498,28 @@ public class Server implements CassandraDaemon.Server
             }
         }
 
+        private void send(InetAddress endpoint, Event.NodeEvent event)
+        {
+            if (logger.isTraceEnabled())
+                logger.trace("Sending event for endpoint {}, rpc address {}", endpoint, event.nodeAddress());
+
+            // If the endpoint is not the local node, extract the node address
+            // and if it is the same as our own RPC broadcast address (which defaults to the rcp address)
+            // then don't send the notification. This covers the case of rpc_address set to "localhost",
+            // which is not useful to any driver and in fact may cauase serious problems to some drivers,
+            // see CASSANDRA-10052
+            if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
+                event.nodeAddress().equals(DatabaseDescriptor.getBroadcastRpcAddress()))
+                return;
+
+            send(event);
+        }
+
+        private void send(Event event)
+        {
+            server.connectionTracker.send(event);
+        }
+
         public void onJoinCluster(InetAddress endpoint)
         {
             onTopologyChange(endpoint, Event.TopologyChange.newNode(getRpcAddress(endpoint), server.socket.getPort()));
@@ -451,7 +555,7 @@ public class Server implements CassandraDaemon.Server
             {
                 LatestEvent ret = latestEvents.put(endpoint, LatestEvent.forTopologyChange(event.change, prev));
                 if (ret == prev)
-                    server.connectionTracker.send(event);
+                    send(endpoint, event);
             }
         }
 
@@ -463,91 +567,91 @@ public class Server implements CassandraDaemon.Server
             LatestEvent prev = latestEvents.get(endpoint);
             if (prev == null || prev.status != event.status)
             {
-                LatestEvent ret = latestEvents.put(endpoint, LatestEvent.forStatusChange(event.status, prev));
+                LatestEvent ret = latestEvents.put(endpoint, LatestEvent.forStatusChange(event.status, null));
                 if (ret == prev)
-                    server.connectionTracker.send(event);
+                    send(endpoint, event);
             }
         }
 
         public void onCreateKeyspace(String ksName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, ksName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, ksName));
         }
 
         public void onCreateColumnFamily(String ksName, String cfName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, ksName, cfName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TABLE, ksName, cfName));
         }
 
         public void onCreateUserType(String ksName, String typeName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, ksName, typeName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.TYPE, ksName, typeName));
         }
 
         public void onCreateFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.FUNCTION,
-                                                                 ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.FUNCTION,
+                                        ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onCreateAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.AGGREGATE,
-                                                                 ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.CREATED, Event.SchemaChange.Target.AGGREGATE,
+                                        ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onUpdateKeyspace(String ksName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, ksName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, ksName));
         }
 
-        public void onUpdateColumnFamily(String ksName, String cfName, boolean columnsDidChange)
+        public void onUpdateColumnFamily(String ksName, String cfName, boolean affectsStatements)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, ksName, cfName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TABLE, ksName, cfName));
         }
 
         public void onUpdateUserType(String ksName, String typeName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, ksName, typeName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.TYPE, ksName, typeName));
         }
 
         public void onUpdateFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.FUNCTION,
-                                                                 ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.FUNCTION,
+                                        ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onUpdateAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.AGGREGATE,
-                                                                 ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.UPDATED, Event.SchemaChange.Target.AGGREGATE,
+                                        ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onDropKeyspace(String ksName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, ksName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, ksName));
         }
 
         public void onDropColumnFamily(String ksName, String cfName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, ksName, cfName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TABLE, ksName, cfName));
         }
 
         public void onDropUserType(String ksName, String typeName)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TYPE, ksName, typeName));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.TYPE, ksName, typeName));
         }
 
         public void onDropFunction(String ksName, String functionName, List<AbstractType<?>> argTypes)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
-                                                                 ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.FUNCTION,
+                                        ksName, functionName, AbstractType.asCQLTypeStringList(argTypes)));
         }
 
         public void onDropAggregate(String ksName, String aggregateName, List<AbstractType<?>> argTypes)
         {
-            server.connectionTracker.send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
-                                                                 ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
+            send(new Event.SchemaChange(Event.SchemaChange.Change.DROPPED, Event.SchemaChange.Target.AGGREGATE,
+                                        ksName, aggregateName, AbstractType.asCQLTypeStringList(argTypes)));
         }
     }
 }

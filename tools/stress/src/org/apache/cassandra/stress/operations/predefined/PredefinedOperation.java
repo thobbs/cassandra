@@ -25,6 +25,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.cassandra.stress.Operation;
 import org.apache.cassandra.stress.generate.*;
+import org.apache.cassandra.stress.operations.PartitionOperation;
 import org.apache.cassandra.stress.settings.Command;
 import org.apache.cassandra.stress.settings.CqlVersion;
 import org.apache.cassandra.stress.settings.StressSettings;
@@ -32,22 +33,23 @@ import org.apache.cassandra.stress.util.Timer;
 import org.apache.cassandra.thrift.SlicePredicate;
 import org.apache.cassandra.thrift.SliceRange;
 
-public abstract class PredefinedOperation extends Operation
+public abstract class PredefinedOperation extends PartitionOperation
 {
+    public static final byte[] EMPTY_BYTE_ARRAY = {};
     public final Command type;
     private final Distribution columnCount;
     private Object cqlCache;
 
     public PredefinedOperation(Command type, Timer timer, PartitionGenerator generator, SeedManager seedManager, StressSettings settings)
     {
-        super(timer, settings, spec(generator, seedManager));
+        super(timer, settings, spec(generator, seedManager, settings.insert.rowPopulationRatio.get()));
         this.type = type;
         this.columnCount = settings.columns.countDistribution.get();
     }
 
-    private static DataSpec spec(PartitionGenerator generator, SeedManager seedManager)
+    private static DataSpec spec(PartitionGenerator generator, SeedManager seedManager, RatioDistribution rowPopulationCount)
     {
-        return new DataSpec(generator, seedManager, new DistributionFixed(1), 1);
+        return new DataSpec(generator, seedManager, new DistributionFixed(1), rowPopulationCount, 1);
     }
 
     public boolean isCql3()
@@ -106,7 +108,7 @@ public abstract class PredefinedOperation extends Operation
             {
                 predicate.setSlice_range(new SliceRange()
                                          .setStart(settings.columns.names.get(lb))
-                                         .setFinish(new byte[] {})
+                                         .setFinish(EMPTY_BYTE_ARRAY)
                                          .setReversed(false)
                                          .setCount(count())
                 );

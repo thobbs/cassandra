@@ -32,12 +32,17 @@ public interface ColumnFamilyStoreMBean
     /**
      * @return the name of the column family
      */
+    @Deprecated
     public String getColumnFamilyName();
+
+    public String getTableName();
 
     /**
      * force a major compaction of this column family
+     *
+     * @param splitOutput true if the output of the major compaction should be split in several sstables
      */
-    public void forceMajorCompaction() throws ExecutionException, InterruptedException;
+    public void forceMajorCompaction(boolean splitOutput) throws ExecutionException, InterruptedException;
 
     /**
      * Gets the minimum number of sstables in queue before compaction kicks off
@@ -65,15 +70,24 @@ public interface ColumnFamilyStoreMBean
     public void setMaximumCompactionThreshold(int threshold);
 
     /**
-     * Sets the compaction strategy by class name
-     * @param className the name of the compaction strategy class
+     * Sets the compaction parameters locally for this node
+     *
+     * Note that this will be set until an ALTER with compaction = {..} is executed or the node is restarted
+     *
+     * @param options compaction options with the same syntax as when doing ALTER ... WITH compaction = {..}
      */
-    public void setCompactionStrategyClass(String className);
+    public void setCompactionParametersJson(String options);
+    public String getCompactionParametersJson();
 
     /**
-     * Gets the compaction strategy class name
+     * Sets the compaction parameters locally for this node
+     *
+     * Note that this will be set until an ALTER with compaction = {..} is executed or the node is restarted
+     *
+     * @param options compaction options map
      */
-    public String getCompactionStrategyClass();
+    public void setCompactionParameters(Map<String, String> options);
+    public Map<String, String> getCompactionParameters();
 
     /**
      * Get the compression parameters
@@ -108,6 +122,14 @@ public interface ColumnFamilyStoreMBean
      * @return list of filenames containing the key
      */
     public List<String> getSSTablesForKey(String key);
+
+    /**
+     * Returns a list of filenames that contain the given key on this node
+     * @param key
+     * @param hexFormat if key is in hex string format
+     * @return list of filenames containing the key
+     */
+    public List<String> getSSTablesForKey(String key, boolean hexFormat);
 
     /**
      * Scan through Keyspace/ColumnFamily's data directory

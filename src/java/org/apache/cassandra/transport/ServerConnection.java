@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.transport;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import io.netty.channel.Channel;
@@ -24,7 +25,6 @@ import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
-import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
 public class ServerConnection extends Connection
 {
@@ -34,7 +34,7 @@ public class ServerConnection extends Connection
     private final ClientState clientState;
     private volatile State state;
 
-    private final ConcurrentMap<Integer, QueryState> queryStates = new NonBlockingHashMap<Integer, QueryState>();
+    private final ConcurrentMap<Integer, QueryState> queryStates = new ConcurrentHashMap<>();
 
     public ServerConnection(Channel channel, int version, Connection.Tracker tracker)
     {
@@ -110,10 +110,10 @@ public class ServerConnection extends Connection
         }
     }
 
-    public IAuthenticator.SaslNegotiator getSaslNegotiator()
+    public IAuthenticator.SaslNegotiator getSaslNegotiator(QueryState queryState)
     {
         if (saslNegotiator == null)
-            saslNegotiator = DatabaseDescriptor.getAuthenticator().newSaslNegotiator();
+            saslNegotiator = DatabaseDescriptor.getAuthenticator().newSaslNegotiator(queryState.getClientAddress());
         return saslNegotiator;
     }
 }

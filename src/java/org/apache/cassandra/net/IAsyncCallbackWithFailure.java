@@ -25,5 +25,5 @@ public interface IAsyncCallbackWithFailure<T> extends IAsyncCallback<T>
     /**
      * Called when there is an exception on the remote node or timeout happens
      */
-    public void onFailure(InetAddress from);
+    void onFailure(InetAddress from);
 }
