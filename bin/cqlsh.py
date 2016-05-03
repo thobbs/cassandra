@@ -2238,11 +2238,14 @@ class Shell(cmd.Cmd):
             out = self.query_out
 
         # convert Exceptions, etc to text
-        if not isinstance(text, unicode):
+        if not isinstance(text, (unicode, str)):
             text = unicode(text)
 
+        if isinstance(text, unicode):
+            text = text.encode(self.encoding)
+
         to_write = self.applycolor(text, color) + ('\n' if newline else '')
-        out.write(to_write.encode(self.encoding))
+        out.write(to_write)
 
     def flush_output(self):
         self.query_out.flush()
