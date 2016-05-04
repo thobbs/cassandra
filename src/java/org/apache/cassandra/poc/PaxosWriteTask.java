@@ -1,7 +1,6 @@
 package org.apache.cassandra.poc;
 
 import com.google.common.collect.Iterables;
-import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
@@ -22,7 +21,6 @@ import org.apache.cassandra.poc.events.Event;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
 import org.apache.cassandra.service.paxos.Commit;
-import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.triggers.TriggerExecutor;
@@ -39,10 +37,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
-// TODO need to handle/replace locking in PaxosState.prepare(), PaxosState.propose()
 public class PaxosWriteTask extends Task
 {
     private static final Logger logger = LoggerFactory.getLogger(WriteTask.class);
@@ -58,7 +54,6 @@ public class PaxosWriteTask extends Task
     private final ClientState state;
     private final CFMetaData cfm;
 
-    private Exception error;
     private long startTime;
     private int contentions = 0;
     private long timeoutCutoff;
@@ -68,11 +63,16 @@ public class PaxosWriteTask extends Task
     private PrepareResponseHandler prepareResponseHandler = null;
 
     private UUID ballot;
+
+    /** If the CAS precondition is not met, this stores the existing data */
     public RowIterator finalResult;
+
+    /** If the operation fails, this stores the final exception */
+    public Exception finalException;
 
     private long localCommitStartNanos;
     private Commit localProposal;
-    AbstractWriteResponseHandler<Commit> responseHandler = null;
+    AbstractWriteResponseHandler<Commit> commitResponseHandler = null;
 
     public PaxosWriteTask(String keyspaceName, String tableName, DecoratedKey key, CASRequest request,
                           ConsistencyLevel consistencyForPaxos, ConsistencyLevel consistencyForCommit, ClientState state)
@@ -103,15 +103,18 @@ public class PaxosWriteTask extends Task
         consistencyForCommit.validateForCasCommit(keyspaceName);
 
         long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getCasContentionTimeout());
-        timeoutCutoff = System.nanoTime() + timeout;  // TODO: set timeout in initialize?
+        timeoutCutoff = System.nanoTime() + timeout;
         return tryProcessMutations();
     }
 
+    /**
+     * Starts a Paxos round. This is rerun if we are preempted by a higher ballot
+     **/
     private Status tryProcessMutations()
     {
         if (System.nanoTime() > timeoutCutoff)
         {
-            error = new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(keyspaceName)));
+            finalException = new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(keyspaceName)));
             return Status.COMPLETED;
         }
 
@@ -124,8 +127,11 @@ public class PaxosWriteTask extends Task
         return Status.REGULAR;
     }
 
+    /**
+     *  This is rerun if our prepare is rejected due to higher ballots (i.e. contention).  It is also rerun after
+     *  finishing a commit of a previously unfinished round.
+     */
     private Status beginAndRepairPaxos()
-            throws WriteTimeoutException, WriteFailureException
     {
         if (System.nanoTime() < timeoutCutoff)
         {
@@ -143,12 +149,11 @@ public class PaxosWriteTask extends Task
             Tracing.trace("Preparing {}", ballot);
             Commit toPrepare = Commit.newPrepare(key, cfm, ballot);
 
-            // First I/O call
             preparePaxos(toPrepare, ballot);
             return Status.REGULAR;
         }
 
-        error = new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(cfm.ksName)));
+        finalException = new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(cfm.ksName)));
         return Status.COMPLETED;
     }
 
@@ -205,39 +210,37 @@ public class PaxosWriteTask extends Task
     private Status handleProposeResponse(ProposeResponseHandler responseHandler)
     {
         if (responseHandler.isSuccessful())
+            return commitPaxos(responseHandler.proposal, consistencyForCommit, false, responseHandler.isForRepair());
+
+        // unsuccessful
+        if (!responseHandler.failFast && !responseHandler.isFullyRefused())
         {
-            return commitPaxos(responseHandler.refreshedInProgress, consistencyForCommit, false, responseHandler.isForRepair());
+            finalException = new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, responseHandler.getAcceptCount(), requiredParticipants);
+            return Status.COMPLETED;
+        }
+        else if (responseHandler.proposal != null)
+        {
+            Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
+            contentions++;
+
+            // TODO event loop needs to support scheduling an event at some point in the future.
+            // We're supposed to sleep a random amount of time to give the other proposer a chance to finish.
+            return beginAndRepairPaxos();
         }
         else
         {
-            if (!responseHandler.failFast && !responseHandler.isFullyRefused())
-            {
-                error = new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, responseHandler.getAcceptCount(), requiredParticipants);
-                return Status.COMPLETED;
-            }
-            else if (responseHandler.refreshedInProgress != null)
-            {
-                Tracing.trace("Some replicas have already promised a higher ballot than ours; aborting");
-                contentions++;
+            Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
+            contentions++;
 
-                // TODO event loop needs to support scheduling an event at some point in the future.
-                // We're supposed to sleep a random amount of time to give the other proposer a chance to finish.
-                return beginAndRepairPaxos();
-            }
-            else
-            {
-                Tracing.trace("Paxos proposal not accepted (pre-empted by a higher ballot)");
-                contentions++;
+            // TODO event loop needs to support scheduling an event at some point in the future.
+            // We're supposed to sleep a random amount of time to give the other proposer a chance to finish.
 
-                // TODO event loop needs to support scheduling an event at some point in the future.
-                // We're supposed to sleep a random amount of time to give the other proposer a chance to finish.
-
-                // restart from the beginning, deal with timeouts
-                return tryProcessMutations();
-            }
+            // restart from the beginning, deal with timeouts
+            return tryProcessMutations();
         }
     }
 
+    /** Called after we get a prepare response */
     private Status readExistingValuesAndApplyUpdates()
     {
         // read the current values and check they validate the conditions
@@ -246,7 +249,8 @@ public class PaxosWriteTask extends Task
         ConsistencyLevel readConsistency = consistencyForPaxos == ConsistencyLevel.LOCAL_SERIAL ? ConsistencyLevel.LOCAL_QUORUM : ConsistencyLevel.QUORUM;
 
         FilteredPartition current;
-        try (RowIterator rowIter = StorageProxy.readOne(readCommand, readConsistency))  // TODO blocking read
+        // TODO this still uses a blocking read, normally we would have another async break here
+        try (RowIterator rowIter = StorageProxy.readOne(readCommand, readConsistency))
         {
             current = FilteredPartition.create(rowIter);
         }
@@ -260,7 +264,6 @@ public class PaxosWriteTask extends Task
         }
 
         // finish the paxos round w/ the desired updates
-        // TODO turn null updates into delete?
         PartitionUpdate updates = request.makeUpdates(current);
 
         // Apply triggers to cas updates. A consideration here is that
@@ -282,8 +285,8 @@ public class PaxosWriteTask extends Task
     private void preparePaxos(Commit toPrepare, UUID ballot)
             throws WriteTimeoutException
     {
-        PrepareResponseHandler callback = new PrepareResponseHandler(ballot);
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_PREPARE, toPrepare, Commit.serializer);
+        PrepareResponseHandler callback = new PrepareResponseHandler(ballot, key, cfm);
+        MessageOut<Commit> message = new MessageOut<>(MessagingService.Verb.PAXOS_PREPARE, toPrepare, Commit.serializer);
         for (InetAddress target : liveEndpoints)
             MessagingService.instance().sendRR(message, target, callback);
     }
@@ -291,11 +294,10 @@ public class PaxosWriteTask extends Task
     private void proposePaxos(Commit proposal, boolean timeoutIfPartial, boolean forRepair)
     throws WriteTimeoutException
     {
-        Commit refreshedInProgress = forRepair ? proposal : null;
         ProposeResponseHandler callback = new ProposeResponseHandler(liveEndpoints.size(), requiredParticipants, !timeoutIfPartial,
-                consistencyForPaxos, refreshedInProgress);
+                consistencyForPaxos, proposal, forRepair);
 
-        MessageOut<Commit> message = new MessageOut<Commit>(MessagingService.Verb.PAXOS_PROPOSE, proposal, Commit.serializer);
+        MessageOut<Commit> message = new MessageOut<>(MessagingService.Verb.PAXOS_PROPOSE, proposal, Commit.serializer);
         for (InetAddress target : liveEndpoints)
             MessagingService.instance().sendRR(message, target, callback);
     }
@@ -313,23 +315,23 @@ public class PaxosWriteTask extends Task
         {
             AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
             CommitSubTask subTask = new CommitSubTask(this, forRepair);
-            responseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistencyLevel, null, WriteType.SIMPLE, subTask);
+            commitResponseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistencyLevel, null, WriteType.SIMPLE, subTask);
         }
 
         MessageOut<Commit> message = new MessageOut<>(MessagingService.Verb.PAXOS_COMMIT, proposal, Commit.serializer);
         for (InetAddress destination : Iterables.concat(naturalEndpoints, pendingEndpoints))
         {
             if (checkForHintOverload(destination))
-                return Status.COMPLETED;  // error will already be set
+                return Status.COMPLETED;  // finalException will already be set
 
             if (FailureDetector.instance.isAlive(destination))
             {
                 if (shouldBlock)
                 {
                     if (StorageProxy.canDoLocalRequest(destination))
-                        commitPaxosLocal(proposal);
+                        commitPaxosLocal(proposal, forRepair);
                     else
-                        MessagingService.instance().sendRR(message, destination, responseHandler, shouldHint);
+                        MessagingService.instance().sendRR(message, destination, commitResponseHandler, shouldHint);
                 }
                 else
                 {
@@ -338,7 +340,6 @@ public class PaxosWriteTask extends Task
             }
             else if (shouldHint)
             {
-                // TODO hint submission is still performed in a separate stage
                 StorageProxy.submitHint(proposal.makeMutation(), destination, null);
             }
         }
@@ -346,7 +347,12 @@ public class PaxosWriteTask extends Task
         return (forRepair || shouldBlock) ? Status.REGULAR : Status.COMPLETED;
     }
 
-    private void commitPaxosLocal(Commit proposal)
+    /**
+     * Commits a proposal locally.
+     * @param proposal the proposal to commit
+     * @param forRepair true if we are repairing an unfinished round (and thus have more work to do), false otherwise
+     */
+    private void commitPaxosLocal(Commit proposal, boolean forRepair)
     {
         localCommitStartNanos = System.nanoTime();
         // There is no guarantee we will see commits in the right order, because messages
@@ -360,7 +366,9 @@ public class PaxosWriteTask extends Task
         {
             Tracing.trace("Committing proposal {}", proposal);
             Mutation mutation = proposal.makeMutation();
-            WriteTask localWriteTask = new WriteTask(Collections.singleton(mutation), this);
+            WriteTask localWriteTask = forRepair
+                                     ? new RepairCommitWriteTask(Collections.singleton(mutation), this)
+                                     : new WriteTask(Collections.singleton(mutation), this);
             localProposal = proposal;
             this.eventLoop.scheduleTask(localWriteTask);
         }
@@ -370,6 +378,7 @@ public class PaxosWriteTask extends Task
         }
     }
 
+    /** Called when our local commit of a proposal completes */
     private Status handleLocalPaxosCommitCompleted(WriteTask.LocalWriteCompleteEvent event)
     {
         if (event.didFail())
@@ -377,31 +386,31 @@ public class PaxosWriteTask extends Task
             if (!(event.error instanceof WriteTimeoutException))
                 logger.error("Failed to apply paxos commit locally : {}", event.error);
 
-            responseHandler.onFailure(FBUtilities.getBroadcastAddress(), -1);
+            commitResponseHandler.onFailure(FBUtilities.getBroadcastAddress(), -1);
+            updateCasCommitStats();
             return Status.REGULAR;
         }
 
-        try
-        {
-            // We don't need to lock, we're just blindly updating
-            // TODO this is still blocking, need to convert ModificationStatement.executeInternal() to TPC
-            SystemKeyspace.savePaxosCommit(localProposal);
-            responseHandler.response(null, -1);
-            return Status.REGULAR;
-        }
-        finally
-        {
-            ColumnFamilyStore cfs = Keyspace.open(localProposal.update.metadata().ksName)
-                    .getColumnFamilyStore(localProposal.update.metadata().cfId);
-            cfs.metric.casCommit.addNano(System.nanoTime() - localCommitStartNanos);
-        }
+        // Update the system.paxos table
+        // We don't need to lock, we're just blindly updating
+        Collection<? extends IMutation> mutations = SystemKeyspace.getSavePaxosCommitMutations(localProposal);
+        WriteTask saveCommitTask = new SavePaxosCommitWriteTask(mutations, this);
+        this.eventLoop.scheduleTask(saveCommitTask);
+        return Status.REGULAR;
+    }
+
+    private void updateCasCommitStats()
+    {
+        ColumnFamilyStore cfs = Keyspace.open(localProposal.update.metadata().ksName)
+                .getColumnFamilyStore(localProposal.update.metadata().cfId);
+        cfs.metric.casCommit.addNano(System.nanoTime() - localCommitStartNanos);
     }
 
     private boolean checkForHintOverload(InetAddress destination)
     {
         if (StorageProxy.hintsAreOverloaded(destination))
         {
-            error = new OverloadedException(
+            finalException = new OverloadedException(
                     "Too many in flight hints: " + StorageMetrics.totalHintsInProgress.getCount() +
                             " destination: " + destination +
                             " destination hints: " + StorageProxy.getHintsInProgressFor(destination).get());
@@ -420,32 +429,35 @@ public class PaxosWriteTask extends Task
         StorageProxy.casWriteMetrics.addNano(System.nanoTime() - startTime);
     }
 
+    /** Handler for responses for a PROPOSE step */
     private class ProposeResponseHandler extends AbstractPaxosCallback<Boolean>
     {
         private final AtomicInteger accepts = new AtomicInteger(0);
         private final AtomicInteger failures = new AtomicInteger(0);
         private final AtomicBoolean haveEmittedEvent = new AtomicBoolean(false);
-        protected final int targets;
+        private final Commit proposal;
+        private final int targets;
         private final int requiredAccepts;
         private final boolean failFast;
-
-        private final Commit refreshedInProgress;
+        private final boolean forRepair;
 
         public ProposeResponseHandler(int totalTargets, int requiredTargets, boolean failFast, ConsistencyLevel consistency,
-                                      Commit refreshedInProgress)
+                                      Commit refreshedInProgress, boolean forRepair)
         {
             super(totalTargets, consistency);
             this.targets = totalTargets;
             this.requiredAccepts = requiredTargets;
             this.failFast = failFast;
-            this.refreshedInProgress = refreshedInProgress;
+            this.proposal = refreshedInProgress;
+            this.forRepair = forRepair;
         }
 
         public boolean isForRepair()
         {
-            return refreshedInProgress != null;
+            return forRepair;
         }
 
+        /** Called by MessagingService when we have a response */
         public void response(MessageIn<Boolean> msg, int id)
         {
             logger.debug("Propose response {} from {}", msg.payload, msg.from);
@@ -474,12 +486,11 @@ public class PaxosWriteTask extends Task
         // Note: this is only reliable if !failFast
         public boolean isFullyRefused()
         {
-            // We need to check the latch first to avoid racing with a late arrival
-            // between the latch check and the accepts one
-            return latch.getCount() == 0 && accepts.get() == 0;
+            return failures.get() == targets;
         }
     }
 
+    /** Handler for responses for a PREPARE step */
     private class PrepareResponseHandler implements IAsyncCallback<PrepareResponse>
     {
         protected final AtomicInteger awaiting;
@@ -492,10 +503,14 @@ public class PaxosWriteTask extends Task
 
         private final Map<InetAddress, Commit> commitsByReplica = new ConcurrentHashMap<>();
 
-        public PrepareResponseHandler(UUID ballot)
+        public PrepareResponseHandler(UUID ballot, DecoratedKey key, CFMetaData metadata)
         {
             this.ballot = ballot;
             awaiting = new AtomicInteger(requiredParticipants);
+
+            mostRecentCommit = Commit.emptyCommit(key, metadata);
+            mostRecentInProgressCommit = Commit.emptyCommit(key, metadata);
+            mostRecentInProgressCommitWithUpdate = Commit.emptyCommit(key, metadata);
         }
 
         public synchronized void response(MessageIn<PrepareResponse> message, int id)
@@ -559,37 +574,59 @@ public class PaxosWriteTask extends Task
         }
         else if (event instanceof WriteTask.LocalWriteCompleteEvent)
         {
-            return handleLocalPaxosCommitCompleted((WriteTask.LocalWriteCompleteEvent) event);
+            if (((WriteTask.LocalWriteCompleteEvent) event).writeTask instanceof SavePaxosCommitWriteTask)
+            {
+                commitResponseHandler.response(null, -1);
+                updateCasCommitStats();
+                return Status.REGULAR;
+            }
+            else
+            {
+                return handleLocalPaxosCommitCompleted((WriteTask.LocalWriteCompleteEvent) event);
+            }
         }
         if (event instanceof WriteTask.WriteSuccessEvent)
         {
             // we've gotten acks on all writes
-            // TODO use cas commit metrics instead?
             StorageProxy.casWriteMetrics.addNano(System.nanoTime() - startTime);
+
             CommitSubTask subTask = (CommitSubTask) ((WriteTask.WriteSuccessEvent) event).task;
             if (subTask.forRepair)
-                return beginAndRepairPaxos();
-            else
-                return Status.COMPLETED;
+                return beginAndRepairPaxos();  // we finished a repair, check again for new proposals to repair
+
+            recordFinalMetrics();
+            return Status.COMPLETED;
         }
         else if (event instanceof WriteTask.WriteTimeoutEvent)
         {
-            // TODO need different behavior/exc attributes for beginAndRepair vs final commit?
+            if (event.task() instanceof SavePaxosCommitWriteTask)
+                updateCasCommitStats();
+
+            // If we're still doing preparation for the paxos rounds, use the CAS write type (see CASSANDRA-8672)
             WriteTask.WriteTimeoutEvent wte = (WriteTask.WriteTimeoutEvent) event;
-            WriteTimeoutException exc = new WriteTimeoutException(wte.writeType, wte.consistencyLevel, wte.acks, wte.blockedFor);
-            error = exc;
-            // TODO use cas commit metrics instead?
+            WriteType writeType = (event.task() instanceof RepairCommitWriteTask)
+                                ? WriteType.CAS
+                                : wte.writeType;
+
+            finalException = new WriteTimeoutException(writeType, wte.consistencyLevel, wte.acks, wte.blockedFor);
             StorageProxy.casWriteMetrics.timeouts.mark();
+            recordFinalMetrics();
             return Status.COMPLETED;
         }
         else if (event instanceof WriteTask.WriteFailureEvent)
         {
-            // TODO need different behavior/exc attributes for beginAndRepair vs final commit?
+            if (event.task() instanceof SavePaxosCommitWriteTask)
+                updateCasCommitStats();
+
+            // If we're still doing preparation for the paxos rounds, use the CAS write type (see CASSANDRA-8672)
             WriteTask.WriteFailureEvent wfe = (WriteTask.WriteFailureEvent) event;
-            WriteFailureException exc = new WriteFailureException(wfe.consistencyLevel, wfe.acks, wfe.failures, wfe.blockedFor, wfe.writeType);
-            error = exc;
-            // TODO use cas commit metrics instead?
+            WriteType writeType = (event.task() instanceof RepairCommitWriteTask)
+                                  ? WriteType.CAS
+                                  : wfe.writeType;
+
+            finalException = new WriteFailureException(wfe.consistencyLevel, wfe.acks, wfe.failures, wfe.blockedFor, writeType);
             StorageProxy.casWriteMetrics.failures.mark();
+            recordFinalMetrics();
             return Status.COMPLETED;
         }
         else
@@ -659,6 +696,24 @@ public class PaxosWriteTask extends Task
         public Task getTask()
         {
             return task;
+        }
+    }
+
+    /** Used for committing existing in-flight proposals before starting our paxos rounds */
+    private class RepairCommitWriteTask extends WriteTask
+    {
+        private RepairCommitWriteTask(Collection<? extends IMutation> mutations, Task parentTask)
+        {
+            super(mutations, parentTask);
+        }
+    }
+
+    /** Used for saving paxos commits to the local system table */
+    private class SavePaxosCommitWriteTask extends WriteTask
+    {
+        private SavePaxosCommitWriteTask(Collection<? extends IMutation> mutations, Task parentTask)
+        {
+            super(mutations, parentTask);
         }
     }
 }

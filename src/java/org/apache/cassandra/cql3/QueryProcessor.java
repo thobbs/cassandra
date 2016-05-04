@@ -276,7 +276,7 @@ public class QueryProcessor implements QueryHandler
         return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
-    private static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
+    public static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
     {
         ParsedStatement.Prepared prepared = internalStatements.get(query);
         if (prepared != null)
@@ -287,6 +287,13 @@ public class QueryProcessor implements QueryHandler
         prepared.statement.validate(internalQueryState().getClientState());
         internalStatements.putIfAbsent(query, prepared);
         return prepared;
+    }
+
+    public Collection<? extends IMutation> prepareAndBuildMutations(String query, Object... values)
+    {
+        ParsedStatement.Prepared prepared = prepareInternal(query);
+        assert prepared.statement instanceof ModificationStatement;
+        return ((ModificationStatement) prepared.statement).getMutations(makeInternalOptions(prepared, values), true, internalQueryState().getTimestamp());
     }
 
     public static UntypedResultSet executeInternal(String query, Object... values)

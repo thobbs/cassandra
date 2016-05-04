@@ -255,10 +255,12 @@ public class WriteTask extends Task
         }
     }
 
-    private void maybeNotifyParentTask()
+    protected void maybeNotifyParentTask()
     {
         if (parentTask != null)
+        {
             parentTask.dispatchEvent(this.eventLoop, new LocalWriteCompleteEvent(this, parentTask, error));
+        }
     }
 
     private AbstractWriteResponseHandler<IMutation> makeResponseHandler(Mutation mutation, MutationTask mutationTask)
@@ -319,8 +321,12 @@ public class WriteTask extends Task
 
             mutTask.applyToMemtable();
             if (remaining == 0)
+            {
                 maybeNotifyParentTask();
-            return remaining == 0 ? Status.COMPLETED : Status.REGULAR;
+                return Status.COMPLETED;
+            }
+
+            return Status.REGULAR;
         }
         else if (event instanceof CommitlogSyncCompleteEvent)
         {
@@ -329,9 +335,14 @@ public class WriteTask extends Task
             CommitLogSegment.Allocation allocation = ((CommitlogSyncCompleteEvent) event).allocation;
             mutTask.replayPosition = allocation.getReplayPosition();
             mutTask.applyToMemtable();
+
             if (remaining == 0)
+            {
                 maybeNotifyParentTask();
-            return remaining == 0 ? Status.COMPLETED : Status.REGULAR;
+                return Status.COMPLETED;
+            }
+
+            return Status.REGULAR;
         }
         else
         {
@@ -470,6 +481,7 @@ public class WriteTask extends Task
     public interface SubTask
     {
         Task getTask();
+
     }
 
     public class MutationTask implements SubTask
@@ -501,13 +513,20 @@ public class WriteTask extends Task
         void applyToMemtable()
         {
             mutation.applyToMemtable(opGroup, replayPosition, nowInSec);
-            AbstractWriteResponseHandler.AckResponse ackResponse = responseHandler.localResponse();
-            if (ackResponse.complete)
+            if (localOnly)
             {
-                if (ackResponse.exc != null)
-                    error = ackResponse.exc;
-
                 remaining--;
+            }
+            else
+            {
+                AbstractWriteResponseHandler.AckResponse ackResponse = responseHandler.localResponse();
+                if (ackResponse.complete)
+                {
+                    if (ackResponse.exc != null)
+                        error = ackResponse.exc;
+
+                    remaining--;
+                }
             }
         }
     }
