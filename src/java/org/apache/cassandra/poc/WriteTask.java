@@ -33,6 +33,24 @@ import java.util.*;
 
 /**
  * A task for executing one or more mutations.
+ *
+ * The state machine for the local write path looks like this:
+ *
+ * [start] --> [segment allocated] --> [segment synced, memtable written]
+ *
+ * Both of the transitions may require yielding to the event loop and waiting for an event (CommitlogSegmentAvailableEvent
+ * and CommitlogSyncCompleteEvent, respectively).  However, it is normal for both transitions to be made immediately
+ * without yielding to the event loop (when a commitlog segment is available and periodic sync mode is in use).
+ *
+ * A normal WriteResponseHandler is used for managing responses from individual replicas (including the coordinator, if
+ * it's a replica).  Once the WriteResponseHandler has enough successful responses to meet the consistency level,
+ * a WriteSuccessEvent is emitted to complete the write.  Note that this step is also optimized for CL.(LOCAL_)ONE
+ * requests, allowing most token-aware writes at ONE to complete in a single cycle of the event loop with no events
+ * emitted.
+ *
+ * When handling multi-mutation batches, this task voluntarily defers to the event loop after processing a chunk of 64
+ * events. This allows other tasks (and individual mutations within the batch) to make progress while a large batch
+ * is handled.
  */
 public class WriteTask extends Task
 {

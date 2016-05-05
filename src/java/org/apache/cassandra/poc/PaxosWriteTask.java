@@ -39,6 +39,25 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+/**
+ * A task for executing a CAS operation using Paxos.
+ *
+ * The basic state machine for Paxos looks like this:
+ *
+ * [start] --> [prepared] --> [proposed] --> [committed]
+ *
+ * However, there are several complications that may require returning to an earlier state:
+ *  * Contention (return to [start])
+ *  * Incomplete rounds (return to [prepared] for the incomplete round, then return to [start] for this commit)
+ *  * Replicas missing the most recent commit (return to [start])
+ *
+ * Additionally, we also need to handle:
+ *  * A local read to check the precondition
+ *  * A local write of the commit itself
+ *  * A local write to save the commit to a system table
+ *
+ * These are accomplished with new WriteTasks and ReadTasks which have their own state machine.
+ */
 public class PaxosWriteTask extends Task
 {
     private static final Logger logger = LoggerFactory.getLogger(WriteTask.class);
