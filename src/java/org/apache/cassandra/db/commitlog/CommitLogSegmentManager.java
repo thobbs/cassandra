@@ -43,7 +43,6 @@ import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.WrappedRunnable;
 import uk.co.real_logic.agrona.concurrent.ManyToOneConcurrentArrayQueue;
-import uk.co.real_logic.agrona.concurrent.ManyToOneConcurrentLinkedQueue;
 
 import static org.apache.cassandra.db.commitlog.CommitLogSegment.Allocation;
 
@@ -192,6 +191,12 @@ public class CommitLogSegmentManager
         return alloc;
     }
 
+    /**
+     * Attempts to allocate space for a mutation in the current commit log segment. If there is not enough
+     * space, the current segment will be advanced.  If there is not a segment with enough space available,
+     * null will be returned and a WriteTask.CommitlogSegmentAvailableEvent will be emitted once one is available.
+     * Otherwise, an Allocation will be returned which can be used immediately.
+     */
     public Allocation allocateAsync(Mutation mutation, int size, WriteTask.MutationTask mutationTask)
     {
         CommitLogSegment segment = allocatingFrom;
@@ -204,6 +209,12 @@ public class CommitLogSegmentManager
         return allocateAsync(mutation, size, segment, mutationTask);
     }
 
+    /**
+     * Attempts to allocate space for a mutation in the given commit log segment. If there is not enough
+     * space, the current segment will be advanced.  If there is not a segment with enough space available,
+     * null will be returned and a WriteTask.CommitlogSegmentAvailableEvent will be emitted once one is available.
+     * Otherwise, an Allocation will be returned which can be used immediately.
+     */
     public Allocation allocateAsync(Mutation mutation, int size, CommitLogSegment segment, WriteTask.MutationTask mutationTask)
     {
         Allocation alloc;
@@ -297,14 +308,17 @@ public class CommitLogSegmentManager
     }
 
     /**
-     *  Returns true when a new segment is available, false when we must yield to the event loop for a notification
+     *  Returns true when a new segment is available, false when we must yield to the event loop and wait for a
+     *  WriteTask.CommitlogSegmentAvailableEvent to be emitted.
      */
     private CommitLogSegment advanceAllocatingFromAsync(CommitLogSegment old, WriteTask.MutationTask mutationTask)
     {
         while (true)
         {
             CommitLogSegment next;
-            // ignore for TPC purposes, for now
+
+            // although this is on the TPC write path, we expect lock acquisition time to be short enough
+            // to not warrant deferring to the event loop
             synchronized (this)
             {
                 // do this in a critical section so we can atomically remove from availableSegments and add to allocatingFrom/activeSegments
@@ -329,12 +343,10 @@ public class CommitLogSegmentManager
                     commitLog.archiver.maybeArchive(old);
 
                     // ensure we don't continue to use the old file; not strictly necessary, but cleaner to enforce it
-                    // TLH: doesn't need special TPC handling
                     old.discardUnusedTail();
                 }
 
                 // request that the CL be synced out-of-band, as we've finished a segment
-                // TLH: doesn't need special TPC handling, doesn't wait for sync to complete
                 commitLog.requestExtraSync();
                 return next;
             }
@@ -342,7 +354,6 @@ public class CommitLogSegmentManager
             // no more segments
             // trigger the management thread; this must occur after registering
             // the signal to ensure we are woken by any new segment creation
-            // TODO roll manager behavior into queued TPC work?
             wakeManager();
 
             // check if the queue has already been added to before waiting on the signal, to catch modifications

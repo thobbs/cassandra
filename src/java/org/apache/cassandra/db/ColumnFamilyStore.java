@@ -36,8 +36,6 @@ import com.google.common.base.*;
 import com.google.common.base.Throwables;
 import com.google.common.collect.*;
 import com.google.common.util.concurrent.*;
-import org.apache.cassandra.db.partitions.AtomicBTreePartition;
-import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1212,6 +1210,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      * param @ columnFamily - columnFamily changes
      */
     public void apply(PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup, ReplayPosition replayPosition)
+
     {
         long start = System.nanoTime();
         Memtable mt = data.getMemtableFor(opGroup, replayPosition);

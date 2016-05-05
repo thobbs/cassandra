@@ -23,8 +23,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.collect.Iterables;
-import org.apache.cassandra.poc.WriteTask;
-import org.apache.cassandra.poc.events.Event;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +33,8 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.poc.events.Event;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackWithFailure<T>
@@ -150,6 +150,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     /** null message means "response from local write" */
     public abstract void response(MessageIn<T> msg, int id);
 
+    /** Called when a local write has completed */
     public abstract AckResponse localResponse();
 
     public void assureSufficientLiveNodes() throws UnavailableException
@@ -161,6 +162,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     {
         if (mutationTask != null)
         {
+            // TPC write path
             int blockedFor = totalBlockFor();
             int acks = ackCount();
             Event event;
@@ -180,6 +182,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         }
         else
         {
+            // SEDA write path
             condition.signalAll();
             if (callback != null)
                 callback.run();

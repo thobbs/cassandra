@@ -35,7 +35,6 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
 
     public BatchlogResponseHandler(AbstractWriteResponseHandler<T> wrapped, int requiredBeforeFinish, BatchlogCleanup cleanup)
     {
-        // TODO write task?
         super(wrapped.keyspace, wrapped.naturalEndpoints, wrapped.pendingEndpoints, wrapped.consistencyLevel, wrapped.callback, wrapped.writeType, null);
         this.wrapped = wrapped;
         this.requiredBeforeFinish = requiredBeforeFinish;
@@ -57,8 +56,6 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
     public AckResponse localResponse()
     {
         AckResponse response = wrapped.localResponse();
-
-        // TODO double check this is the correct behavior
         if (requiredBeforeFinishUpdater.decrementAndGet(this) == 0)
             cleanup.run();
 

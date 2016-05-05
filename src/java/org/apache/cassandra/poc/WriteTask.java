@@ -21,6 +21,7 @@ import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.slf4j.Logger;
@@ -30,11 +31,15 @@ import uk.co.real_logic.agrona.TimerWheel.Timer;
 import java.net.InetAddress;
 import java.util.*;
 
+/**
+ * A task for executing one or more mutations.
+ */
 public class WriteTask extends Task
 {
     private static final Logger logger = LoggerFactory.getLogger(WriteTask.class);
 
-    private static final int CHUNK_SIZE = 64;  // number of mutations to process before yielding to the event loop
+    // for batch mutations, this is the number of mutations to process in one chunk before yielding to the event loop
+    private static final int CHUNK_SIZE = 64;
 
     private final String localDataCenter = DatabaseDescriptor.getEndpointSnitch().getDatacenter(FBUtilities.getBroadcastAddress());
 
@@ -47,9 +52,15 @@ public class WriteTask extends Task
     private final Task parentTask;
 
     private EventLoop eventLoop;
-    private Exception error;
+
+    // the number of mutations left to process
     private int remaining;
+
+    // the time in nanoseconds when the write operation was started
     private long startTime;
+
+    // if the write errors, this stores the cause
+    private Throwable error;
 
     public WriteTask(Collection<? extends IMutation> mutations, ConsistencyLevel consistencyLevel)
     {
@@ -66,7 +77,7 @@ public class WriteTask extends Task
     }
 
     /**
-     * Used only for local mutations
+     * Used only for local mutations executed as part of the work of a parent task (e.g. PaxosWriteTask)
      */
     public WriteTask(Collection<? extends IMutation> mutations, Task parentTask)
     {
@@ -172,7 +183,11 @@ public class WriteTask extends Task
             }
 
             if (insertLocal)
-                performLocalWrite(mutationTask, mutation);
+            {
+                boolean didError = performLocalWrite(mutationTask, mutation);
+                if (didError)
+                    return Status.COMPLETED;
+            }
         }
 
         if (mutationIterator.hasNext())
@@ -235,17 +250,34 @@ public class WriteTask extends Task
         }
     }
 
-    private void performLocalWrite(MutationTask mutationTask, Mutation mutation)
+    /** Returns true if there was an error performing the local write, false otherwise. */
+    private boolean performLocalWrite(MutationTask mutationTask, Mutation mutation)
     {
         mutationTask.nowInSec = FBUtilities.nowInSeconds();
         mutationTask.serializedSize = (int) Mutation.serializer.serializedSize(mutation, MessagingService.current_version);
 
-        Pair<ReplayPosition, OpOrder.Group> pair = mutation.writeCommitlogAsync(mutationTask);
-        mutationTask.replayPosition = pair.left;
-        mutationTask.opGroup = pair.right;
+        Keyspace keyspace = Keyspace.open(mutation.getKeyspaceName());
+        boolean durableWrites = keyspace.getMetadata().params.durableWrites;
 
-        if (mutationTask.replayPosition == null)
-            return; // we are either waiting on commitlog allocation or syncing
+        try
+        {
+            Pair<ReplayPosition, OpOrder.Group> pair = keyspace.writeCommitlogAsync(mutation, durableWrites, true, mutationTask);
+            mutationTask.replayPosition = pair.left;
+            mutationTask.opGroup = pair.right;
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Error writing mutation to commit log: ", t);
+            error = t;
+            status = Status.COMPLETED;
+            maybeNotifyParentTask();
+            return true;
+        }
+
+
+        if (mutationTask.replayPosition == null && durableWrites)
+            return false; // we are either waiting on commitlog allocation or syncing
 
         mutationTask.applyToMemtable();
         if (remaining == 0)
@@ -253,6 +285,7 @@ public class WriteTask extends Task
             status = Status.COMPLETED;
             maybeNotifyParentTask();
         }
+        return false;
     }
 
     protected void maybeNotifyParentTask()
@@ -293,61 +326,79 @@ public class WriteTask extends Task
         else if (event instanceof WriteTimeoutEvent)
         {
             WriteTimeoutEvent wte = (WriteTimeoutEvent) event;
-            WriteTimeoutException exc = new WriteTimeoutException(wte.writeType, wte.consistencyLevel, wte.acks, wte.blockedFor);
-            error = exc;
+            error = new WriteTimeoutException(wte.writeType, wte.consistencyLevel, wte.acks, wte.blockedFor);
             StorageProxy.writeMetrics.timeouts.mark();
             return Status.COMPLETED;
         }
         else if (event instanceof WriteFailureEvent)
         {
             WriteFailureEvent wfe = (WriteFailureEvent) event;
-            WriteFailureException exc = new WriteFailureException(wfe.consistencyLevel, wfe.acks, wfe.failures, wfe.blockedFor, wfe.writeType);
-            error = exc;
+            error = new WriteFailureException(wfe.consistencyLevel, wfe.acks, wfe.failures, wfe.blockedFor, wfe.writeType);
             StorageProxy.writeMetrics.failures.mark();
             return Status.COMPLETED;
         }
         else if (event instanceof CommitlogSegmentAvailableEvent)
         {
-            MutationTask mutTask = (MutationTask) ((CommitlogSegmentAvailableEvent) event).task;
-            int totalSize = mutTask.serializedSize + CommitLogSegment.ENTRY_OVERHEAD_SIZE;
-            CommitLogSegment.Allocation allocation = CommitLog.instance.allocator.allocateAsync(
-                    mutTask.mutation, totalSize, ((CommitlogSegmentAvailableEvent) event).segment, mutTask);
-            if (allocation == null)
-                return Status.REGULAR;  // allocation failed, wait for another CommitlogSegmentAvailableEvent
-
-            mutTask.replayPosition = CommitLog.instance.writeToAllocationAndSync(mutTask.mutation, allocation, mutTask);
-            if (mutTask.replayPosition == null)
-                return Status.REGULAR;  // commitlog sync would have blocked, wait for CommitlogSyncCompleteEvent
-
-            mutTask.applyToMemtable();
-            if (remaining == 0)
-            {
-                maybeNotifyParentTask();
-                return Status.COMPLETED;
-            }
-
-            return Status.REGULAR;
+            return handleCommitlogSegmentAvailable((CommitlogSegmentAvailableEvent) event);
         }
         else if (event instanceof CommitlogSyncCompleteEvent)
         {
-            MutationTask mutTask = (MutationTask) ((CommitlogSyncCompleteEvent) event).task;
-            CommitLog.instance.executor.pending.decrementAndGet();
-            CommitLogSegment.Allocation allocation = ((CommitlogSyncCompleteEvent) event).allocation;
-            mutTask.replayPosition = allocation.getReplayPosition();
-            mutTask.applyToMemtable();
-
-            if (remaining == 0)
-            {
-                maybeNotifyParentTask();
-                return Status.COMPLETED;
-            }
-
-            return Status.REGULAR;
+            return handleCommitlogSyncComplete((CommitlogSyncCompleteEvent) event);
         }
         else
         {
             throw new UnsupportedOperationException();
         }
+    }
+
+    private Status handleCommitlogSegmentAvailable(CommitlogSegmentAvailableEvent event)
+    {
+        MutationTask mutTask = (MutationTask) event.task;
+        int totalSize = mutTask.serializedSize + CommitLogSegment.ENTRY_OVERHEAD_SIZE;
+        CommitLogSegment.Allocation allocation = CommitLog.instance.allocator.allocateAsync(
+                mutTask.mutation, totalSize, event.segment, mutTask);
+        if (allocation == null)
+            return Status.REGULAR;  // allocation failed, wait for another CommitlogSegmentAvailableEvent
+
+        try
+        {
+            mutTask.replayPosition = CommitLog.instance.writeToAllocationAndSync(mutTask.mutation, allocation, mutTask);
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.error("Error writing mutation to commitlog allocation: ", t);
+            error = t;
+            return Status.COMPLETED;
+        }
+
+        if (mutTask.replayPosition == null)
+            return Status.REGULAR;  // commitlog sync would have blocked, wait for CommitlogSyncCompleteEvent
+
+        mutTask.applyToMemtable();
+        if (remaining == 0)
+        {
+            maybeNotifyParentTask();
+            return Status.COMPLETED;
+        }
+
+        return Status.REGULAR;
+    }
+
+    private Status handleCommitlogSyncComplete(CommitlogSyncCompleteEvent event)
+    {
+        MutationTask mutTask = (MutationTask) event.task;
+        CommitLogSegment.Allocation allocation = event.allocation;
+        mutTask.replayPosition = allocation.getReplayPosition();
+        mutTask.applyToMemtable();
+
+        if (remaining == 0)
+        {
+            maybeNotifyParentTask();
+            return Status.COMPLETED;
+        }
+
+        return Status.REGULAR;
     }
 
     public Status handleTimeout(EventLoop eventLoop, Timer timer)
@@ -458,9 +509,9 @@ public class WriteTask extends Task
     {
         public final WriteTask writeTask;
         public final Task parentTask;
-        public final Exception error;
+        public final Throwable error;
 
-        public LocalWriteCompleteEvent(WriteTask writeTask, Task parentTask, Exception error)
+        public LocalWriteCompleteEvent(WriteTask writeTask, Task parentTask, Throwable error)
         {
             this.writeTask = writeTask;
             this.parentTask = parentTask;
@@ -512,7 +563,8 @@ public class WriteTask extends Task
 
         void applyToMemtable()
         {
-            mutation.applyToMemtable(opGroup, replayPosition, nowInSec);
+            // for now, we always assume "updateIndexes" is true
+            mutation.applyToMemtable(opGroup, replayPosition, nowInSec, true);
             if (localOnly)
             {
                 remaining--;

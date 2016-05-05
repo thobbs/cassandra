@@ -70,7 +70,7 @@ public class CommitLog implements CommitLogMBean
     public final CommitLogSegmentManager allocator;
     public final CommitLogArchiver archiver;
     final CommitLogMetrics metrics;
-    public final AbstractCommitLogService executor;
+    final AbstractCommitLogService executor;
 
     final ICompressor compressor;
     public ParameterizedClass compressorClass;
@@ -251,7 +251,6 @@ public class CommitLog implements CommitLogMBean
         executor.requestExtraSync();
     }
 
-    // TODO only used by tests, update tests for TPC and remove this
     /**
      * Add a Mutation to the commit log.
      *
@@ -298,6 +297,17 @@ public class CommitLog implements CommitLogMBean
         return alloc.getReplayPosition();
     }
 
+    /**
+     * Attempts to a Mutation to the commit log.  This may return null if:
+     *   1. The current segment does not have enough space for the allocation
+     *   2. The commitlog segment has not been synced in a way that this mutation can be considered durable.
+     *  In the first case, a WriteTask.CommitlogSegmentAvailableEvent will be emitted once a new segment is available.
+     *  In the second case, WriteTask.CommitlogSegmentSyncCompleteEvent will be emitted once the write can be
+     *  considered durable.
+     *
+     *  If allocation and syncing have both completed, a ReplayPosition is returned and the write can be considered
+     *  durable immediately.
+     */
     public ReplayPosition addAsync(Mutation mutation, WriteTask.MutationTask mutationTask)
     {
         assert mutation != null;
@@ -316,6 +326,11 @@ public class CommitLog implements CommitLogMBean
         return writeToAllocationAndSync(mutation, alloc, mutationTask);
     }
 
+    /**
+     * Writes the given Mutation to the given Allocation.  If the commitlog is already "synced" and the write can
+     * be considered durable, a ReplayPosition is returned.  Otherwise, null is returned, and a
+     * WriteTask.CommitlogSyncCompletedEvent will be emitted.
+     */
     public ReplayPosition writeToAllocationAndSync(Mutation mutation, Allocation alloc, WriteTask.MutationTask mutationTask)
     {
         int serializedSize = mutationTask.getSerializedSize();

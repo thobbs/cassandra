@@ -140,6 +140,8 @@ public final class EventLoop implements Runnable
         catch (Throwable t)
         {
             logger.error("Unhandled exception in event loop: {}", t);
+
+            // TODO for early testing purposes, it's easier to exit on an unhandled error
             // JVMStabilityInspector.inspectThrowable(t);
             System.exit(1);
         }

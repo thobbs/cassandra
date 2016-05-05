@@ -27,8 +27,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
-import org.apache.cassandra.poc.WriteTask;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.config.CFMetaData;
@@ -232,18 +230,12 @@ public class Mutation implements IMutation
         apply(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
     }
 
-    public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(WriteTask.MutationTask mutationTask)
-    {
-        Keyspace keyspace = Keyspace.open(keyspaceName);
-        boolean durableWrites = keyspace.getMetadata().params.durableWrites;
-        return keyspace.writeCommitlogAsync(this, durableWrites, true, false, mutationTask);
-    }
-
-    public void applyToMemtable(OpOrder.Group opGroup, ReplayPosition replayPosition, int nowInSec)
+    /** Applies this mutation to a memtable.  This is always synchronous. */
+    public void applyToMemtable(OpOrder.Group opGroup, ReplayPosition replayPosition, int nowInSec, boolean updateIndexes)
     {
         Keyspace keyspace = Keyspace.open(getKeyspaceName());
         for (PartitionUpdate update : this.getPartitionUpdates())
-            keyspace.applyPartitionUpdateToMemtable(update, opGroup, replayPosition, nowInSec);
+            keyspace.applyPartitionUpdateToMemtable(update, opGroup, replayPosition, nowInSec, updateIndexes);
     }
 
     public void applyUnsafe()

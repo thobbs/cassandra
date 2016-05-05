@@ -56,7 +56,7 @@ public class PaxosState
         this.mostRecentCommit = mostRecentCommit;
     }
 
-    // TODO replacing locking when converting MessagingService to TPC
+    // TODO replace locking when converting MessagingService to TPC
     public static PrepareResponse prepare(Commit toPrepare)
     {
         long start = System.nanoTime();
@@ -92,7 +92,7 @@ public class PaxosState
 
     }
 
-    // TODO replacing locking when converting MessagingService to TPC
+    // TODO replace locking when converting MessagingService to TPC
     public static Boolean propose(Commit proposal)
     {
         long start = System.nanoTime();

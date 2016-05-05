@@ -549,10 +549,17 @@ public class Keyspace
         }
     }
 
+    /**
+     * Begins the (potentially async) commitlog write process for a mutation.
+     * @return a Pair of a (potentially null) ReplayPosition and an (always non-null) OpOrder.Group.  The ReplayPosition
+     *         is null in one of two cases:
+     *           1. Durable writes are disabled
+     *           2. The event that a blocking operation would have been required in order to obtain a ReplayPosition.
+                    In this case, callers should yield to the event loop and await a WriteTask.CommitlogSegmentAvailableEvent.
+     */
     public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(final Mutation mutation,
                                                                    final boolean writeCommitLog,
                                                                    boolean updateIndexes,
-                                                                   boolean isClReplay,
                                                                    WriteTask.MutationTask mutationTask)
     {
         // TODO handle MVs
@@ -578,23 +585,22 @@ public class Keyspace
         }
     }
 
+    /** Updates the memtable with a mutation.  This is always synchronous. */
     public void applyPartitionUpdateToMemtable(PartitionUpdate update, OpOrder.Group opGroup,
-                                               ReplayPosition replayPosition, int nowInSec)
+                                               ReplayPosition replayPosition, int nowInSec, boolean updateIndexes)
     {
         CFMetaData cfm = update.metadata();
         ColumnFamilyStore cfs = columnFamilyStores.get(cfm.cfId);
         if (cfs == null)
         {
-            // TODO error handling?  Throw WriteFailureException?
-            logger.error("Attempting to mutate non-existant table {} ({}.{})", cfm.cfId, cfm.ksName, cfm.cfName);
+            logger.error("Attempting to mutate non-existent table {} ({}.{})", cfm.cfId, cfm.ksName, cfm.cfName);
             return;
         }
 
-        // TODO ensure tracing can't do blocking IO
         Tracing.trace("Adding to {} memtable", update.metadata().cfName);
-
-        // TODO assume updateIndexes is true here?
-        UpdateTransaction indexTransaction = cfs.indexManager.newUpdateTransaction(update, opGroup, nowInSec);
+        UpdateTransaction indexTransaction = updateIndexes
+                                             ? cfs.indexManager.newUpdateTransaction(update, opGroup, nowInSec)
+                                             : UpdateTransaction.NO_OP;
         cfs.apply(update, indexTransaction, opGroup, replayPosition);
     }
 

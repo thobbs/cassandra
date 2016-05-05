@@ -41,8 +41,7 @@ public abstract class AbstractCommitLogService
 
     // counts of total written, and pending, log messages
     private final AtomicLong written = new AtomicLong(0);
-    // TODO expose this in a better way
-    public final AtomicLong pending = new AtomicLong(0);
+    protected final AtomicLong pending = new AtomicLong(0);
 
     // signal that writers can wait on to be notified of a completed sync
     protected final WaitQueue syncComplete = new WaitQueue();
@@ -97,14 +96,13 @@ public abstract class AbstractCommitLogService
                         // sync and signal
                         long syncStarted = System.currentTimeMillis();
 
-                        ArrayList<TaskAwaitingSync> tasksToNotify = new ArrayList<>();
                         // drain awaiting tasks that are synced
+                        ArrayList<TaskAwaitingSync> tasksToNotify = new ArrayList<>();
                         while (!awaitingTasks.isEmpty())
                         {
                             TaskAwaitingSync awaiting = awaitingTasks.peek();
-                            if (waitForSyncToCatchUp(awaiting.startedAt))
+                            if (shouldWaitForSyncToCatchUp(awaiting.startedAt))
                                 break;  // sync hasn't caught up yet
-
 
                             awaitingTasks.poll();
                             tasksToNotify.add(awaiting);
@@ -115,7 +113,10 @@ public abstract class AbstractCommitLogService
                         syncComplete.signalAll();
 
                         for (TaskAwaitingSync awaiting : tasksToNotify)
+                        {
                             WriteTask.CommitlogSyncCompleteEvent.createAndEmit(awaiting.writeTask, awaiting.allocation);
+                            pending.decrementAndGet();
+                        }
 
                         // sleep any time we have left before the next one is due
                         long now = System.currentTimeMillis();
@@ -194,16 +195,20 @@ public abstract class AbstractCommitLogService
         written.incrementAndGet();
     }
 
+    /**
+     * Returns true if the write can be considered durable at this point. Otherwise, false is returned and a
+     * WriteTask.CommitlogSyncCompleteEvent will be emitted to the given WriteTask once it is durable.
+     */
     public boolean finishWriteForAsync(Allocation alloc, WriteTask.MutationTask mutationTask)
     {
-        boolean isSynced = maybeWaitForAsync(alloc, mutationTask);
+        boolean isSynced = startSyncNonBlocking(alloc, mutationTask);
         if (isSynced)
             written.incrementAndGet();
         return isSynced;
     }
 
-    // TODO javadoc
-    protected boolean waitForSyncToCatchUp(long started)
+    /** Returns true if commitlog syncing is lagging behind, false otherwise. */
+    protected boolean shouldWaitForSyncToCatchUp(long started)
     {
         return false;
     }
@@ -212,10 +217,10 @@ public abstract class AbstractCommitLogService
 
     /**
      * Returns true if commit log sync is not lagging behind (and the write can be considered durable at this point).
-     * Otherwise, false is returned and a CommitlogSyncCompleteEvent will be emitted to the given WriteTask once
-     * syncing has caught up.
+     * Otherwise, false is returned and a WriteTask.CommitlogSyncCompleteEvent will be emitted to the given WriteTask
+     * once syncing has caught up.
      */
-    protected abstract boolean maybeWaitForAsync(Allocation alloc, WriteTask.MutationTask mutationTask);
+    protected abstract boolean startSyncNonBlocking(Allocation alloc, WriteTask.MutationTask mutationTask);
 
     /**
      * Sync immediately, but don't block for the sync to cmplete

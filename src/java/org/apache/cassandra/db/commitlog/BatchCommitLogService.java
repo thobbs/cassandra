@@ -27,7 +27,7 @@ class BatchCommitLogService extends AbstractCommitLogService
         super(commitLog, "COMMIT-LOG-WRITER", (int) DatabaseDescriptor.getCommitLogSyncBatchWindow());
     }
 
-    protected boolean maybeWaitForAsync(CommitLogSegment.Allocation alloc, WriteTask.MutationTask mutationTask)
+    protected boolean startSyncNonBlocking(CommitLogSegment.Allocation alloc, WriteTask.MutationTask mutationTask)
     {
         pending.incrementAndGet();
         haveWork.release();

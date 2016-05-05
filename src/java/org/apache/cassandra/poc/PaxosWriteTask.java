@@ -574,6 +574,7 @@ public class PaxosWriteTask extends Task
         }
         else if (event instanceof WriteTask.LocalWriteCompleteEvent)
         {
+            // TODO need to check error on event
             if (((WriteTask.LocalWriteCompleteEvent) event).writeTask instanceof SavePaxosCommitWriteTask)
             {
                 commitResponseHandler.response(null, -1);

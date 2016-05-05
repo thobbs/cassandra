@@ -276,6 +276,7 @@ public class QueryProcessor implements QueryHandler
         return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
+    @VisibleForTesting
     public static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
     {
         ParsedStatement.Prepared prepared = internalStatements.get(query);
@@ -289,7 +290,8 @@ public class QueryProcessor implements QueryHandler
         return prepared;
     }
 
-    public Collection<? extends IMutation> prepareAndBuildMutations(String query, Object... values)
+    /** Internally Prepares a mutation query (INSERT, UPDATE, DELETE statements) and returns a collection of Mutations. */
+    public Collection<? extends IMutation> prepareAndBuildMutationsInternal(String query, Object... values)
     {
         ParsedStatement.Prepared prepared = prepareInternal(query);
         assert prepared.statement instanceof ModificationStatement;

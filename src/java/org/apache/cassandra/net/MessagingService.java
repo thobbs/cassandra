@@ -747,10 +747,7 @@ public final class MessagingService implements MessagingServiceMBean
             logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddress(), message.verb, id, to);
 
         if (to.equals(FBUtilities.getBroadcastAddress()))
-        {
-            System.err.println("#### Message to self going over MessagingService: " + message);
             logger.trace("Message-to-self {} going over MessagingService", message);
-        }
 
         // message sinks are a testing hook
         for (IMessageSink ms : messageSinks)
@@ -761,7 +758,6 @@ public final class MessagingService implements MessagingServiceMBean
         OutboundTcpConnection connection = getConnection(to, message);
 
         // write it
-        System.err.println("#### enqueuing message");
         connection.enqueue(message, id);
     }
 

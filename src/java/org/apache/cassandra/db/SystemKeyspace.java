@@ -33,9 +33,6 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.SetMultimap;
 import com.google.common.io.ByteStreams;
-import org.apache.cassandra.cql3.CQLStatement;
-import org.apache.cassandra.cql3.statements.ModificationStatement;
-import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,7 +64,6 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
-import static org.apache.cassandra.cql3.QueryProcessor.prepareInternal;
 
 public final class SystemKeyspace
 {
@@ -1155,13 +1151,13 @@ public final class SystemKeyspace
                         commit.update.metadata().cfId);
     }
 
-    // TODO probably a cleaner way to organize this and the changes to QueryProcessor
+    /** Returns the collection of mutations necessary to save a paxos Commit to the system tables. */
     public static Collection<? extends IMutation> getSavePaxosCommitMutations(Commit commit)
     {
         // We always erase the last proposal (with the commit timestamp to no erase more recent proposal in case the commit is old)
         // even though that's really just an optimization  since SP.beginAndRepairPaxos will exclude accepted proposal older than the mrc.
         String cql = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = null, proposal = null, most_recent_commit_at = ?, most_recent_commit = ?, most_recent_commit_version = ? WHERE row_key = ? AND cf_id = ?";
-        return QueryProcessor.instance.prepareAndBuildMutations(String.format(cql, PAXOS),
+        return QueryProcessor.instance.prepareAndBuildMutationsInternal(String.format(cql, PAXOS),
                         UUIDGen.microsTimestamp(commit.ballot),
                         paxosTtl(commit.update.metadata()),
                         commit.ballot,

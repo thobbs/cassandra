@@ -30,10 +30,10 @@ class PeriodicCommitLogService extends AbstractCommitLogService
         super(commitLog, "PERIODIC-COMMIT-LOG-SYNCER", DatabaseDescriptor.getCommitLogSyncPeriod());
     }
 
-    protected boolean maybeWaitForAsync(CommitLogSegment.Allocation alloc, WriteTask.MutationTask mutationTask)
+    protected boolean startSyncNonBlocking(CommitLogSegment.Allocation alloc, WriteTask.MutationTask mutationTask)
     {
         long startedAt = System.currentTimeMillis();
-        if (!waitForSyncToCatchUp(startedAt))
+        if (!shouldWaitForSyncToCatchUp(startedAt))
             return true; // we're synced
 
         pending.incrementAndGet();
@@ -43,15 +43,16 @@ class PeriodicCommitLogService extends AbstractCommitLogService
 
     protected void maybeWaitForSync(CommitLogSegment.Allocation alloc)
     {
-        if (waitForSyncToCatchUp(Long.MAX_VALUE))  // TODO this is always true, so why force a volatile read?  From #3578
+        // TODO this is always true, so why force a volatile read?  This is from #3578
+        if (shouldWaitForSyncToCatchUp(Long.MAX_VALUE))
         {
             // wait until periodic sync() catches up with its schedule
             long started = System.currentTimeMillis();
             pending.incrementAndGet();
-            while (waitForSyncToCatchUp(started))
+            while (shouldWaitForSyncToCatchUp(started))
             {
                 WaitQueue.Signal signal = syncComplete.register(commitLog.metrics.waitingOnCommit.time());
-                if (waitForSyncToCatchUp(started))
+                if (shouldWaitForSyncToCatchUp(started))
                     signal.awaitUninterruptibly();
                 else
                     signal.cancel();
@@ -60,10 +61,9 @@ class PeriodicCommitLogService extends AbstractCommitLogService
         }
     }
 
-    /**
-     * @return true if sync is currently lagging behind inserts
-     */
-    protected boolean waitForSyncToCatchUp(long started)
+    /** Returns true if sync is currently lagging behind schedule */
+    @Override
+    protected boolean shouldWaitForSyncToCatchUp(long started)
     {
         return started > lastSyncedAt + blockWhenSyncLagsMillis;
     }
