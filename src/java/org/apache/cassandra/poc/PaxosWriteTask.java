@@ -68,7 +68,7 @@ public class PaxosWriteTask extends Task
     public RowIterator finalResult;
 
     /** If the operation fails, this stores the final exception */
-    public Exception finalException;
+    public Throwable finalException;
 
     private long localCommitStartNanos;
     private Commit localProposal;
@@ -574,8 +574,16 @@ public class PaxosWriteTask extends Task
         }
         else if (event instanceof WriteTask.LocalWriteCompleteEvent)
         {
-            // TODO need to check error on event
-            if (((WriteTask.LocalWriteCompleteEvent) event).writeTask instanceof SavePaxosCommitWriteTask)
+            if (((WriteTask.LocalWriteCompleteEvent) event).error != null)
+            {
+                finalException = ((WriteTask.LocalWriteCompleteEvent) event).error;
+                if (((WriteTask.LocalWriteCompleteEvent) event).writeTask instanceof SavePaxosCommitWriteTask)
+                    logger.error("Error saving paxos commit to local system table: ", finalException);
+                else
+                    logger.error("Error performing local write of paxos commit: ", finalException);
+                return Status.COMPLETED;
+            }
+            else if (((WriteTask.LocalWriteCompleteEvent) event).writeTask instanceof SavePaxosCommitWriteTask)
             {
                 commitResponseHandler.response(null, -1);
                 updateCasCommitStats();
