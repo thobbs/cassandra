@@ -30,6 +30,7 @@ import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.poc.WriteTask;
 
 /**
  * This class blocks for a quorum of responses _in all datacenters_ (CL.EACH_QUORUM).
@@ -46,10 +47,11 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
                                               ConsistencyLevel consistencyLevel,
                                               Keyspace keyspace,
                                               Runnable callback,
-                                              WriteType writeType)
+                                              WriteType writeType,
+                                              WriteTask.SubTask mutationTask)
     {
         // Response is been managed by the map so make it 1 for the superclass.
-        super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType);
+        super(keyspace, naturalEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, mutationTask);
         assert consistencyLevel == ConsistencyLevel.EACH_QUORUM;
 
         NetworkTopologyStrategy strategy = (NetworkTopologyStrategy) keyspace.getReplicationStrategy();
@@ -85,6 +87,20 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
 
         // all the quorum conditions are met
         signal();
+    }
+
+    public AckResponse localResponse()
+    {
+        String dataCenter = DatabaseDescriptor.getLocalDataCenter();
+        responses.get(dataCenter).getAndDecrement();
+        acks.incrementAndGet();
+
+        for (AtomicInteger i : responses.values())
+        {
+            if (i.get() > 0)
+                return new AckResponse(false, null);
+        }
+        return new AckResponse(true, handleLocalFinalAck());
     }
 
     protected int ackCount()

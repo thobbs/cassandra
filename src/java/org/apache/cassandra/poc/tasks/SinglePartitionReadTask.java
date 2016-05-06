@@ -166,6 +166,12 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
     }
 
     @Override
+    public Status resume(EventLoop eventLoop)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public Status handleEvent(EventLoop eventLoop, Event event)
     {
         if (event instanceof LocalReadResponse)

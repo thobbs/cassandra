@@ -1166,6 +1166,22 @@ public final class SystemKeyspace
                         commit.update.metadata().cfId);
     }
 
+    /** Returns the collection of mutations necessary to save a paxos Commit to the system tables. */
+    public static Collection<? extends IMutation> getSavePaxosCommitMutations(Commit commit)
+    {
+        // We always erase the last proposal (with the commit timestamp to no erase more recent proposal in case the commit is old)
+        // even though that's really just an optimization  since SP.beginAndRepairPaxos will exclude accepted proposal older than the mrc.
+        String cql = "UPDATE system.%s USING TIMESTAMP ? AND TTL ? SET proposal_ballot = null, proposal = null, most_recent_commit_at = ?, most_recent_commit = ?, most_recent_commit_version = ? WHERE row_key = ? AND cf_id = ?";
+        return QueryProcessor.instance.prepareAndBuildMutationsInternal(String.format(cql, PAXOS),
+                        UUIDGen.microsTimestamp(commit.ballot),
+                        paxosTtl(commit.update.metadata()),
+                        commit.ballot,
+                        PartitionUpdate.toBytes(commit.update, MessagingService.current_version),
+                        MessagingService.current_version,
+                        commit.update.partitionKey().getKey(),
+                        commit.update.metadata().cfId);
+    }
+
     /**
      * Returns a RestorableMeter tracking the average read rate of a particular SSTable, restoring the last-seen rate
      * from values in system.sstable_activity if present.

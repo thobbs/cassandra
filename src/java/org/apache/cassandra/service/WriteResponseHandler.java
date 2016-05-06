@@ -18,11 +18,11 @@
 package org.apache.cassandra.service;
 
 import java.net.InetAddress;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -47,26 +47,31 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
                                 ConsistencyLevel consistencyLevel,
                                 Keyspace keyspace,
                                 Runnable callback,
-                                WriteType writeType)
+                                WriteType writeType,
+                                WriteTask.SubTask mutationTask)
     {
-        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType);
+        super(keyspace, writeEndpoints, pendingEndpoints, consistencyLevel, callback, writeType, mutationTask);
         responses = totalBlockFor();
-    }
-
-    public WriteResponseHandler(InetAddress endpoint, WriteType writeType, Runnable callback)
-    {
-        this(Arrays.asList(endpoint), Collections.<InetAddress>emptyList(), ConsistencyLevel.ONE, null, callback, writeType);
     }
 
     public WriteResponseHandler(InetAddress endpoint, WriteType writeType)
     {
-        this(endpoint, writeType, null);
+        this(Collections.singleton(endpoint), Collections.<InetAddress>emptyList(), ConsistencyLevel.ONE, null, null, writeType, null);
+        assert writeType == WriteType.COUNTER;
     }
 
     public void response(MessageIn<T> m, int id)
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();
+    }
+
+    public AckResponse localResponse()
+    {
+        if (responsesUpdater.decrementAndGet(this) == 0)
+            return new AckResponse(true, handleLocalFinalAck());
+
+        return new AckResponse(false, null);
     }
 
     protected int ackCount()

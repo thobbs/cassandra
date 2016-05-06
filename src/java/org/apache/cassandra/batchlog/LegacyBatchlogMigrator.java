@@ -144,7 +144,8 @@ public final class LegacyBatchlogMigrator
                                                                                      ConsistencyLevel.ANY,
                                                                                      Keyspace.open(SystemKeyspace.NAME),
                                                                                      null,
-                                                                                     WriteType.SIMPLE);
+                                                                                     WriteType.SIMPLE,
+                                                                                     null);
         Mutation mutation = getRemoveMutation(uuid);
 
         for (InetAddress target : endpoints)

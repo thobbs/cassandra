@@ -20,7 +20,7 @@ package org.apache.cassandra.poc;
 import org.apache.cassandra.poc.events.Event;
 import uk.co.real_logic.agrona.TimerWheel.Timer;
 
-public class Task<T>
+public abstract class Task<T>
 {
     public enum Status
     {
@@ -42,25 +42,15 @@ public class Task<T>
 
     private Status status = Status.NEW;
 
-    public Status start(EventLoop eventLoop)
-    {
-        throw new UnsupportedOperationException();
-    }
+    protected EventLoop eventLoop;
 
-    public Status resume(EventLoop eventLoop)
-    {
-        throw new UnsupportedOperationException();
-    }
+    public abstract Status start(EventLoop eventLoop);
 
-    public Status handleEvent(EventLoop eventLoop, Event event)
-    {
-        throw new UnsupportedOperationException();
-    }
+    public abstract Status resume(EventLoop eventLoop);
 
-    public Status handleTimeout(EventLoop eventLoop, Timer timer)
-    {
-        throw new UnsupportedOperationException();
-    }
+    public abstract Status handleEvent(EventLoop eventLoop, Event event);
+
+    public abstract Status handleTimeout(EventLoop eventLoop, Timer timer);
 
     public void cleanup(EventLoop eventLoop)
     {
@@ -72,6 +62,11 @@ public class Task<T>
 
     public void onFailure(Throwable t)
     {
+    }
+
+    public EventLoop eventLoop()
+    {
+        return eventLoop;
     }
 
     final Status status()

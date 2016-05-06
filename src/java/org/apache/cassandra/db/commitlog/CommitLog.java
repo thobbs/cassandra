@@ -28,6 +28,7 @@ import javax.management.ObjectName;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -296,6 +297,73 @@ public class CommitLog implements CommitLogMBean
 
         executor.finishWriteFor(alloc);
         return alloc.getReplayPosition();
+    }
+
+    /**
+     * Attempts to a Mutation to the commit log.  This may return null if:
+     *   1. The current segment does not have enough space for the allocation
+     *   2. The commitlog segment has not been synced in a way that this mutation can be considered durable.
+     *  In the first case, a WriteTask.CommitlogSegmentAvailableEvent will be emitted once a new segment is available.
+     *  In the second case, WriteTask.CommitlogSegmentSyncCompleteEvent will be emitted once the write can be
+     *  considered durable.
+     *
+     *  If allocation and syncing have both completed, a ReplayPosition is returned and the write can be considered
+     *  durable immediately.
+     */
+    public ReplayPosition addAsync(Mutation mutation, WriteTask.MutationTask mutationTask)
+    {
+        assert mutation != null;
+
+        int totalSize = mutationTask.getSerializedSize() + ENTRY_OVERHEAD_SIZE;
+        if (totalSize > MAX_MUTATION_SIZE)
+        {
+            throw new IllegalArgumentException(String.format("Mutation of %s bytes is too large for the maxiumum size of %s",
+                    totalSize, MAX_MUTATION_SIZE));
+        }
+
+        Allocation alloc = allocator.allocateAsync(mutation, totalSize, mutationTask);
+        if (alloc == null)
+            return null;  // yield to event loop, wait for event
+
+        return writeToAllocationAndSync(mutation, alloc, mutationTask);
+    }
+
+    /**
+     * Writes the given Mutation to the given Allocation.  If the commitlog is already "synced" and the write can
+     * be considered durable, a ReplayPosition is returned.  Otherwise, null is returned, and a
+     * WriteTask.CommitlogSyncCompletedEvent will be emitted.
+     */
+    public ReplayPosition writeToAllocationAndSync(Mutation mutation, Allocation alloc, WriteTask.MutationTask mutationTask)
+    {
+        int serializedSize = mutationTask.getSerializedSize();
+        CRC32 checksum = new CRC32();
+        final ByteBuffer buffer = alloc.getBuffer();
+        try (BufferedDataOutputStreamPlus dos = new DataOutputBufferFixed(buffer))
+        {
+            // checksummed length
+            dos.writeInt(serializedSize);
+            updateChecksumInt(checksum, serializedSize);
+            buffer.putInt((int) checksum.getValue());
+
+            // checksummed mutation
+            Mutation.serializer.serialize(mutation, dos, MessagingService.current_version);
+            updateChecksum(checksum, buffer, buffer.position() - serializedSize, serializedSize);
+            buffer.putInt((int) checksum.getValue());
+        }
+        catch (IOException e)
+        {
+            throw new FSWriteError(e, alloc.getSegment().getPath());
+        }
+        finally
+        {
+            alloc.markWritten();
+        }
+
+        boolean isSynced = executor.finishWriteForAsync(alloc, mutationTask);
+        if (isSynced)
+            return alloc.getReplayPosition();
+        else
+            return null;
     }
 
     /**

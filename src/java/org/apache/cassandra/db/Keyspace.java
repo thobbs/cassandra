@@ -35,9 +35,11 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.ReplayPosition;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
+import org.apache.cassandra.db.partitions.AtomicBTreePartition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.ViewManager;
+import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -45,12 +47,14 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.metrics.KeyspaceMetrics;
+import org.apache.cassandra.poc.WriteTask;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -543,6 +547,61 @@ public class Keyspace
                     lock.unlock();
             }
         }
+    }
+
+    /**
+     * Begins the (potentially async) commitlog write process for a mutation.
+     * @return a Pair of a (potentially null) ReplayPosition and an (always non-null) OpOrder.Group.  The ReplayPosition
+     *         is null in one of two cases:
+     *           1. Durable writes are disabled
+     *           2. The event that a blocking operation would have been required in order to obtain a ReplayPosition.
+                    In this case, callers should yield to the event loop and await a WriteTask.CommitlogSegmentAvailableEvent.
+     */
+    public Pair<ReplayPosition, OpOrder.Group> writeCommitlogAsync(final Mutation mutation,
+                                                                   final boolean writeCommitLog,
+                                                                   boolean updateIndexes,
+                                                                   WriteTask.MutationTask mutationTask)
+    {
+        // TODO handle MVs
+        assert !(updateIndexes && viewManager.updatesAffectView(Collections.singleton(mutation), false));
+
+        OpOrder.Group opGroup = writeOrder.start();
+        try
+        {
+            // write the mutation to the commitlog and memtables
+            ReplayPosition replayPosition = null;
+            if (writeCommitLog)
+            {
+                Tracing.trace("Appending to commitlog");
+                replayPosition = CommitLog.instance.addAsync(mutation, mutationTask);
+                // replayPosition will be null if we would have had to block
+            }
+            return Pair.create(replayPosition, opGroup);
+        }
+        catch (Throwable exc)
+        {
+            opGroup.close();
+            throw exc;
+        }
+    }
+
+    /** Updates the memtable with a mutation.  This is always synchronous. */
+    public void applyPartitionUpdateToMemtable(PartitionUpdate update, OpOrder.Group opGroup,
+                                               ReplayPosition replayPosition, int nowInSec, boolean updateIndexes)
+    {
+        CFMetaData cfm = update.metadata();
+        ColumnFamilyStore cfs = columnFamilyStores.get(cfm.cfId);
+        if (cfs == null)
+        {
+            logger.error("Attempting to mutate non-existent table {} ({}.{})", cfm.cfId, cfm.ksName, cfm.cfName);
+            return;
+        }
+
+        Tracing.trace("Adding to {} memtable", update.metadata().cfName);
+        UpdateTransaction indexTransaction = updateIndexes
+                                             ? cfs.indexManager.newUpdateTransaction(update, opGroup, nowInSec)
+                                             : UpdateTransaction.NO_OP;
+        cfs.apply(update, indexTransaction, opGroup, replayPosition);
     }
 
     public AbstractReplicationStrategy getReplicationStrategy()

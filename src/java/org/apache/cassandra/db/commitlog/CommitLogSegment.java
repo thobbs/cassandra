@@ -596,7 +596,7 @@ public abstract class CommitLogSegment
      * The constructor leaves the fields uninitialized for population by CommitlogManager, so that it can be
      * stack-allocated by escape analysis in CommitLog.add.
      */
-    static class Allocation
+    public static class Allocation
     {
         private final CommitLogSegment segment;
         private final OpOrder.Group appendOp;

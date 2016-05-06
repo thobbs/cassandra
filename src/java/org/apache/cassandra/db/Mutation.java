@@ -26,6 +26,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.base.Throwables;
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.apache.cassandra.db.commitlog.ReplayPosition;
+import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -226,6 +228,14 @@ public class Mutation implements IMutation
     public void apply()
     {
         apply(Keyspace.open(keyspaceName).getMetadata().params.durableWrites);
+    }
+
+    /** Applies this mutation to a memtable.  This is always synchronous. */
+    public void applyToMemtable(OpOrder.Group opGroup, ReplayPosition replayPosition, int nowInSec, boolean updateIndexes)
+    {
+        Keyspace keyspace = Keyspace.open(getKeyspaceName());
+        for (PartitionUpdate update : this.getPartitionUpdates())
+            keyspace.applyPartitionUpdateToMemtable(update, opGroup, replayPosition, nowInSec, updateIndexes);
     }
 
     public void applyUnsafe()

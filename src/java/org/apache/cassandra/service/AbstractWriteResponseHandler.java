@@ -33,6 +33,8 @@ import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.poc.events.Event;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackWithFailure<T>
@@ -47,6 +49,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     protected final Runnable callback;
     protected final Collection<InetAddress> pendingEndpoints;
     protected final WriteType writeType;
+    protected final WriteTask.SubTask mutationTask;
     private static final AtomicIntegerFieldUpdater<AbstractWriteResponseHandler> failuresUpdater
         = AtomicIntegerFieldUpdater.newUpdater(AbstractWriteResponseHandler.class, "failures");
     private volatile int failures = 0;
@@ -59,7 +62,8 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
                                            Collection<InetAddress> pendingEndpoints,
                                            ConsistencyLevel consistencyLevel,
                                            Runnable callback,
-                                           WriteType writeType)
+                                           WriteType writeType,
+                                           WriteTask.SubTask mutationTask)
     {
         this.keyspace = keyspace;
         this.pendingEndpoints = pendingEndpoints;
@@ -68,6 +72,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         this.naturalEndpoints = naturalEndpoints;
         this.callback = callback;
         this.writeType = writeType;
+        this.mutationTask = mutationTask;
     }
 
     public void get() throws WriteTimeoutException, WriteFailureException
@@ -124,6 +129,11 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         return naturalEndpoints.size() + pendingEndpoints.size();
     }
 
+    public Iterable<InetAddress> getTargetedEndpoints()
+    {
+        return Iterables.concat(naturalEndpoints, pendingEndpoints);
+    }
+
     /**
      * @return true if the message counts towards the totalBlockFor() threshold
      */
@@ -140,6 +150,9 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     /** null message means "response from local write" */
     public abstract void response(MessageIn<T> msg, int id);
 
+    /** Called when a local write has completed */
+    public abstract AckResponse localResponse();
+
     public void assureSufficientLiveNodes() throws UnavailableException
     {
         consistencyLevel.assureSufficientLiveNodes(keyspace, Iterables.filter(Iterables.concat(naturalEndpoints, pendingEndpoints), isAlive));
@@ -147,9 +160,50 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
     protected void signal()
     {
-        condition.signalAll();
-        if (callback != null)
-            callback.run();
+        if (mutationTask != null)
+        {
+            // TPC write path
+            int blockedFor = totalBlockFor();
+            int acks = ackCount();
+            Event event;
+            if (blockedFor + failures > totalEndpoints())
+            {
+                event = new WriteTask.WriteTimeoutEvent(mutationTask, writeType, consistencyLevel, acks, blockedFor);
+            }
+            else if (totalBlockFor() + failures > totalEndpoints())
+            {
+                event = new WriteTask.WriteFailureEvent(mutationTask, writeType, consistencyLevel, acks, blockedFor, failures);
+            }
+            else
+            {
+                event = new WriteTask.WriteSuccessEvent(mutationTask);
+            }
+            mutationTask.getTask().eventLoop().emitEvent(event);
+        }
+        else
+        {
+            // SEDA write path
+            condition.signalAll();
+            if (callback != null)
+                callback.run();
+        }
+    }
+
+    /**
+     * Called when the final required ack is received from the local node.  Token-aware writes at CL.ONE are common
+     * enough that this can be optimized for by avoiding emitting an event on the event loop.
+     * @return null if the consistency level has been met, a WriteTimeoutException
+     */
+    protected WriteFailureException handleLocalFinalAck()
+    {
+        assert mutationTask != null;
+
+        int blockedFor = totalBlockFor();
+        int acks = ackCount();
+        if (blockedFor + failures > totalEndpoints())
+            return new WriteFailureException(consistencyLevel, acks, failures, blockedFor, writeType);
+        else
+            return null;
     }
 
     @Override
@@ -163,5 +217,17 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
         if (totalBlockFor() + n > totalEndpoints())
             signal();
+    }
+
+    public static class AckResponse
+    {
+        public final boolean complete;
+        public final WriteFailureException exc;
+
+        AckResponse(boolean complete, WriteFailureException exc)
+        {
+            this.complete = complete;
+            this.exc = exc;
+        }
     }
 }

@@ -20,6 +20,7 @@ package org.apache.cassandra.cql3.statements;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -450,7 +451,8 @@ public abstract class ModificationStatement implements CQLStatement
         }
     }
 
-    private CQL3CasRequest makeCasRequest(QueryState queryState, QueryOptions options)
+    @VisibleForTesting
+    public CQL3CasRequest makeCasRequest(QueryState queryState, QueryOptions options)
     {
         List<ByteBuffer> keys = buildPartitionKeyNames(options);
         // We don't support IN for CAS operation so far
@@ -610,7 +612,7 @@ public abstract class ModificationStatement implements CQLStatement
      *
      * @return list of the mutations
      */
-    private Collection<? extends IMutation> getMutations(QueryOptions options, boolean local, long now)
+    public Collection<? extends IMutation> getMutations(QueryOptions options, boolean local, long now)
     {
         UpdatesCollector collector = new UpdatesCollector(Collections.singletonMap(cfm.cfId, updatedColumns), 1);
         addUpdates(collector, options, local, now);
