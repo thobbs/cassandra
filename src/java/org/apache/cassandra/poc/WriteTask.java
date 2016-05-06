@@ -30,6 +30,7 @@ import uk.co.real_logic.agrona.TimerWheel.Timer;
 
 import java.net.InetAddress;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A task for executing one or more mutations.
@@ -67,21 +68,24 @@ public class WriteTask extends Task<Void>
     private final ArrayList<MutationTask> mutationTasks;
     private final WriteType writeType;
     private final boolean localOnly;
+    private final String keyspace;
 
     // the number of mutations left to process
     private int remaining;
 
     // the time in nanoseconds when the write operation was started
     private long startTime;
+    private Timer requestTimer;
 
     public WriteTask(Collection<? extends IMutation> mutations, ConsistencyLevel consistencyLevel)
     {
         this.mutations = mutations;
         this.consistencyLevel = consistencyLevel;
 
-        this.mutationIterator = mutations.iterator();
+        mutationIterator = mutations.iterator();
         mutationTasks = new ArrayList<>(mutations.size());
         remaining = mutations.size();
+        keyspace = mutations.iterator().next().getKeyspaceName();
         writeType = remaining <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
 
         localOnly = false;
@@ -98,6 +102,7 @@ public class WriteTask extends Task<Void>
         this.mutationIterator = mutations.iterator();
         mutationTasks = new ArrayList<>(mutations.size());
         remaining = mutations.size();
+        keyspace = mutations.iterator().next().getKeyspaceName();
         writeType = remaining <= 1 ? WriteType.SIMPLE : WriteType.UNLOGGED_BATCH;
 
         localOnly = true;
@@ -106,9 +111,11 @@ public class WriteTask extends Task<Void>
     @Override
     public Status start(EventLoop eventLoop)
     {
-        startTime = System.nanoTime();
-
         this.eventLoop = eventLoop;
+
+        startTime = System.nanoTime();
+        requestTimer = eventLoop.scheduleTimer(this, DatabaseDescriptor.getWriteRpcTimeout() , TimeUnit.MILLISECONDS);
+
         return processMutations();
     }
 
@@ -171,7 +178,6 @@ public class WriteTask extends Task<Void>
                     }
                 }
 
-                // TODO hint submission is still performed in a separate stage
                 if (endpointsToHint != null)
                     StorageProxy.submitHint(mutation, endpointsToHint, responseHandler);
 
@@ -398,7 +404,11 @@ public class WriteTask extends Task<Void>
     @Override
     public Status handleTimeout(EventLoop eventLoop, Timer timer)
     {
-        throw new UnsupportedOperationException();
+        // there's not really a reasonable way to determine the number of "responses" that we have for a batch
+        // mutation, so we use zero in that case
+        int responses = (mutations.size() == 1) ? mutationTasks.get(0).responseHandler.ackCount() : 0;
+        int blockFor = consistencyLevel.blockFor(Keyspace.open(this.keyspace));
+        return fail(new WriteTimeoutException(writeType, consistencyLevel, responses, blockFor));
     }
 
     public void cleanup(EventLoop eventLoop)

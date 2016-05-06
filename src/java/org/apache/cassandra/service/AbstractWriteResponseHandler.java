@@ -145,7 +145,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     /**
      * @return number of responses received
      */
-    protected abstract int ackCount();
+    public abstract int ackCount();
 
     /** null message means "response from local write" */
     public abstract void response(MessageIn<T> msg, int id);

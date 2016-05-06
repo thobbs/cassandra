@@ -74,7 +74,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
         return new AckResponse(false, null);
     }
 
-    protected int ackCount()
+    public int ackCount()
     {
         return totalBlockFor() - responses;
     }

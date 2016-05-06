@@ -103,7 +103,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         return new AckResponse(true, handleLocalFinalAck());
     }
 
-    protected int ackCount()
+    public int ackCount()
     {
         return acks.get();
     }

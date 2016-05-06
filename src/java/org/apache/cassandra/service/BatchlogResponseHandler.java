@@ -41,7 +41,7 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         this.cleanup = cleanup;
     }
 
-    protected int ackCount()
+    public int ackCount()
     {
         return wrapped.ackCount();
     }
