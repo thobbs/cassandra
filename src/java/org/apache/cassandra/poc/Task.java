@@ -81,6 +81,7 @@ public abstract class Task<T>
 
         this.result = result;
         status = Status.COMPLETED;
+        hasCompleted = true;
         onComplete(result);
         return status;
     }

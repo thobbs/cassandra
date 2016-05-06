@@ -48,7 +48,7 @@ import java.util.*;
 public class WriteTaskTest extends CQLTester
 {
     @Test
-    public void testBatches()
+    public void testBatches() throws Throwable
     {
         String keyspaceName = "write_task_test";
         KeyspaceAttributes keyspaceAttributes = new KeyspaceAttributes();
@@ -69,8 +69,9 @@ public class WriteTaskTest extends CQLTester
         LivenessInfo info =  LivenessInfo.create(FBUtilities.timestampMicros(), 0, FBUtilities.nowInSeconds());
         Row row = BTreeRow.noCellLiveRow(clustering, info);
 
-        ArrayList<Mutation> mutations = new ArrayList<>(10000);
-        for (int i = 0; i < 10000; i++)
+        int numRows = 100000;
+        ArrayList<Mutation> mutations = new ArrayList<>(numRows);
+        for (int i = 0; i < numRows; i++)
         {
             DecoratedKey key = cfm.decorateKey(Int32Type.instance.getSerializer().serialize(i));
             PartitionUpdate update = PartitionUpdate.singleRowUpdate(cfm, key, row);
@@ -78,16 +79,15 @@ public class WriteTaskTest extends CQLTester
         }
 
         WriteTask task = new WriteTask(mutations, ConsistencyLevel.ONE);
-        eventLoop.scheduleTask(task);
         long startTime = System.currentTimeMillis();
-        while (task.status() != Task.Status.COMPLETED)
-            eventLoop.cycle();
-        logger.info("WriteTasks took {}ms to execute", System.currentTimeMillis() - startTime);
-        assert task.status() != Task.Status.NEW;
+        runTask(eventLoop, task);
+        logger.info("WriteTask with {} mutations took {}ms to execute", numRows, System.currentTimeMillis() - startTime);
+
+        assertRows(execute("SELECT count(*) from " + keyspaceName + "." + tableName), row((long) numRows));
     }
 
     @Test
-    public void testPaxos()
+    public void testPaxos() throws Throwable
     {
         MessagingService.instance().listen();
 
@@ -112,12 +112,38 @@ public class WriteTaskTest extends CQLTester
         DecoratedKey key = cfm.decorateKey(Int32Type.instance.getSerializer().serialize(0));
         PaxosWriteTask task = new PaxosWriteTask(keyspaceName, tableName, key, casRequest, ConsistencyLevel.SERIAL, ConsistencyLevel.ONE, ClientState.forInternalCalls());
 
-        // WriteTask task = new WriteTask(mutations, ConsistencyLevel.ONE);
+        runTask(eventLoop, task);
+        assertRows(execute("SELECT * FROM " + keyspaceName + "." + tableName), row(0, 0));
+
+        // update row with CAS
+        query = "UPDATE " + keyspaceName + "." + tableName + " SET v = 1 WHERE k = 0 IF v = 0";
+        statement = (ModificationStatement) QueryProcessor.prepareInternal(query).statement;
+        casRequest = statement.makeCasRequest(QueryState.forInternalCalls(), QueryOptions.DEFAULT);
+        task = new PaxosWriteTask(keyspaceName, tableName, key, casRequest, ConsistencyLevel.SERIAL, ConsistencyLevel.ONE, ClientState.forInternalCalls());
+
+        runTask(eventLoop, task);
+        assertRows(execute("SELECT * FROM " + keyspaceName + "." + tableName), row(0, 1));
+
+        // update row with CAS that won't apply
+        query = "UPDATE " + keyspaceName + "." + tableName + " SET v = 1 WHERE k = 0 IF v = 0";
+        statement = (ModificationStatement) QueryProcessor.prepareInternal(query).statement;
+        casRequest = statement.makeCasRequest(QueryState.forInternalCalls(), QueryOptions.DEFAULT);
+        task = new PaxosWriteTask(keyspaceName, tableName, key, casRequest, ConsistencyLevel.SERIAL, ConsistencyLevel.ONE, ClientState.forInternalCalls());
+
+        runTask(eventLoop, task);
+        assertRows(execute("SELECT * FROM " + keyspaceName + "." + tableName), row(0, 1));
+    }
+
+    private void runTask(EventLoop eventLoop, Task task) throws Throwable
+    {
         eventLoop.scheduleTask(task);
         long startTime = System.currentTimeMillis();
-        while (task.status() != Task.Status.COMPLETED)
+        while (!task.status().isFinal() && System.currentTimeMillis() < (startTime + 10000))
             eventLoop.cycle();
-        logger.info("PaxosWriteTask took {}ms to execute", System.currentTimeMillis() - startTime);
-        assert task.status() != Task.Status.NEW;
+
+        assert task.status().isFinal() : "Task took more than 10s";
+
+        if (task.hasFailed())
+            throw task.exception();
     }
 }
