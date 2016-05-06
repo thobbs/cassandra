@@ -18,17 +18,20 @@
 package org.apache.cassandra.poc.tasks;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
-import java.util.List;
+import java.nio.ByteBuffer;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Maps;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
@@ -36,6 +39,10 @@ import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessagingService;
@@ -50,27 +57,43 @@ import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.FBUtilities;
 import uk.co.real_logic.agrona.TimerWheel.Timer;
 
+/**
+ * 1. Initiate the initial requests
+ * 2. Wait to speculate, if enabled
+ * 3. As soon as blockFor reqs are received, compare digests
+        (TODO: no need to wait for all blockFor reqs, can start the repair on first mismatch)
+ * 4. In case of digest mismatch, initiate read repair (fire DATA reqs for all the replicas with DATA missing)
+ * 5. Upon receiving blockFor of DATA reqs, merge and return them all
+ * TODO:
+ * 6. Keep background repair in progress
+ * 7. Send end-result merged mutation to all contacted replicas nodes (or, rather, only those that have a different DIGEST)
+ */
 public class SinglePartitionReadTask extends Task<PartitionIterator>
 {
-    private Timer requestTimer;
-    private Timer speculateTimer;
-
-    private List<ReadResponse> responses;
-
     private final SinglePartitionReadCommand command;
     private final ConsistencyLevel cl;
 
+    private int blockFor;
+    private Map<InetAddress, ReadResponse> responses;
+    private Map<InetAddress, Boolean> pendingRequests;
+    private boolean handlingDigestMismatch;
     private InetAddress extraReplica;
+
+    private Timer requestTimer;
+    private Timer speculateTimer;
 
     public SinglePartitionReadTask(SinglePartitionReadCommand command, ConsistencyLevel cl)
     {
         this.command = command;
         this.cl = cl;
+
+        blockFor = cl.blockFor(Keyspace.open(command.metadata().ksName));
     }
 
     /*
+     * TODO: read_repair_chance/dc_local_read_repair_chance speculation
      * TODO: short read protection
-     * TODO: read repair
+     * TODO: background read repair
      */
 
     @Override
@@ -83,7 +106,8 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
         // throw UAE early if we don't have enough replicas.
         cl.assureSufficientLiveNodes(keyspace, targetReplicas);
 
-        responses = new ArrayList<>(targetReplicas.size() + 1);
+        responses = Maps.newHashMapWithExpectedSize(targetReplicas.size() + 1);
+        pendingRequests = Maps.newHashMapWithExpectedSize(targetReplicas.size() + 1);
 
         // decide if we are going to speculate
         SpeculativeRetryParam retry = command.metadata().params.speculativeRetry;
@@ -93,7 +117,7 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
             switch (retry.kind())
             {
                 case ALWAYS:
-                    targetReplicas.add(edgeReplica);
+                    scheduleDataRequest(eventLoop, edgeReplica); // TODO: should send DATA to the 2nd replica, not the last (if QUORUM)
                     break;
                 case PERCENTILE:
                 case CUSTOM:
@@ -157,12 +181,15 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
             Adapters.readLocally(eventLoop, this, command);
         else
             Adapters.sendMessage(eventLoop, this, command.createMessage(MessagingService.instance().getVersion(replica)), replica);
+
+        pendingRequests.put(replica, false);
     }
 
     // always remote
     private void scheduleDigestRequest(EventLoop eventLoop, InetAddress replica)
     {
         Adapters.sendMessage(eventLoop, this, command.copy().setIsDigestQuery(true).createMessage(MessagingService.instance().getVersion(replica)), replica);
+        pendingRequests.put(replica, true);
     }
 
     @Override
@@ -190,26 +217,84 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
 
     private Status handleResponse(EventLoop eventLoop, InetAddress from, ReadResponse response)
     {
-        responses.add(response);
+        // a DIGEST response for a replica we had already issued a DATA request for (on digest mismatch)
+        if (response.isDigestResponse() != pendingRequests.get(from))
+            return Status.PROCESSING;
 
-        int blockFor = cl.blockFor(Keyspace.open(command.metadata().ksName));
-        if (responses.size() < blockFor)
+        pendingRequests.remove(from);
+        responses.put(from, response);
+
+        return handlingDigestMismatch
+             ? handleDigestMismatchResponse(eventLoop, from, response)
+             : handleInitialResponse(eventLoop, from, response);
+    }
+
+    private Status handleInitialResponse(EventLoop eventLoop, InetAddress from, ReadResponse response)
+    {
+        if (responses.size() < blockFor || !hasDataResponses())
             return Status.PROCESSING;
 
         if (speculateTimer != null)
             speculateTimer.cancel();
-        requestTimer.cancel();
 
-        if (responses.size() == 1)
-            return complete(UnfilteredPartitionIterators.filter(response.makeIterator(command), command.nowInSec()));
+        if (responses.size() == 1 || allDigestsMatch(responses.values()))
+        {
+            requestTimer.cancel();
+            ReadResponse dataResponse = Iterables.tryFind(responses.values(), ReadResponse::isDataResponse).get();
+            return complete(UnfilteredPartitionIterators.filter(dataResponse.makeIterator(command), command.nowInSec()));
+        }
+
+        /*
+         * more than 1 response, not all digests are matching;
+         * issue full DATA requests to the replicas for which we only have digests, or still expecting digests
+         */
+
+        for (Map.Entry<InetAddress, ReadResponse> entry : responses.entrySet())
+        {
+            if (entry.getValue().isDigestResponse())
+            {
+                scheduleDataRequest(eventLoop, entry.getKey());
+                responses.remove(entry.getKey());
+            }
+        }
+
+        for (Map.Entry<InetAddress, Boolean> entry : pendingRequests.entrySet())
+            if (entry.getValue())
+                scheduleDataRequest(eventLoop, entry.getKey());
+
+        handlingDigestMismatch = true;
+
+        return Status.PROCESSING;
+    }
+
+    // Await for blockFor DATA responses, merge them and return the result
+    private Status handleDigestMismatchResponse(EventLoop eventLoop, InetAddress from, ReadResponse response)
+    {
+        if (responses.size() < blockFor)
+            return Status.PROCESSING;
 
         List<UnfilteredPartitionIterator> iterators = new ArrayList<>(responses.size());
-        responses.forEach(r -> iterators.add(r.makeIterator(command)));
+        responses.values().forEach(r -> iterators.add(r.makeIterator(command)));
 
+        // Even though every responses should honor the limit, we might have more than requested post reconciliation,
+        // so ensure we're respecting the limit.
         DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true);
+        return complete(counter.applyTo(UnfilteredPartitionIterators.mergeAndFilter(iterators, command.nowInSec(), new VoidMergeListener())));
+    }
 
-        // TODO FIXME: null is a lie
-        return complete(counter.applyTo(UnfilteredPartitionIterators.mergeAndFilter(iterators, command.nowInSec(), null)));
+    private boolean allDigestsMatch(Collection<ReadResponse> responses)
+    {
+        ByteBuffer digest = null;
+        for (ReadResponse response : responses)
+        {
+            ByteBuffer newDigest = response.digest(command);
+            if (digest == null)
+                digest = newDigest;
+            else if (!digest.equals(newDigest))
+                return false;
+        }
+
+        return true;
     }
 
     @Override
@@ -232,12 +317,41 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
 
     private Status timeOut()
     {
-        int blockFor = cl.blockFor(Keyspace.open(command.metadata().ksName));
         return fail(new ReadTimeoutException(cl, responses.size(), blockFor, hasDataResponses()));
     }
 
     private boolean hasDataResponses()
     {
-        return Iterables.any(responses, r -> !r.isDigestResponse());
+        return Iterables.any(responses.values(), ReadResponse::isDataResponse);
+    }
+
+    private static class VoidMergeListener implements UnfilteredPartitionIterators.MergeListener
+    {
+
+        public UnfilteredRowIterators.MergeListener getRowMergeListener(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
+        {
+            return new UnfilteredRowIterators.MergeListener()
+            {
+                public void onMergedPartitionLevelDeletion(DeletionTime mergedDeletion, DeletionTime[] versions)
+                {
+                }
+
+                public void onMergedRows(Row merged, Row[] versions)
+                {
+                }
+
+                public void onMergedRangeTombstoneMarkers(RangeTombstoneMarker merged, RangeTombstoneMarker[] versions)
+                {
+                }
+
+                public void close()
+                {
+                }
+            };
+        }
+
+        public void close()
+        {
+        }
     }
 }

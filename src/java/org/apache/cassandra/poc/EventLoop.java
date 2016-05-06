@@ -22,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import org.apache.cassandra.poc.events.Event;
-import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import uk.co.real_logic.agrona.TimerWheel;
@@ -35,8 +34,8 @@ public final class EventLoop implements Runnable
 {
     private static final Logger logger = LoggerFactory.getLogger(EventLoop.class);
 
-    // TODO: replace with time-based slicing
-    private static final int MAX_CONSEQUENT_RERUNS = 16;
+    // TODO: come up with a test-based number
+    private static final long QUANTUM = TimeUnit.MILLISECONDS.toNanos(1);
 
     private volatile boolean isRunning = false;
 
@@ -140,14 +139,13 @@ public final class EventLoop implements Runnable
     private void rescheduleTask(Task task)
     {
         Task.Status status;
-        int i = 0;
+        long startedAt = System.nanoTime();
 
         do
         {
             status = task.dispatchResume(this);
-            i++;
         }
-        while (status == Task.Status.RESCHEDULED && i < MAX_CONSEQUENT_RERUNS);
+        while (status == Task.Status.RESCHEDULED && (System.nanoTime() - startedAt) < QUANTUM);
 
         if (status == Task.Status.RESCHEDULED)
             reschedule(task);

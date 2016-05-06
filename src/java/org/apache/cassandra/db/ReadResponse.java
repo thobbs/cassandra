@@ -81,6 +81,11 @@ public abstract class ReadResponse
 
     public abstract boolean isDigestResponse();
 
+    public final boolean isDataResponse()
+    {
+        return !isDigestResponse();
+    }
+
     protected static ByteBuffer makeDigest(UnfilteredPartitionIterator iterator, ReadCommand command)
     {
         MessageDigest digest = FBUtilities.threadLocalMD5Digest();

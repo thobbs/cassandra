@@ -36,6 +36,7 @@ public abstract class Task<T>
         }
     }
 
+    // these 3 fields here for testing only for now (and will probably go)
     private volatile boolean hasCompleted = false;
     private volatile T result; // can be Void null
     private volatile Throwable exception;
