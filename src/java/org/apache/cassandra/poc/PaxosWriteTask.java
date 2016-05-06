@@ -74,7 +74,8 @@ public class PaxosWriteTask extends Task<RowIterator>
 
     private long startTime;
     private int contentions = 0;
-    private long timeoutCutoff;
+    private Timer casContentionTimer;
+    private Timer commitWriteTimer;
 
     private List<InetAddress> liveEndpoints;
     private int requiredParticipants;
@@ -104,15 +105,15 @@ public class PaxosWriteTask extends Task<RowIterator>
     @Override
     public Status start(EventLoop eventLoop)
     {
-        startTime = System.nanoTime();
         this.eventLoop = eventLoop;
+
+        startTime = System.nanoTime();
+        casContentionTimer = eventLoop.scheduleTimer(this, DatabaseDescriptor.getCasContentionTimeout(), TimeUnit.MILLISECONDS);
 
         contentions = 0;
         consistencyForPaxos.validateForCas();
         consistencyForCommit.validateForCasCommit(keyspaceName);
 
-        long timeout = TimeUnit.MILLISECONDS.toNanos(DatabaseDescriptor.getCasContentionTimeout());
-        timeoutCutoff = System.nanoTime() + timeout;
         return tryProcessMutations();
     }
 
@@ -121,13 +122,17 @@ public class PaxosWriteTask extends Task<RowIterator>
      **/
     private Status tryProcessMutations()
     {
-        if (System.nanoTime() > timeoutCutoff)
-            return fail(new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(keyspaceName))));
-
         CFMetaData metadata = Schema.instance.getCFMetaData(keyspaceName, tableName);
-        Pair<List<InetAddress>, Integer> p = StorageProxy.getPaxosParticipants(metadata, key, consistencyForPaxos);
-        liveEndpoints = p.left;
-        requiredParticipants = p.right;
+        try
+        {
+            Pair<List<InetAddress>, Integer> p = StorageProxy.getPaxosParticipants(metadata, key, consistencyForPaxos);
+            liveEndpoints = p.left;
+            requiredParticipants = p.right;
+        }
+        catch (UnavailableException uae)
+        {
+            return fail(uae);
+        }
 
         beginAndRepairPaxos();
         return Status.PROCESSING;
@@ -139,27 +144,22 @@ public class PaxosWriteTask extends Task<RowIterator>
      */
     private Status beginAndRepairPaxos()
     {
-        if (System.nanoTime() < timeoutCutoff)
-        {
-            // We want a timestamp that is guaranteed to be unique for that node (so that the ballot is globally unique), but if we've got a prepare rejected
-            // already we also want to make sure we pick a timestamp that has a chance to be promised, i.e. one that is greater that the most recently known
-            // in progress (#5667). Lastly, we don't want to use a timestamp that is older than the last one assigned by ClientState or operations may appear
-            // out-of-order (#7801).
-            long minTimestampMicrosToUse = prepareResponseHandler == null
-                                         ? Long.MIN_VALUE
-                                         : 1 + UUIDGen.microsTimestamp(prepareResponseHandler.mostRecentInProgressCommit.ballot);
-            long ballotMicros = state.getTimestamp(minTimestampMicrosToUse);
-            UUID ballot = UUIDGen.getTimeUUIDFromMicros(ballotMicros);
+        // We want a timestamp that is guaranteed to be unique for that node (so that the ballot is globally unique), but if we've got a prepare rejected
+        // already we also want to make sure we pick a timestamp that has a chance to be promised, i.e. one that is greater that the most recently known
+        // in progress (#5667). Lastly, we don't want to use a timestamp that is older than the last one assigned by ClientState or operations may appear
+        // out-of-order (#7801).
+        long minTimestampMicrosToUse = prepareResponseHandler == null
+                                     ? Long.MIN_VALUE
+                                     : 1 + UUIDGen.microsTimestamp(prepareResponseHandler.mostRecentInProgressCommit.ballot);
+        long ballotMicros = state.getTimestamp(minTimestampMicrosToUse);
+        UUID ballot = UUIDGen.getTimeUUIDFromMicros(ballotMicros);
 
-            // prepare
-            Tracing.trace("Preparing {}", ballot);
-            Commit toPrepare = Commit.newPrepare(key, cfm, ballot);
+        // prepare
+        Tracing.trace("Preparing {}", ballot);
+        Commit toPrepare = Commit.newPrepare(key, cfm, ballot);
 
-            preparePaxos(toPrepare, ballot);
-            return Status.PROCESSING;
-        }
-
-        return fail(new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(Keyspace.open(cfm.ksName))));
+        preparePaxos(toPrepare, ballot);
+        return Status.PROCESSING;
     }
 
     private Status handlePrepareResponse(PrepareResponseHandler responseHandler)
@@ -261,7 +261,7 @@ public class PaxosWriteTask extends Task<RowIterator>
         {
             Tracing.trace("CAS precondition does not match current values {}", current);
             StorageProxy.casWriteMetrics.conditionNotMet.inc();
-            return complete(current.rowIterator());
+            return doComplete(current.rowIterator());
         }
 
         // finish the paxos round w/ the desired updates
@@ -317,6 +317,7 @@ public class PaxosWriteTask extends Task<RowIterator>
             AbstractReplicationStrategy rs = keyspace.getReplicationStrategy();
             CommitSubTask subTask = new CommitSubTask(this, forRepair);
             commitResponseHandler = rs.getWriteResponseHandler(naturalEndpoints, pendingEndpoints, consistencyLevel, null, WriteType.SIMPLE, subTask);
+            commitWriteTimer = eventLoop.scheduleTimer(this, DatabaseDescriptor.getWriteRpcTimeout(), TimeUnit.MILLISECONDS);
         }
 
         MessageOut<Commit> message = new MessageOut<>(MessagingService.Verb.PAXOS_COMMIT, proposal, Commit.serializer);
@@ -345,7 +346,7 @@ public class PaxosWriteTask extends Task<RowIterator>
             }
         }
 
-        return (forRepair || shouldBlock) ? Status.PROCESSING : complete(null);
+        return (forRepair || shouldBlock) ? Status.PROCESSING : doComplete(null);
     }
 
     /**
@@ -545,6 +546,12 @@ public class PaxosWriteTask extends Task<RowIterator>
         }
     }
 
+    private Status doComplete(RowIterator result)
+    {
+        casContentionTimer.cancel();
+        return complete(result);
+    }
+
     @Override
     public Status resume(EventLoop eventLoop)
     {
@@ -572,6 +579,7 @@ public class PaxosWriteTask extends Task<RowIterator>
         if (event instanceof WriteTask.WriteSuccessEvent)
         {
             // we've gotten acks on all writes
+            commitWriteTimer.cancel();
             StorageProxy.casWriteMetrics.addNano(System.nanoTime() - startTime);
 
             CommitSubTask subTask = (CommitSubTask) ((WriteTask.WriteSuccessEvent) event).task;
@@ -579,10 +587,11 @@ public class PaxosWriteTask extends Task<RowIterator>
                 return beginAndRepairPaxos();  // we finished a repair, check again for new proposals to repair
 
             recordFinalMetrics();
-            return complete(null);
+            return doComplete(null);
         }
         else if (event instanceof WriteTask.WriteTimeoutEvent)
         {
+            cancelTimersForFailedWrite();
             if (event.task() instanceof SavePaxosCommitWriteTask)
                 updateCasCommitStats();
 
@@ -598,6 +607,7 @@ public class PaxosWriteTask extends Task<RowIterator>
         }
         else if (event instanceof WriteTask.WriteFailureEvent)
         {
+            cancelTimersForFailedWrite();
             if (event.task() instanceof SavePaxosCommitWriteTask)
                 updateCasCommitStats();
 
@@ -617,10 +627,23 @@ public class PaxosWriteTask extends Task<RowIterator>
         }
     }
 
+    private void cancelTimersForFailedWrite()
+    {
+        if (commitWriteTimer != null)
+            commitWriteTimer.cancel();
+
+        casContentionTimer.cancel();
+    }
+
     @Override
     public Status handleTimeout(EventLoop eventLoop, Timer timer)
     {
-        throw new UnsupportedOperationException();
+        Keyspace ks = Keyspace.open(keyspaceName);
+        if (timer == casContentionTimer)
+            return fail(new WriteTimeoutException(WriteType.CAS, consistencyForPaxos, 0, consistencyForPaxos.blockFor(ks)));
+
+        assert timer == commitWriteTimer;
+        return fail(new WriteTimeoutException(WriteType.SIMPLE, consistencyForCommit, commitResponseHandler.ackCount(), consistencyForCommit.blockFor(ks)));
     }
 
     public static abstract class PaxosWriteEvent implements Event

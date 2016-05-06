@@ -290,7 +290,7 @@ public class WriteTask extends Task<Void>
             return true;
 
         if (remaining == 0)
-            complete(null);
+            doComplete();
 
         return false;
     }
@@ -306,6 +306,12 @@ public class WriteTask extends Task<Void>
 
         return replicationStrategy.getWriteResponseHandler(
                 naturalEndpoints, pendingEndpoints, consistencyLevel, null, writeType, mutationTask);
+    }
+
+    private Status doComplete()
+    {
+        requestTimer.cancel();
+        return complete(null);
     }
 
     @Override
@@ -324,7 +330,7 @@ public class WriteTask extends Task<Void>
             StorageProxy.writeMetrics.addNano(System.nanoTime() - startTime);
             remaining--;
 
-            return remaining == 0 ? complete(null) : Status.PROCESSING;
+            return remaining == 0 ? doComplete() : Status.PROCESSING;
         }
         else if (event instanceof WriteTimeoutEvent)
         {
@@ -380,7 +386,7 @@ public class WriteTask extends Task<Void>
             return status();
 
         if (remaining == 0)
-            return complete(null);
+            return doComplete();
 
         return Status.PROCESSING;
     }
@@ -396,7 +402,7 @@ public class WriteTask extends Task<Void>
             return status();
 
         if (remaining == 0)
-            return complete(null);
+            return doComplete();
 
         return Status.PROCESSING;
     }
