@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+import io.netty.channel.SingleThreadEventLoop;
 import org.apache.cassandra.poc.events.Event;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,6 +52,8 @@ public final class EventLoop implements Runnable
     private final Consumer<Task> taskRescheduler;
     private final Consumer<Event> eventHandler;
 
+    private SingleThreadEventLoop nettyEventLoop;
+
     public EventLoop()
     {
         newTasks = new ManyToOneConcurrentArrayQueue<>(1024 * 1024);
@@ -62,6 +65,11 @@ public final class EventLoop implements Runnable
         taskStarter = this::startTask;
         taskRescheduler = this::rescheduleTask;
         eventHandler = this::handleEvent;
+    }
+
+    public void setNettyExecutor(SingleThreadEventLoop nettyEventLoop)
+    {
+        this.nettyEventLoop = nettyEventLoop;
     }
 
     public void run()
@@ -81,9 +89,11 @@ public final class EventLoop implements Runnable
      *     4. trigger all expired timers
      * @return number of new newTasks started, resumed, events handled, and timers expired during this cycle
      */
-    int cycle()
+    public int cycle()
     {
-        return newTasks.drain(taskStarter) + rescheduleTasks() + events.drain(eventHandler) + timers.expireTimers();
+        int returnValue = newTasks.drain(taskStarter) + rescheduleTasks() + events.drain(eventHandler) + timers.expireTimers();
+        nettyEventLoop.execute(this::cycle);
+        return returnValue;
     }
 
     void stop()
