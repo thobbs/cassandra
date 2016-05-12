@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Map;
 
+import org.apache.cassandra.poc.Task;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -315,7 +316,7 @@ public class MessagePayloadTest extends CQLTester
             return result;
         }
 
-        public ResultMessage process(String query,
+        public Task<Message.Response> process(String query,
                                      QueryState state,
                                      QueryOptions options,
                                      Map<String, ByteBuffer> customPayload)
@@ -323,16 +324,19 @@ public class MessagePayloadTest extends CQLTester
         {
             if (customPayload != null)
                 requestPayload = customPayload;
-            ResultMessage result = QueryProcessor.instance.process(query, state, options, customPayload);
+            Task<Message.Response> result = QueryProcessor.instance.process(query, state, options, customPayload);
+            /*
+             * TODO
             if (customPayload != null)
             {
                 result.setCustomPayload(responsePayload);
                 responsePayload = null;
             }
+            */
             return result;
         }
 
-        public ResultMessage processBatch(BatchStatement statement,
+        public Task<Message.Response> processBatch(BatchStatement statement,
                                           QueryState state,
                                           BatchQueryOptions options,
                                           Map<String, ByteBuffer> customPayload)
@@ -340,29 +344,35 @@ public class MessagePayloadTest extends CQLTester
         {
             if (customPayload != null)
                 requestPayload = customPayload;
-            ResultMessage result = QueryProcessor.instance.processBatch(statement, state, options, customPayload);
+            Task<Message.Response> result = QueryProcessor.instance.processBatch(statement, state, options, customPayload);
+            /*
+             * TODO
             if (customPayload != null)
             {
                 result.setCustomPayload(responsePayload);
                 responsePayload = null;
             }
+            */
             return result;
         }
 
-        public ResultMessage processPrepared(CQLStatement statement,
-                                             QueryState state,
-                                             QueryOptions options,
-                                             Map<String, ByteBuffer> customPayload)
+        public Task<Message.Response> processPrepared(CQLStatement statement,
+                                                      QueryState state,
+                                                      QueryOptions options,
+                                                      Map<String, ByteBuffer> customPayload)
                                                      throws RequestExecutionException, RequestValidationException
         {
             if (customPayload != null)
                 requestPayload = customPayload;
-            ResultMessage result = QueryProcessor.instance.processPrepared(statement, state, options, customPayload);
+            Task<Message.Response> result = QueryProcessor.instance.processPrepared(statement, state, options, customPayload);
+            /*
+             * TODO
             if (customPayload != null)
             {
                 result.setCustomPayload(responsePayload);
                 responsePayload = null;
             }
+            */
             return result;
         }
     }

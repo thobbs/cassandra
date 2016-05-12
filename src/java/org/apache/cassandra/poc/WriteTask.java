@@ -20,6 +20,8 @@ import org.apache.cassandra.poc.events.Event;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.transport.Message;
+import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Pair;
@@ -53,7 +55,7 @@ import java.util.concurrent.TimeUnit;
  * events. This allows other tasks (and individual mutations within the batch) to make progress while a large batch
  * is handled.
  */
-public class WriteTask extends Task<Void>
+public class WriteTask extends Task<Message.Response>
 {
     private static final Logger logger = LoggerFactory.getLogger(WriteTask.class);
 
@@ -311,7 +313,7 @@ public class WriteTask extends Task<Void>
     private Status doComplete()
     {
         requestTimer.cancel();
-        return complete(null);
+        return complete(new ResultMessage.Void());
     }
 
     @Override

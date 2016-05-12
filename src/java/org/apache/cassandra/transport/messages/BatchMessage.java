@@ -31,6 +31,7 @@ import org.apache.cassandra.cql3.statements.ModificationStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
+import org.apache.cassandra.poc.Task;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
@@ -75,11 +76,11 @@ public class BatchMessage extends Message.Request
             for (int i = 0; i < queries; i++)
             {
                 Object q = msg.queryOrIdList.get(i);
-                dest.writeByte((byte)(q instanceof String ? 0 : 1));
+                dest.writeByte((byte) (q instanceof String ? 0 : 1));
                 if (q instanceof String)
-                    CBUtil.writeLongString((String)q, dest);
+                    CBUtil.writeLongString((String) q, dest);
                 else
-                    CBUtil.writeBytes(((MD5Digest)q).bytes, dest);
+                    CBUtil.writeBytes(((MD5Digest) q).bytes, dest);
 
                 CBUtil.writeValueList(msg.values.get(i), dest);
             }
@@ -97,14 +98,14 @@ public class BatchMessage extends Message.Request
             {
                 Object q = msg.queryOrIdList.get(i);
                 size += 1 + (q instanceof String
-                             ? CBUtil.sizeOfLongString((String)q)
-                             : CBUtil.sizeOfBytes(((MD5Digest)q).bytes));
+                             ? CBUtil.sizeOfLongString((String) q)
+                             : CBUtil.sizeOfBytes(((MD5Digest) q).bytes));
 
                 size += CBUtil.sizeOfValueList(msg.values.get(i));
             }
             size += version < 3
-                  ? CBUtil.sizeOfConsistencyLevel(msg.options.getConsistency())
-                  : QueryOptions.codec.encodedSize(msg.options, version);
+                    ? CBUtil.sizeOfConsistencyLevel(msg.options.getConsistency())
+                    : QueryOptions.codec.encodedSize(msg.options, version);
             return size;
         }
 
@@ -124,9 +125,12 @@ public class BatchMessage extends Message.Request
         {
             switch (type)
             {
-                case LOGGED:   return 0;
-                case UNLOGGED: return 1;
-                case COUNTER:  return 2;
+                case LOGGED:
+                    return 0;
+                case UNLOGGED:
+                    return 1;
+                case COUNTER:
+                    return 2;
                 default:
                     throw new AssertionError();
             }
@@ -148,6 +152,11 @@ public class BatchMessage extends Message.Request
     }
 
     public Message.Response execute(QueryState state)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    public Task<Message.Response> executeAsync(QueryState state)
     {
         try
         {
@@ -214,21 +223,27 @@ public class BatchMessage extends Message.Request
             // Note: It's ok at this point to pass a bogus value for the number of bound terms in the BatchState ctor
             // (and no value would be really correct, so we prefer passing a clearly wrong one).
             BatchStatement batch = new BatchStatement(-1, batchType, statements, Attributes.none());
-            Message.Response response = handler.processBatch(batch, state, batchOptions, getCustomPayload());
+            Task<Response> response = handler.processBatch(batch, state, batchOptions, getCustomPayload());
 
+            /*
+             * TODO
             if (tracingId != null)
                 response.setTracingId(tracingId);
+            */
 
             return response;
         }
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
+            throw e;
+            // TODO
+            // return ErrorMessage.fromException(e);
         }
         finally
         {
-            Tracing.instance.stopSession();
+            // TODO
+            // Tracing.instance.stopSession();
         }
     }
 

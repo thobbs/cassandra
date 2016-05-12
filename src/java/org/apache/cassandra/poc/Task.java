@@ -18,10 +18,17 @@
 package org.apache.cassandra.poc;
 
 import org.apache.cassandra.poc.events.Event;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import uk.co.real_logic.agrona.TimerWheel.Timer;
+
+import java.util.ArrayList;
+import java.util.function.Consumer;
 
 public abstract class Task<T>
 {
+    private static final Logger logger = LoggerFactory.getLogger(WriteTask.class);
+
     public enum Status
     {
         NEW, // new task, not initialized yet
@@ -40,6 +47,7 @@ public abstract class Task<T>
     private volatile boolean hasCompleted = false;
     private volatile T result; // can be Void null
     private volatile Throwable exception;
+    private final ArrayList<Consumer<T>> callbacks = new ArrayList<>(1);
 
     private Status status = Status.NEW;
 
@@ -65,6 +73,11 @@ public abstract class Task<T>
     {
     }
 
+    public void addCallback(Consumer<T> callback)
+    {
+        callbacks.add(callback);
+    }
+
     public EventLoop eventLoop()
     {
         return eventLoop;
@@ -84,6 +97,11 @@ public abstract class Task<T>
         status = Status.COMPLETED;
         hasCompleted = true;
         onComplete(result);
+
+        // TODO wrap in try/catch
+        for (Consumer<T> callback : callbacks)
+            callback.accept(result);
+
         return status;
     }
 

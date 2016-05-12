@@ -2313,11 +2313,16 @@ public class CassandraServer implements Cassandra.Iface
             }
 
             ThriftClientState cState = state();
+
+            // TODO
+            throw new UnsupportedOperationException();
+            /*
             return ClientState.getCQLQueryHandler().process(queryString,
                                                             cState.getQueryState(),
                                                             QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel),
                                                             Collections.<ByteBuffer>emptyList()),
                                                             null).toThriftResult();
+            */
         }
         catch (RequestExecutionException e)
         {
@@ -2385,10 +2390,14 @@ public class CassandraServer implements Cassandra.Iface
                                                                 itemId));
             logger.trace("Retrieved prepared statement #{} with {} bind markers", itemId, prepared.statement.getBoundTerms());
 
+            // TODO
+            throw new UnsupportedOperationException();
+            /*
             return ClientState.getCQLQueryHandler().processPrepared(prepared.statement,
                                                                     cState.getQueryState(),
                                                                     QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel), bindVariables),
                                                                     null).toThriftResult();
+            */
         }
         catch (RequestExecutionException e)
         {

@@ -23,6 +23,7 @@ import org.apache.cassandra.service.paxos.AbstractPaxosCallback;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.triggers.TriggerExecutor;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
@@ -59,7 +60,7 @@ import java.util.stream.Collectors;
  *
  * These are accomplished with new WriteTasks and ReadTasks which have their own state machine.
  */
-public class PaxosWriteTask extends Task<RowIterator>
+public class PaxosWriteTask extends Task<Message.Response>
 {
     private static final Logger logger = LoggerFactory.getLogger(WriteTask.class);
 
@@ -549,7 +550,9 @@ public class PaxosWriteTask extends Task<RowIterator>
     private Status doComplete(RowIterator result)
     {
         casContentionTimer.cancel();
-        return complete(result);
+        // TODO convert to ResultSet
+        // return complete(result);
+        return complete(null);
     }
 
     @Override
@@ -723,7 +726,7 @@ public class PaxosWriteTask extends Task<RowIterator>
         }
 
         @Override
-        public void onComplete(Void result)
+        public void onComplete(Message.Response result)
         {
             handleLocalPaxosCommitCompleted();
         }
@@ -747,7 +750,7 @@ public class PaxosWriteTask extends Task<RowIterator>
         }
 
         @Override
-        public void onComplete(Void result)
+        public void onComplete(Message.Response result)
         {
             commitResponseHandler.response(null, -1);
             updateCasCommitStats();

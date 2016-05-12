@@ -17,15 +17,9 @@
  */
 package org.apache.cassandra.transport;
 
-import java.util.ArrayList;
+import java.util.*;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.EnumSet;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
@@ -34,11 +28,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
+import io.netty.channel.EventLoop;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
+import io.netty.util.concurrent.EventExecutor;
+import org.apache.cassandra.poc.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -210,6 +207,11 @@ public abstract class Message
         }
 
         public abstract Response execute(QueryState queryState);
+
+        public Task<Response> executeAsync(QueryState queryState)
+        {
+            return new SynchronousDummyTask(() -> this.execute(queryState));
+        }
 
         public void setTracingRequested()
         {
@@ -491,7 +493,6 @@ public abstract class Message
         public void channelRead0(ChannelHandlerContext ctx, Request request)
         {
 
-            final Response response;
             final ServerConnection connection;
 
             try
@@ -504,14 +505,42 @@ public abstract class Message
                 QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion(), request.getStreamId());
 
                 logger.trace("Received: {}, v={}", request, connection.getVersion());
-                response = request.execute(qstate);
-                response.setStreamId(request.getStreamId());
-                response.setWarnings(ClientWarn.instance.getWarnings());
-                response.attach(connection);
-                connection.applyStateTransition(request.type, response.type);
+                Task<Response> task = request.executeAsync(qstate);
+                task.addCallback(resp -> {
+                    try
+                    {
+                        resp.setStreamId(request.getStreamId());
+                        resp.setWarnings(ClientWarn.instance.getWarnings());
+                        resp.attach(connection);
+                        connection.applyStateTransition(request.type, resp.type);
+                    }
+                    catch (Throwable t)
+                    {
+                        JVMStabilityInspector.inspectThrowable(t);
+                        UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
+                        flush(new FlushItem(ctx, ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId()), request.getSourceFrame()));
+                        return;
+                    }
+                    finally
+                    {
+                        ClientWarn.instance.resetWarnings();
+                    }
+
+                    logger.trace("Responding: {}, v={}", resp, connection.getVersion());
+                    flush(new FlushItem(ctx, resp, request.getSourceFrame()));
+                });
+                EventExecutor eventExecutor = ctx.executor();
+
+                // TODO this is terrible
+                int numEventLoops = Server.eventLoops.size();
+                int index = new Random().nextInt(numEventLoops);
+                org.apache.cassandra.poc.EventLoop eventLoop = Server.eventLoops.get(index);
+
+                eventLoop.scheduleTask(task);
             }
             catch (Throwable t)
             {
+                // TODO what to do here for async
                 JVMStabilityInspector.inspectThrowable(t);
                 UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
                 flush(new FlushItem(ctx, ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId()), request.getSourceFrame()));
@@ -519,11 +548,9 @@ public abstract class Message
             }
             finally
             {
+                // TODO what to do here for async
                 ClientWarn.instance.resetWarnings();
             }
-
-            logger.trace("Responding: {}, v={}", response, connection.getVersion());
-            flush(new FlushItem(ctx, response, request.getSourceFrame()));
         }
 
         private void flush(FlushItem item)

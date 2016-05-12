@@ -22,6 +22,7 @@ import java.lang.reflect.Constructor;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -90,6 +91,8 @@ public class Server implements CassandraDaemon.Server
     private EventLoopGroup workerGroup;
     private EventExecutor eventExecutorGroup;
 
+    public static ArrayList<org.apache.cassandra.poc.EventLoop> eventLoops = new ArrayList<>();
+
     static class CassEpollEventLoopGroup extends MultithreadEventLoopGroup
     {
         public CassEpollEventLoopGroup() {
@@ -114,6 +117,7 @@ public class Server implements CassandraDaemon.Server
 
             org.apache.cassandra.poc.EventLoop cassEventLoop = new org.apache.cassandra.poc.EventLoop();
             cassEventLoop.setNettyExecutor(eventLoop);
+            eventLoops.add(cassEventLoop);
 
             // TODO may need to integrate idling
             eventLoop.execute(cassEventLoop::cycle);

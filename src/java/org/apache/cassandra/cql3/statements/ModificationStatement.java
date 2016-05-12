@@ -22,6 +22,10 @@ import java.util.*;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.poc.SynchronousDummyTask;
+import org.apache.cassandra.poc.Task;
+import org.apache.cassandra.poc.WriteTask;
+import org.apache.cassandra.transport.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -405,6 +409,31 @@ public abstract class ModificationStatement implements CQLStatement
     public boolean hasConditions()
     {
         return !conditions.isEmpty();
+    }
+
+    public Task<Message.Response> executeAsync(QueryState queryState, QueryOptions options)
+    throws RequestExecutionException, RequestValidationException
+    {
+        if (options.getConsistency() == null)
+            throw new InvalidRequestException("Invalid empty consistency level");
+
+        if (hasConditions())
+        {
+            // TODO use PaxosWriteTask
+            return new SynchronousDummyTask(() -> executeWithCondition(queryState, options));
+        }
+
+        ConsistencyLevel cl = options.getConsistency();
+        if (isCounter())
+            cl.validateCounterForWrite(cfm);
+        else
+            cl.validateForWrite(cfm.ksName);
+
+        Collection<? extends IMutation> mutations = getMutations(options, false, options.getTimestamp(queryState));
+        if (mutations.isEmpty())
+            return new SynchronousDummyTask(() -> new ResultMessage.Void());
+
+        return new WriteTask(mutations, cl);
     }
 
     public ResultMessage execute(QueryState queryState, QueryOptions options)
