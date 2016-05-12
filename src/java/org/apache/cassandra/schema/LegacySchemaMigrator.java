@@ -684,9 +684,11 @@ public final class LegacySchemaMigrator
         AbstractType<?> validator = parseType(row.getString("validator"));
 
         // In the 2.x schema we didn't store UDT's with a FrozenType wrapper because they were implicitly frozen.  After
-        // CASSANDRA-7423 (non-frozen UDTs), this is no longer true, so we need to freeze nested UDTs to properly
-        // migrate the schema.  See CASSANDRA-11609.
+        // CASSANDRA-7423 (non-frozen UDTs), this is no longer true, so we need to freeze UDTs and nested UDTs to properly
+        // migrate the schema.  See CASSANDRA-11609 and CASSANDRA-11613.
         validator = validator.freezeNestedUDTs();
+        if (validator.isUDT() && validator.isMultiCell())
+            validator = validator.freeze();
 
         return new ColumnDefinition(keyspace, table, name, validator, componentIndex, kind);
     }
