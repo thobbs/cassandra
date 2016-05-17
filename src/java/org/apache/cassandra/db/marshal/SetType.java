@@ -105,12 +105,14 @@ public class SetType<T> extends CollectionType<Set<T>>
     }
 
     @Override
-    public AbstractType<?> freezeNestedUDTs()
+    public AbstractType<?> freezeNestedMulticellTypes()
     {
-        if (elements.isUDT() && elements.isMultiCell())
+        if (!isMultiCell())
+            return this;
+        else if (elements.isFreezable() && elements.isMultiCell())
             return getInstance(elements.freeze(), isMultiCell);
         else
-            return getInstance(elements.freezeNestedUDTs(), isMultiCell);
+            return getInstance(elements.freezeNestedMulticellTypes(), isMultiCell);
     }
 
     @Override
