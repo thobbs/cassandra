@@ -38,12 +38,10 @@ import org.slf4j.LoggerFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
-import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.Version;
@@ -96,7 +94,8 @@ public class Server implements CassandraDaemon.Server
     static class CassEpollEventLoopGroup extends MultithreadEventLoopGroup
     {
         public CassEpollEventLoopGroup() {
-            super(0, null, 128);
+            // TODO base this first arg (number of workers) on the number of cores
+            super(4, null, 128);
         }
 
         public void setIoRatio(int ioRatio) {
