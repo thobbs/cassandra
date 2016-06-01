@@ -1,5 +1,6 @@
 2.2.7
  * cqlsh: fix tab completion for case-sensitive identifiers (CASSANDRA-11664)
+ * Avoid showing estimated key as -1 in tablestats (CASSANDRA-11587)
  * Fix possible race condition in CommitLog.recover (CASSANDRA-11743)
  * Enable client encryption in sstableloader with cli options (CASSANDRA-11708)
  * Possible memory leak in NIODataInputStream (CASSANDRA-11867)
@@ -21,6 +22,7 @@
  * Always close cluster with connection in CqlRecordWriter (CASSANDRA-11553)
  * Fix slice queries on ordered COMPACT tables (CASSANDRA-10988)
 Merged from 2.1:
+ * cqlsh: apply current keyspace to source command (CASSANDRA-11152)
  * Backport CASSANDRA-11578 (CASSANDRA-11750)
  * Clear out parent repair session if repair coordinator dies (CASSANDRA-11824)
  * Set default streaming_socket_timeout_in_ms to 24 hours (CASSANDRA-11840)
