@@ -197,9 +197,9 @@ public class WriteTask extends Task<Message.Response>
 
             if (insertLocal)
             {
-                boolean didError = performLocalWrite(mutationTask, mutation);
-                if (didError)
-                    return Status.FAILED;
+                Status status = performLocalWrite(mutationTask, mutation);
+                if (status.isFinal())
+                    return status;
             }
         }
 
@@ -262,7 +262,7 @@ public class WriteTask extends Task<Message.Response>
     }
 
     /** Returns true if there was an error performing the local write, false otherwise. */
-    private boolean performLocalWrite(MutationTask mutationTask, Mutation mutation)
+    private Status performLocalWrite(MutationTask mutationTask, Mutation mutation)
     {
         mutationTask.nowInSec = FBUtilities.nowInSeconds();
         mutationTask.serializedSize = (int) Mutation.serializer.serializedSize(mutation, MessagingService.current_version);
@@ -281,20 +281,23 @@ public class WriteTask extends Task<Message.Response>
             JVMStabilityInspector.inspectThrowable(t);
             logger.error("Error writing mutation to commit log: ", t);
             fail(t);
-            return true;
+            return Status.FAILED;
         }
 
         if (mutationTask.replayPosition == null && durableWrites)
-            return false; // we are either waiting on commitlog allocation or syncing
+            return Status.PROCESSING; // we are either waiting on commitlog allocation or syncing
 
         mutationTask.applyToMemtable();
         if (hasFailed())
-            return true;
+            return Status.FAILED;
 
         if (remaining == 0)
+        {
             doComplete();
+            return Status.COMPLETED;
+        }
 
-        return false;
+        return Status.PROCESSING;
     }
 
     private AbstractWriteResponseHandler<IMutation> makeResponseHandler(Mutation mutation, MutationTask mutationTask)

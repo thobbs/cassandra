@@ -141,8 +141,12 @@ public final class EventLoop implements Runnable
         nextRescheduledTasks = tasks;
 
         int size = tasks.size();
-        tasks.forEach(taskRescheduler);
-        tasks.clear();
+        if (size > 0)
+        {
+            for (int i = 0; i < size; i++)
+               rescheduleTask(tasks.get(i));
+            tasks.clear();
+        }
         return size;
     }
 
@@ -163,7 +167,7 @@ public final class EventLoop implements Runnable
 
     private void startTask(Task task)
     {
-        if (task.start(this) == Task.Status.RESCHEDULED)
+        if (task.dispatchStart(this) == Task.Status.RESCHEDULED)
             reschedule(task);
     }
 
