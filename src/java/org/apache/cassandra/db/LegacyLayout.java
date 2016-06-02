@@ -41,6 +41,8 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
 
@@ -49,6 +51,8 @@ import static org.apache.cassandra.utils.ByteBufferUtil.bytes;
  */
 public abstract class LegacyLayout
 {
+    private static final Logger logger = LoggerFactory.getLogger(LegacyLayout.class);
+
     public final static int MAX_CELL_NAME_LENGTH = FBUtilities.MAX_UNSIGNED_SHORT;
 
     public final static int STATIC_PREFIX = 0xFFFF;
@@ -2200,33 +2204,58 @@ public abstract class LegacyLayout
                 return;
 
             List<AbstractType<?>> types = new ArrayList<>(comparator.clusteringComparator.subtypes());
-            if (!metadata.isDense())
-                types.add(UTF8Type.instance);
-            CompositeType type = CompositeType.getInstance(types);
-
-            for (int i = 0; i < size; i++)
+            if (metadata.isCompound())
             {
-                LegacyBound start = starts[i];
-                LegacyBound end = ends[i];
+                if (!metadata.isDense())
+                    types.add(UTF8Type.instance);
+                CompositeType type = CompositeType.getInstance(types);
 
-                CompositeType.Builder startBuilder = type.builder();
-                CompositeType.Builder endBuilder = type.builder();
-                for (int j = 0; j < start.bound.clustering().size(); j++)
+                for (int i = 0; i < size; i++)
                 {
-                    startBuilder.add(start.bound.get(j));
-                    endBuilder.add(end.bound.get(j));
+                    LegacyBound start = starts[i];
+                    LegacyBound end = ends[i];
+
+                    CompositeType.Builder startBuilder = type.builder();
+                    CompositeType.Builder endBuilder = type.builder();
+                    for (int j = 0; j < start.bound.clustering().size(); j++)
+                    {
+                        startBuilder.add(start.bound.get(j));
+                        endBuilder.add(end.bound.get(j));
+                    }
+
+                    if (start.collectionName != null)
+                        startBuilder.add(start.collectionName.name.bytes);
+                    if (end.collectionName != null)
+                        endBuilder.add(end.collectionName.name.bytes);
+
+                    ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
+                    ByteBufferUtil.writeWithShortLength(endBuilder.buildAsEndOfRange(), out);
+
+                    out.writeInt(delTimes[i]);
+                    out.writeLong(markedAts[i]);
                 }
+            }
+            else
+            {
+                assert types.size() == 1 : types;
 
-                if (start.collectionName != null)
-                    startBuilder.add(start.collectionName.name.bytes);
-                if (end.collectionName != null)
-                    endBuilder.add(end.collectionName.name.bytes);
+                for (int i = 0; i < size; i++)
+                {
+                    LegacyBound start = starts[i];
+                    LegacyBound end = ends[i];
 
-                ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
-                ByteBufferUtil.writeWithShortLength(endBuilder.buildAsEndOfRange(), out);
+                    ClusteringPrefix startClustering = start.bound.clustering();
+                    ClusteringPrefix endClustering = end.bound.clustering();
 
-                out.writeInt(delTimes[i]);
-                out.writeLong(markedAts[i]);
+                    assert startClustering.size() == 1;
+                    assert endClustering.size() == 1;
+
+                    ByteBufferUtil.writeWithShortLength(startClustering.get(0), out);
+                    ByteBufferUtil.writeWithShortLength(endClustering.get(0), out);
+
+                    out.writeInt(delTimes[i]);
+                    out.writeLong(markedAts[i]);
+                }
             }
         }
 
