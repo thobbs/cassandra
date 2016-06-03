@@ -991,7 +991,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                 return false;
             }
 
-            public void response(MessageIn msg)
+            public void response(MessageIn msg, int id)
             {
                 realMarkAlive(addr, localState);
             }

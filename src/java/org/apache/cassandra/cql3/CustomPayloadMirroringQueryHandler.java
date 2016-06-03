@@ -22,7 +22,9 @@ import java.util.Map;
 
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ParsedStatement;
+import org.apache.cassandra.poc.Task;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.messages.ResultMessage;
 import org.apache.cassandra.utils.MD5Digest;
 
@@ -35,13 +37,14 @@ public class CustomPayloadMirroringQueryHandler implements QueryHandler
 {
     static QueryProcessor queryProcessor = QueryProcessor.instance;
 
-    public ResultMessage process(String query,
-                                 QueryState state,
-                                 QueryOptions options,
-                                 Map<String, ByteBuffer> customPayload)
+    public Task<Message.Response> process(String query,
+                                          QueryState state,
+                                          QueryOptions options,
+                                          Map<String, ByteBuffer> customPayload)
     {
-        ResultMessage result = queryProcessor.process(query, state, options, customPayload);
-        result.setCustomPayload(customPayload);
+        Task<Message.Response> result = queryProcessor.process(query, state, options, customPayload);
+        // TODO
+        // result.setCustomPayload(customPayload);
         return result;
     }
 
@@ -62,23 +65,25 @@ public class CustomPayloadMirroringQueryHandler implements QueryHandler
         return queryProcessor.getPreparedForThrift(id);
     }
 
-    public ResultMessage processPrepared(CQLStatement statement,
-                                         QueryState state,
-                                         QueryOptions options,
-                                         Map<String, ByteBuffer> customPayload)
+    public Task<Message.Response> processPrepared(CQLStatement statement,
+                                                  QueryState state,
+                                                  QueryOptions options,
+                                                  Map<String, ByteBuffer> customPayload)
     {
-        ResultMessage result = queryProcessor.processPrepared(statement, state, options, customPayload);
-        result.setCustomPayload(customPayload);
+        Task<Message.Response> result = queryProcessor.processPrepared(statement, state, options, customPayload);
+        // TODO
+        // result.setCustomPayload(customPayload);
         return result;
     }
 
-    public ResultMessage processBatch(BatchStatement statement,
-                                      QueryState state,
-                                      BatchQueryOptions options,
-                                      Map<String, ByteBuffer> customPayload)
+    public Task<Message.Response> processBatch(BatchStatement statement,
+                                               QueryState state,
+                                               BatchQueryOptions options,
+                                               Map<String, ByteBuffer> customPayload)
     {
-        ResultMessage result = queryProcessor.processBatch(statement, state, options, customPayload);
-        result.setCustomPayload(customPayload);
+        Task<Message.Response> result = queryProcessor.processBatch(statement, state, options, customPayload);
+        // TODO
+        // result.setCustomPayload(customPayload);
         return result;
     }
 }

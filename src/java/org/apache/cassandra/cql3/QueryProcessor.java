@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +30,8 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.primitives.Ints;
+import org.apache.cassandra.poc.Task;
+import org.apache.cassandra.transport.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -177,7 +180,7 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options)
+    public Task<Message.Response> processStatement(CQLStatement statement, QueryState queryState, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
         logger.trace("Process {} @CL.{}", statement, options.getConsistency());
@@ -185,26 +188,26 @@ public class QueryProcessor implements QueryHandler
         statement.checkAccess(clientState);
         statement.validate(clientState);
 
-        ResultMessage result = statement.execute(queryState, options);
-        return result == null ? new ResultMessage.Void() : result;
+        return statement.executeAsync(queryState, options);
+        // return result == null ? new ResultMessage.Void() : result;
     }
 
-    public static ResultMessage process(String queryString, ConsistencyLevel cl, QueryState queryState)
+    public static Task<Message.Response> process(String queryString, ConsistencyLevel cl, QueryState queryState)
     throws RequestExecutionException, RequestValidationException
     {
         return instance.process(queryString, queryState, QueryOptions.forInternalCalls(cl, Collections.<ByteBuffer>emptyList()));
     }
 
-    public ResultMessage process(String query,
-                                 QueryState state,
-                                 QueryOptions options,
-                                 Map<String, ByteBuffer> customPayload)
+    public Task<Message.Response> process(String query,
+                                       QueryState state,
+                                       QueryOptions options,
+                                       Map<String, ByteBuffer> customPayload)
                                          throws RequestExecutionException, RequestValidationException
     {
         return process(query, state, options);
     }
 
-    public ResultMessage process(String queryString, QueryState queryState, QueryOptions options)
+    public Task<Message.Response> process(String queryString, QueryState queryState, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
         ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState());
@@ -224,18 +227,47 @@ public class QueryProcessor implements QueryHandler
         return getStatement(queryStr, queryState.getClientState());
     }
 
+    // used internally
     public static UntypedResultSet process(String query, ConsistencyLevel cl) throws RequestExecutionException
     {
         return process(query, cl, Collections.<ByteBuffer>emptyList());
     }
 
+    // used internally
     public static UntypedResultSet process(String query, ConsistencyLevel cl, List<ByteBuffer> values) throws RequestExecutionException
     {
-        ResultMessage result = instance.process(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values));
+        ResultMessage result = instance.processSync(query, QueryState.forInternalCalls(), QueryOptions.forInternalCalls(cl, values));
         if (result instanceof ResultMessage.Rows)
             return UntypedResultSet.create(((ResultMessage.Rows)result).result);
         else
             return null;
+    }
+
+    public ResultMessage processSync(String queryString, QueryState queryState, QueryOptions options)
+    throws RequestExecutionException, RequestValidationException
+    {
+        ParsedStatement.Prepared p = getStatement(queryString, queryState.getClientState());
+        options.prepare(p.boundNames);
+        CQLStatement prepared = p.statement;
+        if (prepared.getBoundTerms() != options.getValues().size())
+            throw new InvalidRequestException("Invalid amount of bind variables");
+
+        if (!queryState.getClientState().isInternal)
+            metrics.regularStatementsExecuted.inc();
+
+        return processStatementSync(prepared, queryState, options);
+    }
+
+    public ResultMessage processStatementSync(CQLStatement statement, QueryState queryState, QueryOptions options)
+    throws RequestExecutionException, RequestValidationException
+    {
+        logger.trace("Process {} @CL.{}", statement, options.getConsistency());
+        ClientState clientState = queryState.getClientState();
+        statement.checkAccess(clientState);
+        statement.validate(clientState);
+
+        ResultMessage result = statement.execute(queryState, options);
+        return result == null ? new ResultMessage.Void() : result;
     }
 
     private static QueryOptions makeInternalOptions(ParsedStatement.Prepared prepared, Object[] values)
@@ -258,7 +290,8 @@ public class QueryProcessor implements QueryHandler
         return QueryOptions.forInternalCalls(cl, boundValues);
     }
 
-    private static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
+    @VisibleForTesting
+    public static ParsedStatement.Prepared prepareInternal(String query) throws RequestValidationException
     {
         ParsedStatement.Prepared prepared = internalStatements.get(query);
         if (prepared != null)
@@ -269,6 +302,14 @@ public class QueryProcessor implements QueryHandler
         prepared.statement.validate(internalQueryState().getClientState());
         internalStatements.putIfAbsent(query, prepared);
         return prepared;
+    }
+
+    /** Internally Prepares a mutation query (INSERT, UPDATE, DELETE statements) and returns a collection of Mutations. */
+    public Collection<? extends IMutation> prepareAndBuildMutationsInternal(String query, Object... values)
+    {
+        ParsedStatement.Prepared prepared = prepareInternal(query);
+        assert prepared.statement instanceof ModificationStatement;
+        return ((ModificationStatement) prepared.statement).getMutations(makeInternalOptions(prepared, values), true, internalQueryState().getTimestamp());
     }
 
     public static UntypedResultSet executeInternal(String query, Object... values)
@@ -435,16 +476,16 @@ public class QueryProcessor implements QueryHandler
         }
     }
 
-    public ResultMessage processPrepared(CQLStatement statement,
-                                         QueryState state,
-                                         QueryOptions options,
-                                         Map<String, ByteBuffer> customPayload)
-                                                 throws RequestExecutionException, RequestValidationException
+    public Task<Message.Response> processPrepared(CQLStatement statement,
+                                                  QueryState state,
+                                                  QueryOptions options,
+                                                  Map<String, ByteBuffer> customPayload)
+    throws RequestExecutionException, RequestValidationException
     {
         return processPrepared(statement, state, options);
     }
 
-    public ResultMessage processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options)
+    public Task<Message.Response> processPrepared(CQLStatement statement, QueryState queryState, QueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
         List<ByteBuffer> variables = options.getValues();
@@ -467,23 +508,23 @@ public class QueryProcessor implements QueryHandler
         return processStatement(statement, queryState, options);
     }
 
-    public ResultMessage processBatch(BatchStatement statement,
-                                      QueryState state,
-                                      BatchQueryOptions options,
-                                      Map<String, ByteBuffer> customPayload)
-                                              throws RequestExecutionException, RequestValidationException
+    public Task<Message.Response> processBatch(BatchStatement statement,
+                                               QueryState state,
+                                               BatchQueryOptions options,
+                                               Map<String, ByteBuffer> customPayload)
+            throws RequestExecutionException, RequestValidationException
     {
         return processBatch(statement, state, options);
     }
 
-    public ResultMessage processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options)
+    public Task<Message.Response> processBatch(BatchStatement batch, QueryState queryState, BatchQueryOptions options)
     throws RequestExecutionException, RequestValidationException
     {
         ClientState clientState = queryState.getClientState();
         batch.checkAccess(clientState);
         batch.validate();
         batch.validate(clientState);
-        return batch.execute(queryState, options);
+        return batch.executeAsync(queryState, options);
     }
 
     public static ParsedStatement.Prepared getStatement(String queryStr, ClientState clientState)

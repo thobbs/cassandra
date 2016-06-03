@@ -22,6 +22,9 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.poc.SynchronousDummyTask;
+import org.apache.cassandra.poc.Task;
+import org.apache.cassandra.transport.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.helpers.MessageFormatter;
@@ -257,8 +260,6 @@ public class BatchStatement implements CQLStatement
 
     /**
      * Checks batch size to ensure threshold is met. If not, a warning is logged.
-     *
-     * @param updates - the batch mutations.
      */
     private static void verifyBatchSize(Collection<? extends IMutation> mutations) throws InvalidRequestException
     {
@@ -333,6 +334,10 @@ public class BatchStatement implements CQLStatement
         }
     }
 
+    public Task<Message.Response> executeAsync(QueryState queryState, BatchQueryOptions options) throws RequestExecutionException, RequestValidationException
+    {
+        return new SynchronousDummyTask(() -> this.execute(queryState, options));
+    }
 
     public ResultMessage execute(QueryState queryState, QueryOptions options) throws RequestExecutionException, RequestValidationException
     {

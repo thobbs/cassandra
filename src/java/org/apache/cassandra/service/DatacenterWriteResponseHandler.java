@@ -24,6 +24,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.poc.WriteTask;
 
 /**
  * This class blocks for a quorum of responses _in the local datacenter only_ (CL.LOCAL_QUORUM).
@@ -35,17 +36,18 @@ public class DatacenterWriteResponseHandler<T> extends WriteResponseHandler<T>
                                           ConsistencyLevel consistencyLevel,
                                           Keyspace keyspace,
                                           Runnable callback,
-                                          WriteType writeType)
+                                          WriteType writeType,
+                                          WriteTask.SubTask mutationTask)
     {
-        super(naturalEndpoints, pendingEndpoints, consistencyLevel, keyspace, callback, writeType);
+        super(naturalEndpoints, pendingEndpoints, consistencyLevel, keyspace, callback, writeType, mutationTask);
         assert consistencyLevel.isDatacenterLocal();
     }
 
     @Override
-    public void response(MessageIn<T> message)
+    public void response(MessageIn<T> message, int id)
     {
         if (message == null || waitingFor(message.from))
-            super.response(message);
+            super.response(message, id);
     }
 
     @Override

@@ -17,10 +17,13 @@
  */
 package org.apache.cassandra.db.commitlog;
 
+import org.apache.cassandra.poc.WriteTask;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.slf4j.*;
+import uk.co.real_logic.agrona.concurrent.ManyToOneConcurrentArrayQueue;
 
+import java.util.ArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
@@ -43,6 +46,9 @@ public abstract class AbstractCommitLogService
     // signal that writers can wait on to be notified of a completed sync
     protected final WaitQueue syncComplete = new WaitQueue();
     protected final Semaphore haveWork = new Semaphore(1);
+
+    // TODO evaluate queue type and size more carefully
+    protected final ManyToOneConcurrentArrayQueue<TaskAwaitingSync> awaitingTasks = new ManyToOneConcurrentArrayQueue<>(1024 * 1024);
 
     final CommitLog commitLog;
     private final String name;
@@ -89,11 +95,29 @@ public abstract class AbstractCommitLogService
 
                         // sync and signal
                         long syncStarted = System.currentTimeMillis();
+
+                        // drain awaiting tasks that are synced
+                        ArrayList<TaskAwaitingSync> tasksToNotify = new ArrayList<>();
+                        while (!awaitingTasks.isEmpty())
+                        {
+                            TaskAwaitingSync awaiting = awaitingTasks.peek();
+                            if (shouldWaitForSyncToCatchUp(awaiting.startedAt))
+                                break;  // sync hasn't caught up yet
+
+                            awaitingTasks.poll();
+                            tasksToNotify.add(awaiting);
+                        }
+
                         //This is a target for Byteman in CommitLogSegmentManagerTest
                         commitLog.sync(shutdown);
                         lastSyncedAt = syncStarted;
                         syncComplete.signalAll();
 
+                        for (TaskAwaitingSync awaiting : tasksToNotify)
+                        {
+                            WriteTask.CommitlogSyncCompleteEvent.createAndEmit(awaiting.writeTask, awaiting.allocation);
+                            pending.decrementAndGet();
+                        }
 
                         // sleep any time we have left before the next one is due
                         long now = System.currentTimeMillis();
@@ -172,7 +196,32 @@ public abstract class AbstractCommitLogService
         written.incrementAndGet();
     }
 
+    /**
+     * Returns true if the write can be considered durable at this point. Otherwise, false is returned and a
+     * WriteTask.CommitlogSyncCompleteEvent will be emitted to the given WriteTask once it is durable.
+     */
+    public boolean finishWriteForAsync(Allocation alloc, WriteTask.MutationTask mutationTask)
+    {
+        boolean isSynced = startSyncNonBlocking(alloc, mutationTask);
+        if (isSynced)
+            written.incrementAndGet();
+        return isSynced;
+    }
+
+    /** Returns true if commitlog syncing is lagging behind, false otherwise. */
+    protected boolean shouldWaitForSyncToCatchUp(long started)
+    {
+        return false;
+    }
+
     protected abstract void maybeWaitForSync(Allocation alloc);
+
+    /**
+     * Returns true if commit log sync is not lagging behind (and the write can be considered durable at this point).
+     * Otherwise, false is returned and a WriteTask.CommitlogSyncCompleteEvent will be emitted to the given WriteTask
+     * once syncing has caught up.
+     */
+    protected abstract boolean startSyncNonBlocking(Allocation alloc, WriteTask.MutationTask mutationTask);
 
     /**
      * Sync immediately, but don't block for the sync to cmplete
@@ -226,5 +275,19 @@ public abstract class AbstractCommitLogService
     public long getPendingTasks()
     {
         return pending.get();
+    }
+
+    protected static class TaskAwaitingSync
+    {
+        final WriteTask.MutationTask writeTask;
+        final Allocation allocation;
+        final long startedAt;
+
+        TaskAwaitingSync(WriteTask.MutationTask writeTask, Allocation allocation, long startedAt)
+        {
+            this.writeTask = writeTask;
+            this.allocation = allocation;
+            this.startedAt = startedAt;
+        }
     }
 }

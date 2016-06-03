@@ -35,22 +35,31 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
 
     public BatchlogResponseHandler(AbstractWriteResponseHandler<T> wrapped, int requiredBeforeFinish, BatchlogCleanup cleanup)
     {
-        super(wrapped.keyspace, wrapped.naturalEndpoints, wrapped.pendingEndpoints, wrapped.consistencyLevel, wrapped.callback, wrapped.writeType);
+        super(wrapped.keyspace, wrapped.naturalEndpoints, wrapped.pendingEndpoints, wrapped.consistencyLevel, wrapped.callback, wrapped.writeType, null);
         this.wrapped = wrapped;
         this.requiredBeforeFinish = requiredBeforeFinish;
         this.cleanup = cleanup;
     }
 
-    protected int ackCount()
+    public int ackCount()
     {
         return wrapped.ackCount();
     }
 
-    public void response(MessageIn<T> msg)
+    public void response(MessageIn<T> msg, int id)
     {
-        wrapped.response(msg);
+        wrapped.response(msg, id);
         if (requiredBeforeFinishUpdater.decrementAndGet(this) == 0)
             cleanup.run();
+    }
+
+    public AckResponse localResponse()
+    {
+        AckResponse response = wrapped.localResponse();
+        if (requiredBeforeFinishUpdater.decrementAndGet(this) == 0)
+            cleanup.run();
+
+        return response;
     }
 
     public boolean isLatencyForSnitch()
@@ -58,9 +67,9 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         return wrapped.isLatencyForSnitch();
     }
 
-    public void onFailure(InetAddress from)
+    public void onFailure(InetAddress from, int id)
     {
-        wrapped.onFailure(from);
+        wrapped.onFailure(from, id);
     }
 
     public void assureSufficientLiveNodes()

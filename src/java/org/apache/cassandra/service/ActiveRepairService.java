@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -262,7 +261,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
         IAsyncCallbackWithFailure callback = new IAsyncCallbackWithFailure()
         {
-            public void response(MessageIn msg)
+            public void response(MessageIn msg, int id)
             {
                 prepareLatch.countDown();
             }
@@ -272,7 +271,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
                 return false;
             }
 
-            public void onFailure(InetAddress from)
+            public void onFailure(InetAddress from, int id)
             {
                 status.set(false);
                 failedNodes.add(from.getHostAddress());

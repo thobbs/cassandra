@@ -66,7 +66,7 @@ public class AsyncOneResponse<T> implements IAsyncCallback<T>
         return result;
     }
 
-    public synchronized void response(MessageIn<T> response)
+    public synchronized void response(MessageIn<T> response, int id)
     {
         if (!done)
         {

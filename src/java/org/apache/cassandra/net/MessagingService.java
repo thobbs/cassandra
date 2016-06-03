@@ -407,7 +407,7 @@ public final class MessagingService implements MessagingServiceMBean
                     StageManager.getStage(Stage.INTERNAL_RESPONSE).submit(new Runnable() {
                         @Override
                         public void run() {
-                            ((IAsyncCallbackWithFailure)expiredCallbackInfo.callback).onFailure(expiredCallbackInfo.target);
+                            ((IAsyncCallbackWithFailure)expiredCallbackInfo.callback).onFailure(expiredCallbackInfo.target, pair.left);
                         }
                     });
                 }

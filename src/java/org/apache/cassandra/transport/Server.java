@@ -18,13 +18,16 @@
 package org.apache.cassandra.transport;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLEngine;
@@ -35,12 +38,10 @@ import org.slf4j.LoggerFactory;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.*;
-import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.Version;
@@ -88,10 +89,48 @@ public class Server implements CassandraDaemon.Server
     private EventLoopGroup workerGroup;
     private EventExecutor eventExecutorGroup;
 
+    public static ArrayList<org.apache.cassandra.poc.EventLoop> eventLoops = new ArrayList<>();
+
+    static class CassEpollEventLoopGroup extends MultithreadEventLoopGroup
+    {
+        public CassEpollEventLoopGroup() {
+            // TODO base this first arg (number of workers) on the number of cores
+            super(4, null, 128);
+        }
+
+        public void setIoRatio(int ioRatio) {
+            for (EventExecutor e: children()) {
+                // TODO the EpollEventLoop class isn't publicly accessible
+                // ((EpollEventLoop) e).setIoRatio(ioRatio);
+            }
+        }
+
+        @Override
+        protected EventExecutor newChild(ThreadFactory threadFactory, Object... args) throws Exception {
+            // TODO only use epoll when the Builder calls for it
+            SelectStrategy selectStrategy = DefaultSelectStrategyFactory.INSTANCE.newSelectStrategy();
+            Class klass = Class.forName("io.netty.channel.epoll.EpollEventLoop");
+            Constructor<?> constructor = klass.getDeclaredConstructor(EventLoopGroup.class, ThreadFactory.class, int.class, SelectStrategy.class);
+            constructor.setAccessible(true);
+            SingleThreadEventLoop eventLoop = (SingleThreadEventLoop) constructor.newInstance(this, threadFactory, args[0], selectStrategy);
+
+            org.apache.cassandra.poc.EventLoop cassEventLoop = new org.apache.cassandra.poc.EventLoop();
+            cassEventLoop.setNettyExecutor(eventLoop);
+            eventLoops.add(cassEventLoop);
+
+            // TODO may need to integrate idling
+            eventLoop.execute(cassEventLoop::cycle);
+
+            return eventLoop;
+        }
+    }
+
     private Server (Builder builder)
     {
         this.socket = builder.getSocket();
         this.useSSL = builder.useSSL;
+
+        /*
         if (builder.workerGroup != null)
         {
             workerGroup = builder.workerGroup;
@@ -103,8 +142,12 @@ public class Server implements CassandraDaemon.Server
             else
                 workerGroup = new NioEventLoopGroup();
         }
+        */
+
+        workerGroup = new CassEpollEventLoopGroup();
         if (builder.eventExecutorGroup != null)
             eventExecutorGroup = builder.eventExecutorGroup;
+
         EventNotifier notifier = new EventNotifier(this);
         StorageService.instance.register(notifier);
         MigrationManager.instance.register(notifier);

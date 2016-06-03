@@ -25,6 +25,7 @@ import java.util.*;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+import org.apache.cassandra.poc.WriteTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -129,21 +130,22 @@ public abstract class AbstractReplicationStrategy
     public abstract List<InetAddress> calculateNaturalEndpoints(Token searchToken, TokenMetadata tokenMetadata);
 
     public <T> AbstractWriteResponseHandler<T> getWriteResponseHandler(Collection<InetAddress> naturalEndpoints,
-                                                                Collection<InetAddress> pendingEndpoints,
-                                                                ConsistencyLevel consistency_level,
-                                                                Runnable callback,
-                                                                WriteType writeType)
+                                                                       Collection<InetAddress> pendingEndpoints,
+                                                                       ConsistencyLevel consistency_level,
+                                                                       Runnable callback,
+                                                                       WriteType writeType,
+                                                                       WriteTask.SubTask callbackTask)
     {
         if (consistency_level.isDatacenterLocal())
         {
             // block for in this context will be localnodes block.
-            return new DatacenterWriteResponseHandler<T>(naturalEndpoints, pendingEndpoints, consistency_level, getKeyspace(), callback, writeType);
+            return new DatacenterWriteResponseHandler<T>(naturalEndpoints, pendingEndpoints, consistency_level, getKeyspace(), callback, writeType, callbackTask);
         }
         else if (consistency_level == ConsistencyLevel.EACH_QUORUM && (this instanceof NetworkTopologyStrategy))
         {
-            return new DatacenterSyncWriteResponseHandler<T>(naturalEndpoints, pendingEndpoints, consistency_level, getKeyspace(), callback, writeType);
+            return new DatacenterSyncWriteResponseHandler<T>(naturalEndpoints, pendingEndpoints, consistency_level, getKeyspace(), callback, writeType, callbackTask);
         }
-        return new WriteResponseHandler<T>(naturalEndpoints, pendingEndpoints, consistency_level, getKeyspace(), callback, writeType);
+        return new WriteResponseHandler<T>(naturalEndpoints, pendingEndpoints, consistency_level, getKeyspace(), callback, writeType, callbackTask);
     }
 
     private Keyspace getKeyspace()

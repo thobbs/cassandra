@@ -466,7 +466,7 @@ public class BatchlogManager implements BatchlogManagerMBean
 
             ReplayWriteResponseHandler(Collection<InetAddress> writeEndpoints)
             {
-                super(writeEndpoints, Collections.<InetAddress>emptySet(), null, null, null, WriteType.UNLOGGED_BATCH);
+                super(writeEndpoints, Collections.<InetAddress>emptySet(), null, null, null, WriteType.UNLOGGED_BATCH, null);
                 undelivered.addAll(writeEndpoints);
             }
 
@@ -477,11 +477,11 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
 
             @Override
-            public void response(MessageIn<T> m)
+            public void response(MessageIn<T> m, int id)
             {
                 boolean removed = undelivered.remove(m == null ? FBUtilities.getBroadcastAddress() : m.from);
                 assert removed;
-                super.response(m);
+                super.response(m, id);
             }
         }
     }

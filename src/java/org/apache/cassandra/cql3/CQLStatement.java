@@ -19,8 +19,11 @@ package org.apache.cassandra.cql3;
 
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.poc.SynchronousDummyTask;
+import org.apache.cassandra.poc.Task;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
 public interface CQLStatement
@@ -52,6 +55,14 @@ public interface CQLStatement
      * @param options options for this query (consistency, variables, pageSize, ...)
      */
     public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
+
+    public default Task<Message.Response> executeAsync(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException
+    {
+        return new SynchronousDummyTask(() -> {
+            Message.Response response = this.execute(state, options);
+            return response == null ? new ResultMessage.Void() : response;
+        });
+    }
 
     /**
      * Variant of execute used for internal query against the system tables, and thus only query the local node.

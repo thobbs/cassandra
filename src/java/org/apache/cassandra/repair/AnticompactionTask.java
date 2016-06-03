@@ -89,7 +89,7 @@ public class AnticompactionTask extends AbstractFuture<InetAddress> implements R
             this.task = task;
         }
 
-        public void response(MessageIn msg)
+        public void response(MessageIn msg, int id)
         {
             task.set(msg.from);
         }
@@ -99,7 +99,7 @@ public class AnticompactionTask extends AbstractFuture<InetAddress> implements R
             return false;
         }
 
-        public void onFailure(InetAddress from)
+        public void onFailure(InetAddress from, int id)
         {
             task.setException(new RuntimeException("Anticompaction failed or timed out in " + from));
         }

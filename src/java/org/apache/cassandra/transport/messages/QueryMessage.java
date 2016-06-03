@@ -25,6 +25,7 @@ import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.poc.Task;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
@@ -82,7 +83,14 @@ public class QueryMessage extends Message.Request
         this.options = options;
     }
 
+
     public Message.Response execute(QueryState state)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Task<Message.Response> executeAsync(QueryState state)
     {
         try
         {
@@ -112,24 +120,29 @@ public class QueryMessage extends Message.Request
                 Tracing.instance.begin("Execute CQL3 query", state.getClientAddress(), builder.build());
             }
 
-            Message.Response response = ClientState.getCQLQueryHandler().process(query, state, options, getCustomPayload());
+            return ClientState.getCQLQueryHandler().process(query, state, options, getCustomPayload());
+
+            // TODO
+            /*
             if (options.skipMetadata() && response instanceof ResultMessage.Rows)
                 ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
 
             if (tracingId != null)
                 response.setTracingId(tracingId);
-
-            return response;
+            */
         }
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
             if (!((e instanceof RequestValidationException) || (e instanceof RequestExecutionException)))
                 logger.error("Unexpected error during query", e);
-            return ErrorMessage.fromException(e);
+            throw e;
+            // TODO
+            // return ErrorMessage.fromException(e);
         }
         finally
         {
+            // TODO
             Tracing.instance.stopSession();
         }
     }
