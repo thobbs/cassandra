@@ -2203,59 +2203,68 @@ public abstract class LegacyLayout
             if (size == 0)
                 return;
 
-            List<AbstractType<?>> types = new ArrayList<>(comparator.clusteringComparator.subtypes());
             if (metadata.isCompound())
-            {
-                if (!metadata.isDense())
-                    types.add(UTF8Type.instance);
-                CompositeType type = CompositeType.getInstance(types);
-
-                for (int i = 0; i < size; i++)
-                {
-                    LegacyBound start = starts[i];
-                    LegacyBound end = ends[i];
-
-                    CompositeType.Builder startBuilder = type.builder();
-                    CompositeType.Builder endBuilder = type.builder();
-                    for (int j = 0; j < start.bound.clustering().size(); j++)
-                    {
-                        startBuilder.add(start.bound.get(j));
-                        endBuilder.add(end.bound.get(j));
-                    }
-
-                    if (start.collectionName != null)
-                        startBuilder.add(start.collectionName.name.bytes);
-                    if (end.collectionName != null)
-                        endBuilder.add(end.collectionName.name.bytes);
-
-                    ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
-                    ByteBufferUtil.writeWithShortLength(endBuilder.buildAsEndOfRange(), out);
-
-                    out.writeInt(delTimes[i]);
-                    out.writeLong(markedAts[i]);
-                }
-            }
+                serializeCompound(out, metadata.isDense());
             else
+                serializeSimple(out);
+        }
+
+        private void serializeCompound(DataOutputPlus out, boolean isDense) throws IOException
+        {
+            List<AbstractType<?>> types = new ArrayList<>(comparator.clusteringComparator.subtypes());
+
+            if (!isDense)
+                types.add(UTF8Type.instance);
+
+            CompositeType type = CompositeType.getInstance(types);
+
+            for (int i = 0; i < size; i++)
             {
-                assert types.size() == 1 : types;
+                LegacyBound start = starts[i];
+                LegacyBound end = ends[i];
 
-                for (int i = 0; i < size; i++)
+                CompositeType.Builder startBuilder = type.builder();
+                CompositeType.Builder endBuilder = type.builder();
+                for (int j = 0; j < start.bound.clustering().size(); j++)
                 {
-                    LegacyBound start = starts[i];
-                    LegacyBound end = ends[i];
-
-                    ClusteringPrefix startClustering = start.bound.clustering();
-                    ClusteringPrefix endClustering = end.bound.clustering();
-
-                    assert startClustering.size() == 1;
-                    assert endClustering.size() == 1;
-
-                    ByteBufferUtil.writeWithShortLength(startClustering.get(0), out);
-                    ByteBufferUtil.writeWithShortLength(endClustering.get(0), out);
-
-                    out.writeInt(delTimes[i]);
-                    out.writeLong(markedAts[i]);
+                    startBuilder.add(start.bound.get(j));
+                    endBuilder.add(end.bound.get(j));
                 }
+
+                if (start.collectionName != null)
+                    startBuilder.add(start.collectionName.name.bytes);
+                if (end.collectionName != null)
+                    endBuilder.add(end.collectionName.name.bytes);
+
+                ByteBufferUtil.writeWithShortLength(startBuilder.build(), out);
+                ByteBufferUtil.writeWithShortLength(endBuilder.buildAsEndOfRange(), out);
+
+                out.writeInt(delTimes[i]);
+                out.writeLong(markedAts[i]);
+            }
+        }
+
+        private void serializeSimple(DataOutputPlus out) throws IOException
+        {
+            List<AbstractType<?>> types = new ArrayList<>(comparator.clusteringComparator.subtypes());
+            assert types.size() == 1 : types;
+
+            for (int i = 0; i < size; i++)
+            {
+                LegacyBound start = starts[i];
+                LegacyBound end = ends[i];
+
+                ClusteringPrefix startClustering = start.bound.clustering();
+                ClusteringPrefix endClustering = end.bound.clustering();
+
+                assert startClustering.size() == 1;
+                assert endClustering.size() == 1;
+
+                ByteBufferUtil.writeWithShortLength(startClustering.get(0), out);
+                ByteBufferUtil.writeWithShortLength(endClustering.get(0), out);
+
+                out.writeInt(delTimes[i]);
+                out.writeLong(markedAts[i]);
             }
         }
 
@@ -2267,8 +2276,17 @@ public abstract class LegacyLayout
             if (this.size == 0)
                 return size;
 
+            if (metadata.isCompound())
+                return size + serializedSizeCompound(metadata.isDense());
+            else
+                return size + serializedSizeSimple();
+        }
+
+        private long serializedSizeCompound(boolean isDense)
+        {
+            long size = 0;
             List<AbstractType<?>> types = new ArrayList<>(comparator.clusteringComparator.subtypes());
-            if (!metadata.isDense())
+            if (!isDense)
                 types.add(UTF8Type.instance);
             CompositeType type = CompositeType.getInstance(types);
 
@@ -2292,6 +2310,32 @@ public abstract class LegacyLayout
 
                 size += ByteBufferUtil.serializedSizeWithShortLength(startBuilder.build());
                 size += ByteBufferUtil.serializedSizeWithShortLength(endBuilder.buildAsEndOfRange());
+
+                size += TypeSizes.sizeof(delTimes[i]);
+                size += TypeSizes.sizeof(markedAts[i]);
+            }
+            return size;
+        }
+
+        private long serializedSizeSimple()
+        {
+            long size = 0;
+            List<AbstractType<?>> types = new ArrayList<>(comparator.clusteringComparator.subtypes());
+            assert types.size() == 1 : types;
+
+            for (int i = 0; i < this.size; i++)
+            {
+                LegacyBound start = starts[i];
+                LegacyBound end = ends[i];
+
+                ClusteringPrefix startClustering = start.bound.clustering();
+                ClusteringPrefix endClustering = end.bound.clustering();
+
+                assert startClustering.size() == 1;
+                assert endClustering.size() == 1;
+
+                size += ByteBufferUtil.serializedSizeWithShortLength(startClustering.get(0));
+                size += ByteBufferUtil.serializedSizeWithShortLength(endClustering.get(0));
 
                 size += TypeSizes.sizeof(delTimes[i]);
                 size += TypeSizes.sizeof(markedAts[i]);
