@@ -1,6 +1,8 @@
 3.0.8
  * Add TimeWindowCompactionStrategy (CASSANDRA-9666)
 Merged from 2.2:
+ * Validate bloom_filter_fp_chance against lowest supported
+   value when the table is created (CASSANDRA-11920)
  * StorageService shutdown hook should use a volatile variable (CASSANDRA-11984)
 Merged from 2.1:
  * Cache local ranges when calculating repair neighbors (CASSANDRA-11934)
