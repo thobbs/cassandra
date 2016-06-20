@@ -44,6 +44,11 @@ public class MatcherResponse
         return respondN(message, Integer.MAX_VALUE);
     }
 
+    public MockMessagingSpy dontReply()
+    {
+        return respond(null);
+    }
+
     public MockMessagingSpy respondN(final MessageIn<?> response, int limit)
     {
         limitCounter.set(limit);
@@ -70,8 +75,11 @@ public class MatcherResponse
                         assert !sendResponses.contains(id) : "ID re-use for outgoing message";
                         sendResponses.add(id);
                     }
-                    MessagingService.instance().getRegisteredCallback(id).callback.response(response);
-                    spy.matchingResponse(response);
+                    if (response != null)
+                    {
+                        MessagingService.instance().getRegisteredCallback(id).callback.response(response);
+                        spy.matchingResponse(response);
+                    }
                     return false;
                 }
                 return true;
