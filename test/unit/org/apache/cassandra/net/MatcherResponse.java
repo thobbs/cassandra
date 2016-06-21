@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * Sends a response for an incoming message with a matching {@link Matcher}.
@@ -33,10 +34,16 @@ public class MatcherResponse
     private final Set<Integer> sendResponses = new HashSet<>();
     private final MockMessagingSpy spy = new MockMessagingSpy(false);
     private final AtomicInteger limitCounter = new AtomicInteger(Integer.MAX_VALUE);
+    private IMessageSink sink;
 
     MatcherResponse(Matcher<?> matcher)
     {
         this.matcher = matcher;
+    }
+
+    public MockMessagingSpy dontReply()
+    {
+        return respond((MessageIn<?>)null);
     }
 
     public MockMessagingSpy respond(MessageIn<?> message)
@@ -44,16 +51,23 @@ public class MatcherResponse
         return respondN(message, Integer.MAX_VALUE);
     }
 
-    public MockMessagingSpy dontReply()
+    public MockMessagingSpy respondN(final MessageIn<?> response, int limit)
     {
-        return respond(null);
+        return respondN((in) -> response, limit);
     }
 
-    public MockMessagingSpy respondN(final MessageIn<?> response, int limit)
+    public <T, S> MockMessagingSpy respond(Function<MessageOut<T>, MessageIn<S>> fnResponse)
+    {
+        return respondN(fnResponse, Integer.MAX_VALUE);
+    }
+
+    public <T, S> MockMessagingSpy respondN(Function<MessageOut<T>, MessageIn<S>> fnResponse, int limit)
     {
         limitCounter.set(limit);
 
-        MessagingService.instance().addMessageSink(new IMessageSink()
+        assert sink == null: "destroy() must be called first to register new response";
+
+        sink = new IMessageSink()
         {
             public boolean allowOutgoingMessage(MessageOut message, int id, InetAddress to)
             {
@@ -75,9 +89,18 @@ public class MatcherResponse
                         assert !sendResponses.contains(id) : "ID re-use for outgoing message";
                         sendResponses.add(id);
                     }
+                    MessageIn<?> response = fnResponse.apply(message);
                     if (response != null)
                     {
-                        MessagingService.instance().getRegisteredCallback(id).callback.response(response);
+                        CallbackInfo cb = MessagingService.instance().getRegisteredCallback(id);
+                        if (cb != null)
+                        {
+                            cb.callback.response(response);
+                        }
+                        else
+                        {
+                            MessagingService.instance().receive(response, id);
+                        }
                         spy.matchingResponse(response);
                     }
                     return false;
@@ -89,8 +112,17 @@ public class MatcherResponse
             {
                 return true;
             }
-        });
+        };
+        MessagingService.instance().addMessageSink(sink);
 
         return spy;
+    }
+
+    /**
+     * Stops currently registered response from being send.
+     */
+    public void destroy()
+    {
+        MessagingService.instance().removeMessageSink(sink);
     }
 }
