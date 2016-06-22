@@ -274,9 +274,9 @@ if [ "x$allow_root" != "xyes" ] ; then
 fi
 
 # see CASSANDRA-7254
-"$JAVA" -cp "$CLASSPATH" $JVM_OPTS 2>&1 | grep -q 'Error: Exception thrown by the agent : java.lang.NullPointerException'
-if [ $? -ne "1" ]; then 
-    echo Unable to bind JMX, is Cassandra already running?
+lsof -i ":$JMX_PORT" >/dev/null
+if [ $? -eq "0" ]; then
+    echo The JMX port appears to be in use, is Cassandra already running?
     exit 1;
 fi
 
