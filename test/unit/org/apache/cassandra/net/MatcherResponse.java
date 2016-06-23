@@ -21,7 +21,7 @@ import java.net.InetAddress;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
  * Sends a response for an incoming message with a matching {@link Matcher}.
@@ -53,15 +53,15 @@ public class MatcherResponse
 
     public MockMessagingSpy respondN(final MessageIn<?> response, int limit)
     {
-        return respondN((in) -> response, limit);
+        return respondN((in, to) -> response, limit);
     }
 
-    public <T, S> MockMessagingSpy respond(Function<MessageOut<T>, MessageIn<S>> fnResponse)
+    public <T, S> MockMessagingSpy respond(BiFunction<MessageOut<T>, InetAddress, MessageIn<S>> fnResponse)
     {
         return respondN(fnResponse, Integer.MAX_VALUE);
     }
 
-    public <T, S> MockMessagingSpy respondN(Function<MessageOut<T>, MessageIn<S>> fnResponse, int limit)
+    public <T, S> MockMessagingSpy respondN(BiFunction<MessageOut<T>, InetAddress, MessageIn<S>> fnResponse, int limit)
     {
         limitCounter.set(limit);
 
@@ -89,7 +89,7 @@ public class MatcherResponse
                         assert !sendResponses.contains(id) : "ID re-use for outgoing message";
                         sendResponses.add(id);
                     }
-                    MessageIn<?> response = fnResponse.apply(message);
+                    MessageIn<?> response = fnResponse.apply(message, to);
                     if (response != null)
                     {
                         CallbackInfo cb = MessagingService.instance().getRegisteredCallback(id);
