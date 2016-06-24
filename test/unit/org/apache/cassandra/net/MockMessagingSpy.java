@@ -17,15 +17,21 @@
  */
 package org.apache.cassandra.net;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.AbstractFuture;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import junit.framework.AssertionFailedError;
-import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 /**
  * Allows inspecting the behavior of mocked messaging by observing {@link MatcherResponse}.
@@ -34,117 +40,198 @@ public class MockMessagingSpy
 {
     private static final Logger logger = LoggerFactory.getLogger(MockMessagingSpy.class);
 
-    private boolean capture;
-    public List<MessageOut> capturedMessages = new LinkedList<>();
-
     public int messagesIntercepted = 0;
     public int mockedMessageResponses = 0;
 
-    private volatile SimpleCondition blockReceivedCondition;
-    private volatile SimpleCondition blockResponsesCondition;
+    private final BlockingQueue<MessageOut<?>> interceptedMessages = new LinkedBlockingQueue<>();
+    private final BlockingQueue<MessageIn<?>> deliveredReponses = new LinkedBlockingQueue<>();
 
-    private int waitUntilNumberOfReceivedMessages = -1;
-    private int waitUntilMockedResponses = -1;
+    private static final Executor executor = Executors.newSingleThreadExecutor();
 
-
-    MockMessagingSpy(boolean capture)
+    /**
+     * Returns a future with the first mocked incoming message that has been created and delivered.
+     */
+    public ListenableFuture<MessageIn<?>> captureMockedMessageIn()
     {
-        this.capture = capture;
+        return Futures.transform(captureMockedMessageInN(1), (List<MessageIn<?>> result) -> result.isEmpty() ? null : result.get(0));
     }
 
     /**
-     * Enables capturing of outgoing messages that have been intercepted
+     * Returns a future with the specified number mocked incoming messages that have been created and delivered.
      */
-    public MockMessagingSpy capture()
+    public ListenableFuture<List<MessageIn<?>>> captureMockedMessageInN(int noOfMessages)
     {
-        capture = true;
-        return this;
+        CapturedResultsFuture<MessageIn<?>> ret = new CapturedResultsFuture<>(noOfMessages, deliveredReponses);
+        executor.execute(ret);
+        return ret;
     }
 
     /**
-     * Blocks until one intercepted message has been received.
+     * Returns a future that will indicate if a mocked incoming message has been created and delivered.
      */
-    public MockMessagingSpy receive1() throws InterruptedException
+    public ListenableFuture<Boolean> expectMockedMessageIn()
     {
-        return receiveN(1, 1, TimeUnit.MINUTES);
+        return expectMockedMessageIn(1);
     }
 
     /**
-     * Blocks until n intercepted message have been received.
+     * Returns a future that will indicate if the specified number of mocked incoming message have been created and delivered.
      */
-    public MockMessagingSpy receiveN(int numberOfReceivedMessages) throws InterruptedException
+    public ListenableFuture<Boolean> expectMockedMessageIn(int noOfMessages)
     {
-        return receiveN(numberOfReceivedMessages, 1, TimeUnit.MINUTES);
+        ResultsCompletionFuture<MessageIn<?>> ret = new ResultsCompletionFuture<>(noOfMessages, deliveredReponses);
+        executor.execute(ret);
+        return ret;
     }
 
     /**
-     * Blocks until n intercepted message have been received.
+     * Returns a future with the first intercepted outbound message that would have been send.
      */
-    public MockMessagingSpy receiveN(int numberOfReceivedMessages, long time, TimeUnit unit) throws InterruptedException
+    public ListenableFuture<MessageOut<?>> captureMessageOut()
     {
-        waitUntilNumberOfReceivedMessages = messagesIntercepted + numberOfReceivedMessages;
-        blockReceivedCondition = new SimpleCondition();
-        if(!blockReceivedCondition.await(time, unit))
-            throw new AssertionFailedError("Timeout while waiting for messages");
-        return this;
+        return Futures.transform(captureMessageOut(1), (List<MessageOut<?>> result) -> result.isEmpty() ? null : result.get(0));
     }
 
     /**
-     * Blocks specified time interval and raises an error in case of any received messages.
+     * Returns a future with the specified number of intercepted outbound messages that would have been send.
      */
-    public MockMessagingSpy receiveNoMsg(long time, TimeUnit unit) throws InterruptedException
+    public ListenableFuture<List<MessageOut<?>>> captureMessageOut(int noOfMessages)
     {
-        try
-        {
-            receiveN(1, time, unit);
-        }
-        catch (AssertionFailedError e)
-        {
-            return this;
-        }
-        throw new AssertionFailedError("Received unexpected message");
+        CapturedResultsFuture<MessageOut<?>> ret = new CapturedResultsFuture<>(noOfMessages, interceptedMessages);
+        executor.execute(ret);
+        return ret;
     }
 
     /**
-     * Blocks until one response has been send in return of an intercepted message.
+     * Returns a future that will indicate if an intercepted outbound messages would have been send.
      */
-    public MockMessagingSpy respond1() throws InterruptedException
+    public ListenableFuture<Boolean> interceptMessageOut()
     {
-        return respondN(1, 1, TimeUnit.MINUTES);
+        return interceptMessageOut(1);
     }
 
     /**
-     * Blocks until n responses have been send in return of intercepted messages.
+     * Returns a future that will indicate if the specified number of intercepted outbound messages would have been send.
      */
-    public MockMessagingSpy respondN(int numberOfMockedResponses) throws InterruptedException
+    public ListenableFuture<Boolean> interceptMessageOut(int noOfMessages)
     {
-        return respondN(numberOfMockedResponses, 1, TimeUnit.MINUTES);
+        ResultsCompletionFuture<MessageOut<?>> ret = new ResultsCompletionFuture<>(noOfMessages, interceptedMessages);
+        executor.execute(ret);
+        return ret;
     }
 
     /**
-     * Blocks until n responses have been send in return of intercepted messages.
+     * Returns a future that will indicate the absence of any intercepted outbound messages with the specifed period.
      */
-    public MockMessagingSpy respondN(int numberOfMockedResponses, long time, TimeUnit unit) throws InterruptedException
+    public ListenableFuture<Boolean> interceptNoMsg(long time, TimeUnit unit)
     {
-        waitUntilMockedResponses = mockedMessageResponses + numberOfMockedResponses;
-        blockResponsesCondition = new SimpleCondition();
-        if(!blockResponsesCondition.await(time, unit))
-            throw new AssertionFailedError("Timeout while waiting for messages");
-        return this;
+        ResultAbsenceFuture<MessageOut<?>> ret = new ResultAbsenceFuture<>(interceptedMessages, time, unit);
+        executor.execute(ret);
+        return ret;
     }
 
     void matchingMessage(MessageOut<?> message)
     {
         messagesIntercepted++;
         logger.trace("Received matching message: {}", message);
-        if (capture) capturedMessages.add(message);
-        if (waitUntilNumberOfReceivedMessages != -1 && messagesIntercepted >= waitUntilNumberOfReceivedMessages) blockReceivedCondition.signalAll();
+        interceptedMessages.add(message);
     }
 
     void matchingResponse(MessageIn<?> response)
     {
         mockedMessageResponses++;
         logger.trace("Responding to intercepted message: {}", response);
-        if (waitUntilMockedResponses != -1 && mockedMessageResponses >= waitUntilMockedResponses) blockResponsesCondition.signalAll();
+        deliveredReponses.add(response);
+    }
+
+
+    private static class CapturedResultsFuture<T> extends AbstractFuture<List<T>> implements Runnable
+    {
+        private final int waitForResults;
+        private final List<T> results;
+        private final BlockingQueue<T> queue;
+
+        CapturedResultsFuture(int waitForResponses, BlockingQueue<T> queue)
+        {
+            this.waitForResults = waitForResponses;
+            results = new ArrayList<T>(waitForResponses);
+            this.queue = queue;
+        }
+
+        public void run()
+        {
+            try
+            {
+                while (results.size() < waitForResults)
+
+                {
+                    results.add(queue.take());
+                }
+                set(results);
+            }
+            catch (InterruptedException e)
+            {
+            }
+        }
+    }
+
+    private static class ResultsCompletionFuture<T> extends AbstractFuture<Boolean> implements Runnable
+    {
+        private final int waitForResults;
+        private final BlockingQueue<T> queue;
+
+        ResultsCompletionFuture(int waitForResponses, BlockingQueue<T> queue)
+        {
+            this.waitForResults = waitForResponses;
+            this.queue = queue;
+        }
+
+        public void run()
+        {
+            try
+            {
+                for (int i = 0; i < waitForResults; i++)
+                {
+                    queue.take();
+                }
+                set(true);
+            }
+            catch (InterruptedException e)
+            {
+            }
+        }
+    }
+
+    private static class ResultAbsenceFuture<T> extends AbstractFuture<Boolean> implements Runnable
+    {
+        private final BlockingQueue<T> queue;
+        private final long time;
+        private final TimeUnit unit;
+
+        ResultAbsenceFuture(BlockingQueue<T> queue, long time, TimeUnit unit)
+        {
+            this.queue = queue;
+            this.time = time;
+            this.unit = unit;
+        }
+
+        public void run()
+        {
+            try
+            {
+                T result = queue.poll(time, unit);
+                if (result != null)
+                {
+                    setException(new AssertionFailedError("Received unexpected message: " + result));
+                }
+                else
+                {
+                    set(true);
+                }
+            }
+            catch (InterruptedException e)
+            {
+            }
+        }
     }
 }

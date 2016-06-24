@@ -32,7 +32,7 @@ public class MatcherResponse
 {
     private final Matcher<?> matcher;
     private final Set<Integer> sendResponses = new HashSet<>();
-    private final MockMessagingSpy spy = new MockMessagingSpy(false);
+    private final MockMessagingSpy spy = new MockMessagingSpy();
     private final AtomicInteger limitCounter = new AtomicInteger(Integer.MAX_VALUE);
     private IMessageSink sink;
 
