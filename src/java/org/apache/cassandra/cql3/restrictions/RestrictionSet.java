@@ -255,7 +255,12 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
      */
     public final boolean hasIN()
     {
-        return stream().anyMatch(SingleRestriction::isIN);
+        for (SingleRestriction restriction : restrictions.values())
+        {
+            if (restriction.isIN())
+                return true;
+        }
+        return false;
     }
 
     /**
@@ -266,6 +271,11 @@ final class RestrictionSet implements Restrictions, Iterable<SingleRestriction>
      */
     public final boolean hasOnlyEqualityRestrictions()
     {
-        return stream().allMatch(p -> p.isEQ() || p.isIN());
+        for (SingleRestriction restriction : restrictions.values())
+        {
+            if (!(restriction.isEQ() || restriction.isIN()))
+                return false;
+        }
+        return true;
     }
 }
