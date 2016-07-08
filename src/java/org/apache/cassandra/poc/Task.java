@@ -147,6 +147,7 @@ public abstract class Task<T>
         }
         catch (Throwable t)
         {
+            logger.warn("Unhandled exception while starting Task", t);
             fail(t);
         }
 
@@ -183,6 +184,7 @@ public abstract class Task<T>
         }
         catch (Throwable t)
         {
+            logger.warn("Unhandled exception while handling event", t);
             fail(t);
         }
 

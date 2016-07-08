@@ -18,7 +18,6 @@
 package org.apache.cassandra.poc;
 
 import java.net.InetAddress;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
@@ -27,6 +26,7 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.db.monitoring.ApproximateTime;
 import org.apache.cassandra.db.monitoring.ConstructionTime;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
@@ -93,7 +93,7 @@ public final class Adapters
             this.task = task;
             this.command = command;
 
-            enqueuedAt = System.nanoTime();
+            enqueuedAt = ApproximateTime.currentTimeMillis();
         }
 
         public void run()
@@ -108,7 +108,7 @@ public final class Adapters
 
         private void read()
         {
-            command.setMonitoringTime(new ConstructionTime(TimeUnit.NANOSECONDS.toMillis(enqueuedAt)), DatabaseDescriptor.getReadRpcTimeout());
+            command.setMonitoringTime(new ConstructionTime(enqueuedAt), DatabaseDescriptor.getReadRpcTimeout());
 
             try (ReadExecutionController executionController = command.executionController();
                  UnfilteredPartitionIterator iterator = command.executeLocally(executionController))
@@ -128,7 +128,7 @@ public final class Adapters
 
         private long timeWaited()
         {
-            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - enqueuedAt);
+            return ApproximateTime.currentTimeMillis() - enqueuedAt;
         }
     }
 }

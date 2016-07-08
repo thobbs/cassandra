@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.collect.Lists;
+import org.apache.cassandra.poc.Task;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -283,6 +284,8 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
 
     protected abstract UnfilteredPartitionIterator queryStorage(ColumnFamilyStore cfs, ReadExecutionController executionController);
 
+    protected abstract UnfilteredPartitionIterator queryStorageAsync(ColumnFamilyStore cfs, ReadExecutionController executionController, Task task);
+
     protected abstract int oldestUnrepairedTombstone();
 
     public ReadResponse createResponse(UnfilteredPartitionIterator iterator)
@@ -365,6 +368,53 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
         UnfilteredPartitionIterator resultIterator = searcher == null
                                          ? queryStorage(cfs, executionController)
                                          : searcher.search(executionController);
+
+        try
+        {
+            resultIterator = withStateTracking(resultIterator);
+            resultIterator = withMetricsRecording(withoutPurgeableTombstones(resultIterator, cfs), cfs.metric, startTimeNanos);
+
+            // If we've used a 2ndary index, we know the result already satisfy the primary expression used, so
+            // no point in checking it again.
+            RowFilter updatedFilter = searcher == null
+                                    ? rowFilter()
+                                    : index.getPostIndexQueryFilter(rowFilter());
+
+            // TODO: We'll currently do filtering by the rowFilter here because it's convenient. However,
+            // we'll probably want to optimize by pushing it down the layer (like for dropped columns) as it
+            // would be more efficient (the sooner we discard stuff we know we don't care, the less useless
+            // processing we do on it).
+            return limits().filter(updatedFilter.filter(resultIterator, nowInSec()), nowInSec());
+        }
+        catch (RuntimeException | Error e)
+        {
+            resultIterator.close();
+            throw e;
+        }
+    }
+
+    @SuppressWarnings("resource") // The result iterator is closed upon exceptions (we know it's fine to potentially not close the intermediary
+                                  // iterators created inside the try as long as we do close the original resultIterator), or by closing the result.
+    public UnfilteredPartitionIterator executeLocallyAsync(ReadExecutionController executionController, Task task)
+    {
+        long startTimeNanos = System.nanoTime();
+
+        ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
+        Index index = getIndex(cfs);
+
+        Index.Searcher searcher = null;
+        if (index != null)
+        {
+            if (!cfs.indexManager.isIndexQueryable(index))
+                throw new IndexNotAvailableException(index);
+
+            searcher = index.searcherFor(this);
+            Tracing.trace("Executing read on {}.{} using index {}", cfs.metadata.ksName, cfs.metadata.cfName, index.getIndexMetadata().name);
+        }
+
+        UnfilteredPartitionIterator resultIterator = searcher == null
+                                         ? queryStorageAsync(cfs, executionController, task)
+                                         : searcher.search(executionController);  // TODO 2i search
 
         try
         {

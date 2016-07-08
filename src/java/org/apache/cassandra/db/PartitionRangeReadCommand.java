@@ -41,6 +41,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.poc.Task;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
@@ -171,6 +172,12 @@ public class PartitionRangeReadCommand extends ReadCommand
     protected void recordLatency(TableMetrics metric, long latencyNanos)
     {
         metric.rangeLatency.addNano(latencyNanos);
+    }
+
+    protected UnfilteredPartitionIterator queryStorageAsync(final ColumnFamilyStore cfs, ReadExecutionController executionController, Task task)
+    {
+        // TODO
+        throw new UnsupportedOperationException();
     }
 
     protected UnfilteredPartitionIterator queryStorage(final ColumnFamilyStore cfs, ReadExecutionController executionController)

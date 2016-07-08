@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.monitoring;
 
+import com.google.common.base.MoreObjects;
+
 public final class ConstructionTime
 {
     public final long timestamp;
@@ -37,5 +39,11 @@ public final class ConstructionTime
     {
         this.timestamp = timestamp;
         this.isCrossNode = isCrossNode;
+    }
+
+    @Override
+    public String toString()
+    {
+        return MoreObjects.toStringHelper(this).add("timestamp", timestamp).add("isCrossNode", isCrossNode).toString();
     }
 }

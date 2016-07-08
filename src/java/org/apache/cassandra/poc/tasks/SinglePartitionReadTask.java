@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Iterables;
@@ -29,12 +30,7 @@ import com.google.common.collect.Maps;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.ConsistencyLevel;
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.DeletionTime;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.ReadResponse;
-import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -54,7 +50,10 @@ import org.apache.cassandra.poc.events.LocalReadResponse;
 import org.apache.cassandra.poc.events.RemoteResponse;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.transport.Message;
 import org.apache.cassandra.utils.FBUtilities;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import uk.co.real_logic.agrona.TimerWheel.Timer;
 
 /**
@@ -68,9 +67,12 @@ import uk.co.real_logic.agrona.TimerWheel.Timer;
  * 6. Keep background repair in progress
  * 7. Send end-result merged mutation to all contacted replicas nodes (or, rather, only those that have a different DIGEST)
  */
-public class SinglePartitionReadTask extends Task<PartitionIterator>
+public class SinglePartitionReadTask extends Task<Message.Response>
 {
+    private static final Logger logger = LoggerFactory.getLogger(SinglePartitionReadTask.class);
+
     private final SinglePartitionReadCommand command;
+    private final Function<PartitionIterator, Message.Response> resultProcessor;
     private final ConsistencyLevel cl;
 
     private int blockFor;
@@ -82,9 +84,10 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
     private Timer requestTimer;
     private Timer speculateTimer;
 
-    public SinglePartitionReadTask(SinglePartitionReadCommand command, ConsistencyLevel cl)
+    public SinglePartitionReadTask(SinglePartitionReadCommand command, ConsistencyLevel cl, Function<PartitionIterator, Message.Response> resultProcessor)
     {
         this.command = command;
+        this.resultProcessor = resultProcessor;
         this.cl = cl;
 
         blockFor = cl.blockFor(Keyspace.open(command.metadata().ksName));
@@ -130,11 +133,11 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
             }
         }
 
-        // schedule local and remote read requests
-        scheduleRequests(eventLoop, targetReplicas);
-
         // set the timer (shared for all reqs)
         requestTimer = eventLoop.scheduleTimer(this, DatabaseDescriptor.getReadRpcTimeout(), TimeUnit.MILLISECONDS);
+
+        // schedule local and remote read requests
+        scheduleRequests(eventLoop, targetReplicas);
 
         return Status.PROCESSING;
     }
@@ -177,12 +180,30 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
 
     private void scheduleDataRequest(EventLoop eventLoop, InetAddress replica)
     {
-        if (replica.equals(FBUtilities.getBroadcastAddress()))
-            Adapters.readLocally(eventLoop, this, command);
-        else
-            Adapters.sendMessage(eventLoop, this, command.createMessage(MessagingService.instance().getVersion(replica)), replica);
-
         pendingRequests.put(replica, false);
+        InetAddress localAddress = FBUtilities.getBroadcastAddress();
+        if (replica.equals(localAddress))
+        {
+            if (command.metadata().ksName.contains("system"))
+            {
+                Adapters.readLocally(eventLoop, this, command);
+            }
+            else
+            {
+                try (ReadExecutionController executionController = command.executionController();
+                     UnfilteredPartitionIterator iterator = command.executeLocallyAsync(executionController, this))
+                {
+                    ReadResponse response = command.createResponse(iterator);
+                    boolean isCompleted = command.complete();
+                    assert isCompleted;
+                    handleResponse(eventLoop, localAddress, response);
+                }
+            }
+        }
+        else
+        {
+            Adapters.sendMessage(eventLoop, this, command.createMessage(MessagingService.instance().getVersion(replica)), replica);
+        }
     }
 
     // always remote
@@ -241,7 +262,8 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
         {
             requestTimer.cancel();
             ReadResponse dataResponse = Iterables.tryFind(responses.values(), ReadResponse::isDataResponse).get();
-            return complete(UnfilteredPartitionIterators.filter(dataResponse.makeIterator(command), command.nowInSec()));
+            PartitionIterator iterator = UnfilteredPartitionIterators.filter(dataResponse.makeIterator(command), command.nowInSec());
+            return complete(resultProcessor.apply(iterator));
         }
 
         /*
@@ -279,7 +301,7 @@ public class SinglePartitionReadTask extends Task<PartitionIterator>
         // Even though every responses should honor the limit, we might have more than requested post reconciliation,
         // so ensure we're respecting the limit.
         DataLimits.Counter counter = command.limits().newCounter(command.nowInSec(), true);
-        return complete(counter.applyTo(UnfilteredPartitionIterators.mergeAndFilter(iterators, command.nowInSec(), new VoidMergeListener())));
+        return complete(resultProcessor.apply(counter.applyTo(UnfilteredPartitionIterators.mergeAndFilter(iterators, command.nowInSec(), new VoidMergeListener()))));
     }
 
     private boolean allDigestsMatch(Collection<ReadResponse> responses)

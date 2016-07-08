@@ -24,6 +24,10 @@ import com.google.common.base.MoreObjects;
 import com.google.common.base.Objects;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
+import org.apache.cassandra.poc.SynchronousDummyTask;
+import org.apache.cassandra.poc.Task;
+import org.apache.cassandra.poc.tasks.SinglePartitionReadTask;
+import org.apache.cassandra.transport.Message;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -236,6 +240,54 @@ public class SelectStatement implements CQLStatement
 
         QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
         return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit);
+    }
+
+    @Override
+    public Task<Message.Response> executeAsync(QueryState state, QueryOptions options) throws RequestExecutionException, RequestValidationException
+    {
+        ConsistencyLevel cl = options.getConsistency();
+        checkNotNull(cl, "Invalid empty consistency level");
+
+        cl.validateForRead(keyspace());
+
+        int nowInSec = FBUtilities.nowInSeconds();
+        int userLimit = getLimit(options);
+        int userPerPartitionLimit = getPerPartitionLimit(options);
+        ReadQuery query = getQuery(options, nowInSec, userLimit, userPerPartitionLimit);
+
+        // TODO ignoring paging for now
+        // int pageSize = getPageSize(options);
+        final int pageSize = 0;
+
+        if (pageSize <= 0 || query.limits().count() <= pageSize)
+        {
+            if (!(query instanceof SinglePartitionReadCommand.Group))
+            {
+                // TODO async partition range reads
+                return new SynchronousDummyTask(() -> execute(query, options, state, nowInSec, userLimit));
+            }
+
+            // TODO async multi-partition reads
+            SinglePartitionReadCommand.Group commandGroup = (SinglePartitionReadCommand.Group) query;
+            if (commandGroup.commands.size() > 1)
+            {
+                return new SynchronousDummyTask(() -> execute(query, options, state, nowInSec, userLimit));
+            }
+
+            return new SinglePartitionReadTask(commandGroup.commands.get(0), options.getConsistency(),
+                (partitionIterator) -> {
+                    try (PartitionIterator data = partitionIterator)
+                    {
+                        return processResults(data, options, nowInSec, userLimit);
+                    }
+                });
+        }
+
+        // TODO async paged queries
+        return new SynchronousDummyTask(() -> {
+            QueryPager pager = query.getPager(options.getPagingState(), options.getProtocolVersion());
+            return execute(Pager.forDistributedQuery(pager, cl, state.getClientState()), options, pageSize, nowInSec, userLimit);
+        });
     }
 
     private int getPageSize(QueryOptions options)
