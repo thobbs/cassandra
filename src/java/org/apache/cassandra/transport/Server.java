@@ -95,7 +95,7 @@ public class Server implements CassandraDaemon.Server
     {
         public CassEpollEventLoopGroup() {
             // TODO base this first arg (number of workers) on the number of cores
-            super(4, null, 128);
+            super(Runtime.getRuntime().availableProcessors(), null, 128);
         }
 
         public void setIoRatio(int ioRatio) {
