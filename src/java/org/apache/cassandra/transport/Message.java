@@ -529,9 +529,14 @@ public abstract class Message
                     logger.trace("Responding: {}, v={}", resp, connection.getVersion());
                     flush(new FlushItem(ctx, resp, request.getSourceFrame()));
                 });
-                EventExecutor eventExecutor = ctx.executor();
 
-                // TODO this is terrible
+                task.addErrback(throwable -> {
+                    JVMStabilityInspector.inspectThrowable(throwable);
+                    UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
+                    flush(new FlushItem(ctx, ErrorMessage.fromException(throwable, handler).setStreamId(request.getStreamId()), request.getSourceFrame()));
+                });
+
+                // TODO do round-robin instead
                 int numEventLoops = Server.eventLoops.size();
                 int index = new Random().nextInt(numEventLoops);
                 org.apache.cassandra.poc.EventLoop eventLoop = Server.eventLoops.get(index);
@@ -544,7 +549,6 @@ public abstract class Message
                 JVMStabilityInspector.inspectThrowable(t);
                 UnexpectedChannelExceptionHandler handler = new UnexpectedChannelExceptionHandler(ctx.channel(), true);
                 flush(new FlushItem(ctx, ErrorMessage.fromException(t, handler).setStreamId(request.getStreamId()), request.getSourceFrame()));
-                return;
             }
             finally
             {

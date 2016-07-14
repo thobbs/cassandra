@@ -48,6 +48,7 @@ public abstract class Task<T>
     private volatile T result; // can be Void null
     private volatile Throwable exception;
     private final ArrayList<Consumer<T>> callbacks = new ArrayList<>(1);
+    private final ArrayList<Consumer<Throwable>> errbacks = new ArrayList<>(1);
 
     private Status status = Status.NEW;
 
@@ -76,6 +77,11 @@ public abstract class Task<T>
     public void addCallback(Consumer<T> callback)
     {
         callbacks.add(callback);
+    }
+
+    public void addErrback(Consumer<Throwable> errback)
+    {
+        errbacks.add(errback);
     }
 
     public EventLoop eventLoop()
@@ -126,6 +132,11 @@ public abstract class Task<T>
         this.exception = t;
         status = Status.FAILED;
         onFailure(t);
+
+        // TODO wrap in try/catch
+        for (Consumer<Throwable> errback : errbacks)
+            errback.accept(exception);
+
         return status;
     }
 
