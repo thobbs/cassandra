@@ -96,8 +96,11 @@ public abstract class Task<T>
 
     protected final Status complete(T result)
     {
-        if (hasCompleted || exception != null)
-            throw new IllegalStateException();
+        if (hasCompleted)
+            throw new IllegalStateException("Task.complete() was called after the task was marked complete");
+
+        if (exception != null)
+            throw new IllegalStateException("Task.complete() was called after an exception was already set: " + exception);
 
         this.result = result;
         status = Status.COMPLETED;
@@ -126,8 +129,11 @@ public abstract class Task<T>
 
     protected final Status fail(Throwable t)
     {
-        if (hasCompleted || exception != null)
-            throw new IllegalStateException();
+        if (hasCompleted)
+            throw new IllegalStateException("Task.fail() was called after the task was marked completed; exception: " + t);
+
+        if (exception != null)
+            throw new IllegalStateException("Task.fail() was called after an exception was already set; old exception: " + exception + ", new exception: " + t);
 
         this.exception = t;
         status = Status.FAILED;
