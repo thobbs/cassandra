@@ -113,8 +113,10 @@ public class SinglePartitionReadTask extends Task<Message.Response>
         pendingRequests = Maps.newHashMapWithExpectedSize(targetReplicas.size() + 1);
 
         // decide if we are going to speculate
-        SpeculativeRetryParam retry = command.metadata().params.speculativeRetry;
-        if (liveReplicas.size() > targetReplicas.size())
+        // TODO
+        // SpeculativeRetryParam retry = command.metadata().params.speculativeRetry;
+        SpeculativeRetryParam retry = SpeculativeRetryParam.NONE;
+        if (retry.kind() != SpeculativeRetryParam.Kind.NONE && liveReplicas.size() > targetReplicas.size())
         {
             InetAddress edgeReplica = liveReplicas.get(targetReplicas.size());
             switch (retry.kind())
