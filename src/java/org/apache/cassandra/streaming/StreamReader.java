@@ -25,16 +25,25 @@ import java.util.UUID;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.UnmodifiableIterator;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.ning.compress.lzf.LZFInputStream;
-
+import io.reactivex.Observable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.PartitionColumns;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableSimpleIterator;
 import org.apache.cassandra.io.sstable.format.RangeAwareSSTableWriter;
@@ -48,6 +57,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.io.util.TrackedInputStream;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
+import org.reactivestreams.Subscription;
 
 
 /**
@@ -355,5 +365,29 @@ public class StreamReader
                                                          "Required disk space: %s.", FBUtilities.prettyPrintMemory(maxSize)));
             return new File(tmpDir, String.format("%s-%s.%s", BUFFER_FILE_PREFIX, sessionId, BUFFER_FILE_SUFFIX));
         }
+
+        public Observable<Unfiltered> asObservable()
+        {
+            return Observable.create(subscriber -> {
+                subscriber.onSubscribe(new Subscription()
+                {
+                    public void request(long l)
+                    {
+
+                    }
+
+                    public void cancel()
+                    {
+
+                    }
+                });
+
+                while(hasNext())
+                    subscriber.onNext(next());
+
+                subscriber.onComplete();
+            });
+        }
+
     }
 }

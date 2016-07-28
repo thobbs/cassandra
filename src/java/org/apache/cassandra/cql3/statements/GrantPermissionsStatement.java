@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.statements;
 
 import java.util.Set;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -35,9 +36,9 @@ public class GrantPermissionsStatement extends PermissionsManagementStatement
         super(permissions, resource, grantee);
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         DatabaseDescriptor.getAuthorizer().grant(state.getUser(), permissions, resource, grantee);
-        return null;
+        return Observable.empty();
     }
 }

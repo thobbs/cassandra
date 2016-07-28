@@ -17,13 +17,17 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
 import org.apache.cassandra.cql3.IndexName;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.KeyspaceNotDefinedException;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.MigrationManager;
@@ -64,10 +68,10 @@ public class DropIndexStatement extends SchemaAlteringStatement
     }
 
     @Override
-    public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException
+    public Observable<ResultMessage> execute(QueryState state, QueryOptions options) throws RequestValidationException
     {
         Event.SchemaChange ce = announceMigration(false);
-        return ce == null ? null : new ResultMessage.SchemaChange(ce);
+        return ce == null ? Observable.empty() : Observable.just(new ResultMessage.SchemaChange(ce));
     }
 
     public Event.SchemaChange announceMigration(boolean isLocalOnly) throws InvalidRequestException, ConfigurationException

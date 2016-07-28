@@ -104,6 +104,8 @@ final class SEPWorker extends AtomicReference<SEPWorker.Work> implements Runnabl
 
                     // we know there is work waiting, as we have a work permit, so poll() will always succeed
                     task.run();
+
+
                     task = null;
 
                     // if we're shutting down, or we fail to take a permit, we don't perform any more work

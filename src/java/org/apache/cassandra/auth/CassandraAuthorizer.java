@@ -224,7 +224,7 @@ public class CassandraAuthorizer implements IAuthorizer
         SelectStatement statement = Schema.instance.getCFMetaData(AuthKeyspace.NAME, USER_PERMISSIONS) == null
                                     ? authorizeRoleStatement
                                     : legacyAuthorizeRoleStatement;
-        ResultMessage.Rows rows = statement.execute(QueryState.forInternalCalls(), options) ;
+        ResultMessage.Rows rows = statement.execute(QueryState.forInternalCalls(), options).toBlocking().single();
         UntypedResultSet result = UntypedResultSet.create(rows.result);
 
         if (!result.isEmpty() && result.one().has(PERMISSIONS))
@@ -461,6 +461,6 @@ public class CassandraAuthorizer implements IAuthorizer
 
     private UntypedResultSet process(String query) throws RequestExecutionException
     {
-        return QueryProcessor.process(query, ConsistencyLevel.LOCAL_ONE);
+        return QueryProcessor.process(query, ConsistencyLevel.LOCAL_ONE).toBlocking().single();
     }
 }

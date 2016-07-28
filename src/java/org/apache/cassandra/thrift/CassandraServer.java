@@ -93,7 +93,7 @@ public class CassandraServer implements Cassandra.Iface
             schedule(DatabaseDescriptor.getReadRpcTimeout());
             try
             {
-                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState);
+                return StorageProxy.read(new SinglePartitionReadCommand.Group(commands, DataLimits.NONE), consistency_level, cState).toBlocking().single();
             }
             finally
             {
@@ -2317,7 +2317,7 @@ public class CassandraServer implements Cassandra.Iface
                                                             cState.getQueryState(),
                                                             QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel),
                                                             Collections.<ByteBuffer>emptyList()),
-                                                            null).toThriftResult();
+                                                            null).toBlocking().single().toThriftResult();
         }
         catch (RequestExecutionException e)
         {
@@ -2388,7 +2388,7 @@ public class CassandraServer implements Cassandra.Iface
             return ClientState.getCQLQueryHandler().processPrepared(prepared.statement,
                                                                     cState.getQueryState(),
                                                                     QueryOptions.fromThrift(ThriftConversion.fromThrift(cLevel), bindVariables),
-                                                                    null).toThriftResult();
+                                                                    null).toBlocking().single().toThriftResult();
         }
         catch (RequestExecutionException e)
         {

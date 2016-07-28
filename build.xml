@@ -811,7 +811,7 @@
         <copy todir="${build.classes.main}">
             <fileset dir="${build.src.resources}" />
         </copy>
-	<copy todir="${basedir}/conf" file="${build.classes.main}/META-INF/hotspot_compiler"/>
+	<!--<copy todir="${basedir}/conf" file="${build.classes.main}/META-INF/hotspot_compiler"/>-->
     </target>
 
     <!-- Stress build file -->

@@ -20,8 +20,9 @@ package org.apache.cassandra.transport.messages;
 import java.util.UUID;
 
 import com.google.common.collect.ImmutableMap;
-import io.netty.buffer.ByteBuf;
 
+import io.netty.buffer.ByteBuf;
+import io.reactivex.Observable;
 import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -30,7 +31,9 @@ import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.*;
+import org.apache.cassandra.transport.CBUtil;
+import org.apache.cassandra.transport.Message;
+import org.apache.cassandra.transport.ProtocolException;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.MD5Digest;
 import org.apache.cassandra.utils.UUIDGen;
@@ -86,7 +89,7 @@ public class ExecuteMessage extends Message.Request
         this.options = options;
     }
 
-    public Message.Response execute(QueryState state)
+    public Observable<Response> execute(QueryState state)
     {
         try
         {
@@ -128,19 +131,22 @@ public class ExecuteMessage extends Message.Request
             // Some custom QueryHandlers are interested by the bound names. We provide them this information
             // by wrapping the QueryOptions.
             QueryOptions queryOptions = QueryOptions.addColumnSpecifications(options, prepared.boundNames);
-            Message.Response response = handler.processPrepared(statement, state, queryOptions, getCustomPayload());
-            if (options.skipMetadata() && response instanceof ResultMessage.Rows)
-                ((ResultMessage.Rows)response).result.metadata.setSkipMetadata();
+            Observable<? extends ResultMessage> obs = handler.processPrepared(statement, state, queryOptions, getCustomPayload());
+            final UUID finalTracingId = tracingId;
+            return obs.map(response -> {
+                if (options.skipMetadata() && response instanceof ResultMessage.Rows)
+                    ((ResultMessage.Rows) response).result.metadata.setSkipMetadata();
 
-            if (tracingId != null)
-                response.setTracingId(tracingId);
+                if (finalTracingId != null)
+                    response.setTracingId(finalTracingId);
 
-            return response;
+                return response;
+            });
         }
         catch (Exception e)
         {
             JVMStabilityInspector.inspectThrowable(e);
-            return ErrorMessage.fromException(e);
+            return Observable.just(ErrorMessage.fromException(e));
         }
         finally
         {

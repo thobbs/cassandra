@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3.statements;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.cql3.CFName;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -86,13 +87,13 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
      */
     public abstract Event.SchemaChange announceMigration(boolean isLocalOnly) throws RequestValidationException;
 
-    public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException
+    public Observable<ResultMessage> execute(QueryState state, QueryOptions options) throws RequestValidationException
     {
         // If an IF [NOT] EXISTS clause was used, this may not result in an actual schema change.  To avoid doing
         // extra work in the drivers to handle schema changes, we return an empty message in this case. (CASSANDRA-7600)
         Event.SchemaChange ce = announceMigration(false);
         if (ce == null)
-            return new ResultMessage.Void();
+            return Observable.just(new ResultMessage.Void());
 
         // when a schema alteration results in a new db object being created, we grant permissions on the new
         // object to the user performing the request if:
@@ -112,7 +113,7 @@ public abstract class SchemaAlteringStatement extends CFStatement implements CQL
             }
         }
 
-        return new ResultMessage.SchemaChange(ce);
+        return Observable.just(new ResultMessage.SchemaChange(ce));
     }
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options)

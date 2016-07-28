@@ -26,14 +26,13 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.concurrent.Stage;
-import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.ReadRepairDecision;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.exceptions.ReadFailureException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
@@ -42,7 +41,6 @@ import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.SpeculativeRetryParam;
-import org.apache.cassandra.service.StorageProxy.LocalReadRunnable;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -114,7 +112,17 @@ public abstract class AbstractReadExecutor
         if (hasLocalEndpoint)
         {
             logger.trace("reading {} locally", readCommand.isDigestQuery() ? "digest" : "data");
-            StageManager.getStage(Stage.READ).maybeExecuteImmediately(new LocalReadRunnable(command, handler));
+
+            //if (command instanceof SinglePartitionReadCommand)
+            //{
+            //    Long token = (Long)((SinglePartitionReadCommand) command).partitionKey().getToken().getTokenValue();
+
+            //    MonitoredTPCRxScheduler.forCpu(token.intValue() & 0xFF).createWorker().schedule(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
+            //}
+            //else
+            //{
+                NettyRxScheduler.instance().createWorker().schedule(() -> new StorageProxy.LocalReadRunnable(command, handler).runMayThrow());
+            //}
         }
     }
 

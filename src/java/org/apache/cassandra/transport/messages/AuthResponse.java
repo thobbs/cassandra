@@ -20,11 +20,15 @@ package org.apache.cassandra.transport.messages;
 import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.exceptions.AuthenticationException;
 import org.apache.cassandra.service.QueryState;
-import org.apache.cassandra.transport.*;
+import org.apache.cassandra.transport.CBUtil;
+import org.apache.cassandra.transport.Message;
+import org.apache.cassandra.transport.ProtocolException;
+import org.apache.cassandra.transport.ServerConnection;
 
 /**
  * A SASL token message sent from client to server. Some SASL
@@ -67,7 +71,7 @@ public class AuthResponse extends Message.Request
     }
 
     @Override
-    public Response execute(QueryState queryState)
+    public Observable<Response> execute(QueryState queryState)
     {
         try
         {
@@ -78,16 +82,16 @@ public class AuthResponse extends Message.Request
                 AuthenticatedUser user = negotiator.getAuthenticatedUser();
                 queryState.getClientState().login(user);
                 // authentication is complete, send a ready message to the client
-                return new AuthSuccess(challenge);
+                return Observable.just(new AuthSuccess(challenge));
             }
             else
             {
-                return new AuthChallenge(challenge);
+                return Observable.just(new AuthChallenge(challenge));
             }
         }
         catch (AuthenticationException e)
         {
-            return ErrorMessage.fromException(e);
+            return Observable.just(ErrorMessage.fromException(e));
         }
     }
 }

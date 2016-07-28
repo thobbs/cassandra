@@ -120,7 +120,7 @@
 -XX:+ResizeTLAB
 
 # http://www.evanjones.ca/jvm-mmap-pause.html
--XX:+PerfDisableSharedMem
+#-XX:+PerfDisableSharedMem
 
 # Prefer binding to IPv4 network intefaces (when net.ipv6.bindv6only=1). See
 # http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6342561 (short version:
@@ -130,14 +130,16 @@
 ### Debug options
 
 # uncomment to enable flight recorder
-#-XX:+UnlockCommercialFeatures
-#-XX:+FlightRecorder
+-XX:+UnlockCommercialFeatures
+-XX:+FlightRecorder
+
 
 # uncomment to have Cassandra JVM listen for remote debuggers/profilers on port 1414
 #-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=1414
 
 # uncomment to have Cassandra JVM log internal method compilation (developers only)
-#-XX:+UnlockDiagnosticVMOptions
+-XX:+UnlockDiagnosticVMOptions
+-XX:+DebugNonSafepoints
 #-XX:+LogCompilation
 
 #################
@@ -183,6 +185,7 @@
 #################
 
 ### CMS Settings
+-XX:+UseNUMA
 
 -XX:+UseParNewGC
 -XX:+UseConcMarkSweepGC

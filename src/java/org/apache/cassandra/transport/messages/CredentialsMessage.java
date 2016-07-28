@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import io.netty.buffer.ByteBuf;
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.AuthenticatedUser;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.AuthenticationException;
@@ -70,7 +71,7 @@ public class CredentialsMessage extends Message.Request
         this.credentials = credentials;
     }
 
-    public Message.Response execute(QueryState state)
+    public Observable<Response> execute(QueryState state)
     {
         try
         {
@@ -79,10 +80,10 @@ public class CredentialsMessage extends Message.Request
         }
         catch (AuthenticationException e)
         {
-            return ErrorMessage.fromException(e);
+            return Observable.just(ErrorMessage.fromException(e));
         }
 
-        return new ReadyMessage();
+        return Observable.just(new ReadyMessage());
     }
 
     @Override

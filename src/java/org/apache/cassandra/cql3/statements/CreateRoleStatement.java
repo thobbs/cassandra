@@ -17,10 +17,17 @@
  */
 package org.apache.cassandra.cql3.statements;
 
-import org.apache.cassandra.auth.*;
+import io.reactivex.Observable;
+import org.apache.cassandra.auth.AuthenticatedUser;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.RoleOptions;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.RoleName;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -61,15 +68,15 @@ public class CreateRoleStatement extends AuthenticationStatement
             throw new InvalidRequestException(String.format("%s already exists", role.getRoleName()));
     }
 
-    public ResultMessage execute(ClientState state) throws RequestExecutionException, RequestValidationException
+    public Observable<ResultMessage> execute(ClientState state) throws RequestExecutionException, RequestValidationException
     {
         // not rejected in validate()
         if (ifNotExists && DatabaseDescriptor.getRoleManager().isExistingRole(role))
-            return null;
+            return Observable.empty();
 
         DatabaseDescriptor.getRoleManager().createRole(state.getUser(), role, opts);
         grantPermissionsToCreator(state);
-        return null;
+        return Observable.empty();
     }
 
     /**

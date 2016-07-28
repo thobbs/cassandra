@@ -24,13 +24,23 @@ import java.util.Set;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
-import org.apache.cassandra.auth.*;
+import io.reactivex.Observable;
+import org.apache.cassandra.auth.AuthKeyspace;
+import org.apache.cassandra.auth.IRoleManager;
+import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.auth.RoleResource;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ColumnSpecification;
+import org.apache.cassandra.cql3.ResultSet;
+import org.apache.cassandra.cql3.RoleName;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.messages.ResultMessage;
 
@@ -73,7 +83,7 @@ public class ListRolesStatement extends AuthorizationStatement
     {
     }
 
-    public ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException
+    public Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException
     {
         // If the executing user has DESCRIBE permission on the root roles resource, let them list any and all roles
         boolean hasRootLevelSelect = DatabaseDescriptor.getAuthorizer()
@@ -98,14 +108,14 @@ public class ListRolesStatement extends AuthorizationStatement
         }
     }
 
-    private ResultMessage resultMessage(Set<RoleResource> roles)
+    private Observable<ResultMessage> resultMessage(Set<RoleResource> roles)
     {
         if (roles.isEmpty())
-            return new ResultMessage.Void();
+            return Observable.empty();
 
         List<RoleResource> sorted = Lists.newArrayList(roles);
         Collections.sort(sorted);
-        return formatResults(sorted);
+        return Observable.just(formatResults(sorted));
     }
 
     // overridden in ListUsersStatement to include legacy metadata

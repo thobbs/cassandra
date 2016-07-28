@@ -25,6 +25,7 @@ import java.net.InetAddress;
 import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -35,6 +36,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Uninterruptibles;
+import io.reactivex.plugins.RxJavaPlugins;
+import io.reactivex.schedulers.Schedulers;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -179,6 +182,9 @@ public class CassandraDaemon
             WindowsFailedSnapshotTracker.deleteOldSnapshots();
 
         ThreadAwareSecurityManager.install();
+
+        RxJavaPlugins.initIOScheduler(Schedulers.from(Executors.newFixedThreadPool(DatabaseDescriptor.getConcurrentWriters())));
+        RxJavaPlugins.setErrorHandler(t -> logger.error("RxJava unexpected Exception ", t));
 
         logSystemInfo();
 

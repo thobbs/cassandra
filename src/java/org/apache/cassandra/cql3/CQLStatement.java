@@ -17,8 +17,12 @@
  */
 package org.apache.cassandra.cql3;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.cql3.functions.Function;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.exceptions.RequestValidationException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.messages.ResultMessage;
@@ -51,7 +55,7 @@ public interface CQLStatement
      * @param state the current query state
      * @param options options for this query (consistency, variables, pageSize, ...)
      */
-    public ResultMessage execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
+    public Observable<? extends ResultMessage> execute(QueryState state, QueryOptions options) throws RequestValidationException, RequestExecutionException;
 
     /**
      * Variant of execute used for internal query against the system tables, and thus only query the local node.

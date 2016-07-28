@@ -49,6 +49,8 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService
     volatile boolean shuttingDown = false;
     final SimpleCondition shutdown = new SimpleCondition();
 
+    public final String name;
+
     // TODO: see if other queue implementations might improve throughput
     protected final ConcurrentLinkedQueue<FutureTask<?>> tasks = new ConcurrentLinkedQueue<>();
 
@@ -59,6 +61,7 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService
         this.maxTasksQueued = maxTasksQueued;
         this.permits.set(combine(0, maxWorkers));
         this.metrics = new SEPMetrics(this, jmxPath, name);
+        this.name = name;
     }
 
     protected void onCompletion()

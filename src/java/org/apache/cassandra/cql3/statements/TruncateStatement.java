@@ -20,18 +20,24 @@ package org.apache.cassandra.cql3.statements;
 import java.io.IOException;
 import java.util.concurrent.TimeoutException;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.cql3.*;
+import org.apache.cassandra.cql3.CFName;
+import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.exceptions.*;
-import org.apache.cassandra.transport.messages.ResultMessage;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.TruncateException;
+import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.exceptions.UnavailableException;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.thrift.ThriftValidation;
+import org.apache.cassandra.transport.messages.ResultMessage;
 
 public class TruncateStatement extends CFStatement implements CQLStatement
 {
@@ -60,7 +66,7 @@ public class TruncateStatement extends CFStatement implements CQLStatement
         ThriftValidation.validateColumnFamily(keyspace(), columnFamily());
     }
 
-    public ResultMessage execute(QueryState state, QueryOptions options) throws InvalidRequestException, TruncateException
+    public Observable<ResultMessage> execute(QueryState state, QueryOptions options) throws InvalidRequestException, TruncateException
     {
         try
         {
@@ -74,7 +80,8 @@ public class TruncateStatement extends CFStatement implements CQLStatement
         {
             throw new TruncateException(e);
         }
-        return null;
+
+        return Observable.empty();
     }
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options)

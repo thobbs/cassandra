@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.ColumnFilter;
@@ -33,6 +34,7 @@ import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.DataPosition;
 import org.apache.cassandra.io.util.SegmentedFile;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.reactivestreams.Subscription;
 
 public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
 {
@@ -292,6 +294,29 @@ public abstract class AbstractSSTableIterator implements UnfilteredRowIterator
             reader.close();
 
         isClosed = true;
+    }
+
+    public Observable<Unfiltered> asObservable()
+    {
+        return Observable.create(subscriber -> {
+            subscriber.onSubscribe(new Subscription()
+            {
+                public void request(long l)
+                {
+
+                }
+
+                public void cancel()
+                {
+
+                }
+            });
+
+            while (hasNext())
+                subscriber.onNext(next());
+
+            subscriber.onComplete();
+        });
     }
 
     public void close()

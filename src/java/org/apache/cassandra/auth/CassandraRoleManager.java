@@ -351,9 +351,9 @@ public class CassandraRoleManager implements IRoleManager
         // Try looking up the 'cassandra' default role first, to avoid the range query if possible.
         String defaultSUQuery = String.format("SELECT * FROM %s.%s WHERE role = '%s'", AuthKeyspace.NAME, AuthKeyspace.ROLES, DEFAULT_SUPERUSER_NAME);
         String allUsersQuery = String.format("SELECT * FROM %s.%s LIMIT 1", AuthKeyspace.NAME, AuthKeyspace.ROLES);
-        return !QueryProcessor.process(defaultSUQuery, ConsistencyLevel.ONE).isEmpty()
-               || !QueryProcessor.process(defaultSUQuery, ConsistencyLevel.QUORUM).isEmpty()
-               || !QueryProcessor.process(allUsersQuery, ConsistencyLevel.QUORUM).isEmpty();
+        return !QueryProcessor.process(defaultSUQuery, ConsistencyLevel.ONE).toBlocking().single().isEmpty()
+               || !QueryProcessor.process(defaultSUQuery, ConsistencyLevel.QUORUM).toBlocking().single().isEmpty()
+               || !QueryProcessor.process(allUsersQuery, ConsistencyLevel.QUORUM).toBlocking().single().isEmpty();
     }
 
     private void scheduleSetupTask(final Callable<Void> setupTask)
@@ -401,7 +401,7 @@ public class CassandraRoleManager implements IRoleManager
             {
                 logger.info("Converting legacy users");
                 UntypedResultSet users = QueryProcessor.process("SELECT * FROM system_auth.users",
-                                                                ConsistencyLevel.QUORUM);
+                                                                ConsistencyLevel.QUORUM).toBlocking().single();
                 for (UntypedResultSet.Row row : users)
                 {
                     RoleOptions options = new RoleOptions();
@@ -416,7 +416,7 @@ public class CassandraRoleManager implements IRoleManager
             {
                 logger.info("Migrating legacy credentials data to new system table");
                 UntypedResultSet credentials = QueryProcessor.process("SELECT * FROM system_auth.credentials",
-                                                                      ConsistencyLevel.QUORUM);
+                                                                      ConsistencyLevel.QUORUM).toBlocking().single();
                 for (UntypedResultSet.Row row : credentials)
                 {
                     // Write the password directly into the table to avoid doubly encrypting it
@@ -496,7 +496,7 @@ public class CassandraRoleManager implements IRoleManager
         ResultMessage.Rows rows =
             statement.execute(QueryState.forInternalCalls(),
                               QueryOptions.forInternalCalls(consistencyForRole(name),
-                                                            Collections.singletonList(ByteBufferUtil.bytes(name))));
+                                                            Collections.singletonList(ByteBufferUtil.bytes(name)))).toBlocking().single();
         if (rows.result.isEmpty())
             return NULL_ROLE;
 
@@ -602,7 +602,7 @@ public class CassandraRoleManager implements IRoleManager
                                             + "This is likely because some of nodes in the cluster are on version 2.1 or earlier. "
                                             + "You need to upgrade all nodes to Cassandra 2.2 or more to use roles.");
 
-        return QueryProcessor.process(query, consistencyLevel);
+        return QueryProcessor.process(query, consistencyLevel).toBlocking().single();
     }
 
     private static final class Role

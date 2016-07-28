@@ -21,8 +21,24 @@ import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.management.MBeanServer;
@@ -30,49 +46,107 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicate;
 import com.google.common.cache.CacheLoader;
-import com.google.common.collect.*;
+import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.PeekingIterator;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.reactivex.Observable;
+import io.reactivex.Scheduler;
 import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchlogManager;
 import org.apache.cassandra.batchlog.LegacyBatchlogMigrator;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.CounterMutation;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.HintedHandOffManager;
+import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
+import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.Truncation;
+import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.db.monitoring.ConstructionTime;
-import org.apache.cassandra.db.partitions.*;
+import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
+import org.apache.cassandra.db.partitions.PartitionIterators;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.view.ViewUtils;
-import org.apache.cassandra.dht.*;
-import org.apache.cassandra.exceptions.*;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.Bounds;
+import org.apache.cassandra.dht.RingPosition;
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.IsBootstrappingException;
+import org.apache.cassandra.exceptions.OverloadedException;
+import org.apache.cassandra.exceptions.ReadFailureException;
+import org.apache.cassandra.exceptions.ReadTimeoutException;
+import org.apache.cassandra.exceptions.RequestFailureException;
+import org.apache.cassandra.exceptions.RequestTimeoutException;
+import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.exceptions.WriteFailureException;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.locator.*;
-import org.apache.cassandra.metrics.*;
-import org.apache.cassandra.net.*;
+import org.apache.cassandra.locator.AbstractReplicationStrategy;
+import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.locator.LocalStrategy;
+import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.metrics.CASClientRequestMetrics;
+import org.apache.cassandra.metrics.ClientRequestMetrics;
+import org.apache.cassandra.metrics.ReadRepairMetrics;
+import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.metrics.ViewWriteMetrics;
+import org.apache.cassandra.net.CompactEndpointSerializationHelper;
+import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.net.IAsyncCallbackWithFailure;
+import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.MessagingService.Verb;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.PrepareCallback;
 import org.apache.cassandra.service.paxos.ProposeCallback;
-import org.apache.cassandra.net.MessagingService.Verb;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.triggers.TriggerExecutor;
-import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.UUIDGen;
+import org.apache.cassandra.utils.UUIDSerializer;
+import org.reactivestreams.Subscription;
 
-import static com.google.common.collect.Iterables.contains;
 
 public class StorageProxy implements StorageProxyMBean
 {
@@ -1494,7 +1568,7 @@ public class StorageProxy implements StorageProxyMBean
     public static RowIterator readOne(SinglePartitionReadCommand command, ConsistencyLevel consistencyLevel, ClientState state)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
-        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state), command);
+        return PartitionIterators.getOnlyElement(read(SinglePartitionReadCommand.Group.one(command), consistencyLevel, state).toBlocking().single(), command);
     }
 
     public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel)
@@ -1502,14 +1576,14 @@ public class StorageProxy implements StorageProxyMBean
     {
         // When using serial CL, the ClientState should be provided
         assert !consistencyLevel.isSerialConsistency();
-        return read(group, consistencyLevel, null);
+        return read(group, consistencyLevel, null).toBlocking().single();
     }
 
     /**
      * Performs the actual reading of a row out of the StorageService, fetching
      * a specific set of column names from a given column family.
      */
-    public static PartitionIterator read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state)
+    public static Observable<PartitionIterator> read(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel, ClientState state)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
         if (StorageService.instance.isBootstrapMode() && !systemKeyspaceQuery(group.commands))
@@ -1519,7 +1593,7 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         return consistencyLevel.isSerialConsistency()
-             ? readWithPaxos(group, consistencyLevel, state)
+             ? Observable.just(readWithPaxos(group, consistencyLevel, state))
              : readRegular(group, consistencyLevel);
     }
 
@@ -1563,7 +1637,7 @@ public class StorageProxy implements StorageProxyMBean
                 throw new ReadFailureException(consistencyLevel, e.received, e.failures, e.blockFor, false);
             }
 
-            result = fetchRows(group.commands, consistencyForCommitOrFetch);
+            result = fetchRows(group.commands, consistencyForCommitOrFetch).toBlocking().single();
         }
         catch (UnavailableException e)
         {
@@ -1595,18 +1669,21 @@ public class StorageProxy implements StorageProxyMBean
     }
 
     @SuppressWarnings("resource")
-    private static PartitionIterator readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel)
+    private static Observable<PartitionIterator> readRegular(SinglePartitionReadCommand.Group group, ConsistencyLevel consistencyLevel)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
         long start = System.nanoTime();
         try
         {
-            PartitionIterator result = fetchRows(group.commands, consistencyLevel);
+            Observable<PartitionIterator> resultObs = fetchRows(group.commands, consistencyLevel);
             // If we have more than one command, then despite each read command honoring the limit, the total result
             // might not honor it and so we should enforce it
-            if (group.commands.size() > 1)
-                result = group.limits().filter(result, group.nowInSec());
-            return result;
+            return resultObs.map(result -> {
+                if (group.commands.size() > 1)
+                    result = group.limits().filter(result, group.nowInSec());
+
+                return result;
+            });
         }
         catch (UnavailableException e)
         {
@@ -1644,36 +1721,14 @@ public class StorageProxy implements StorageProxyMBean
      * 4. If the digests (if any) match the data return the data
      * 5. else carry out read repair by getting data from all the nodes.
      */
-    private static PartitionIterator fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel)
+    private static Observable<PartitionIterator> fetchRows(List<SinglePartitionReadCommand> commands, ConsistencyLevel consistencyLevel)
     throws UnavailableException, ReadFailureException, ReadTimeoutException
     {
-        int cmdCount = commands.size();
-
-        SinglePartitionReadLifecycle[] reads = new SinglePartitionReadLifecycle[cmdCount];
-        for (int i = 0; i < cmdCount; i++)
-            reads[i] = new SinglePartitionReadLifecycle(commands.get(i), consistencyLevel);
-
-        for (int i = 0; i < cmdCount; i++)
-            reads[i].doInitialQueries();
-
-        for (int i = 0; i < cmdCount; i++)
-            reads[i].maybeTryAdditionalReplicas();
-
-        for (int i = 0; i < cmdCount; i++)
-            reads[i].awaitResultsAndRetryOnDigestMismatch();
-
-        for (int i = 0; i < cmdCount; i++)
-            if (!reads[i].isDone())
-                reads[i].maybeAwaitFullDataRead();
-
-        List<PartitionIterator> results = new ArrayList<>(cmdCount);
-        for (int i = 0; i < cmdCount; i++)
-        {
-            assert reads[i].isDone();
-            results.add(reads[i].getResult());
-        }
-
-        return PartitionIterators.concat(results);
+        return Observable.fromIterable(commands)
+                         .map(command -> new SinglePartitionReadLifecycle(command, consistencyLevel))
+                         .flatMap(reader -> reader.getPartitionIterator(NettyRxScheduler.instance()))
+                         .toList()
+                         .map(PartitionIterators::concat);
     }
 
     private static class SinglePartitionReadLifecycle
@@ -1707,6 +1762,94 @@ public class StorageProxy implements StorageProxyMBean
             executor.maybeTryAdditionalReplicas();
         }
 
+        Observable<PartitionIterator> getPartitionIterator(Scheduler scheduler)
+        {
+            final PartitionIterator[] partitionIterator = new PartitionIterator[1];
+
+
+                //Create observable based on callback
+                Observable<PartitionIterator> obs = Observable.create(subscriber -> {
+                    executor.handler.onSignaledAction(scheduler, () -> {
+                        try
+                        {
+                            partitionIterator[0] = executor.handler.get();
+                            subscriber.onSubscribe(new Subscription()
+                            {
+                                public void request(long l)
+                                {
+
+                                }
+
+                                public void cancel()
+                                {
+
+                                }
+                            });
+                            subscriber.onNext(partitionIterator[0]);
+                            subscriber.onComplete();
+                        }
+                        catch (DigestMismatchException e)
+                        {
+                            retryOnDigestMismatch(scheduler, () -> {
+                                try
+                                {
+                                    partitionIterator[0] = repairHandler.get();
+                                    subscriber.onNext(partitionIterator[0]);
+                                }
+                                catch (DigestMismatchException e1)
+                                {
+                                    subscriber.onError(new RuntimeException("Encountered a digest mismatch during a read repair", e1));
+                                }
+                                finally
+                                {
+                                    subscriber.onComplete();
+                                }
+                            });
+                        }
+                        finally
+                        {
+                            if (partitionIterator[0] != null)
+                                partitionIterator[0].close();
+                        }
+                    });
+
+                });
+
+                doInitialQueries();
+
+                //FIXME: Needs to become async
+                //maybeTryAdditionalReplicas();
+
+
+                return obs;
+        }
+
+        void retryOnDigestMismatch(Scheduler scheduler, Runnable onRepairAction) throws ReadFailureException, ReadTimeoutException
+        {
+
+            ReadRepairMetrics.repairedBlocking.mark();
+
+            // Do a full data read to resolve the correct response (and repair node that need be)
+            Keyspace keyspace = Keyspace.open(command.metadata().ksName);
+            DataResolver resolver = new DataResolver(keyspace, command, ConsistencyLevel.ALL, executor.handler.endpoints.size());
+            repairHandler = new ReadCallback(resolver,
+                                             ConsistencyLevel.ALL,
+                                             executor.getContactedReplicas().size(),
+                                             command,
+                                             keyspace,
+                                             executor.handler.endpoints);
+
+            if (onRepairAction != null)
+                repairHandler.onSignaledAction(scheduler, onRepairAction);
+
+            for (InetAddress endpoint : executor.getContactedReplicas())
+            {
+                MessageOut<ReadCommand> message = command.createMessage(MessagingService.instance().getVersion(endpoint));
+                Tracing.trace("Enqueuing full data read to {}", endpoint);
+                MessagingService.instance().sendRRWithFailure(message, endpoint, repairHandler);
+            }
+        }
+
         void awaitResultsAndRetryOnDigestMismatch() throws ReadFailureException, ReadTimeoutException
         {
             try
@@ -1717,24 +1860,7 @@ public class StorageProxy implements StorageProxyMBean
             {
                 Tracing.trace("Digest mismatch: {}", ex);
 
-                ReadRepairMetrics.repairedBlocking.mark();
-
-                // Do a full data read to resolve the correct response (and repair node that need be)
-                Keyspace keyspace = Keyspace.open(command.metadata().ksName);
-                DataResolver resolver = new DataResolver(keyspace, command, ConsistencyLevel.ALL, executor.handler.endpoints.size());
-                repairHandler = new ReadCallback(resolver,
-                                                 ConsistencyLevel.ALL,
-                                                 executor.getContactedReplicas().size(),
-                                                 command,
-                                                 keyspace,
-                                                 executor.handler.endpoints);
-
-                for (InetAddress endpoint : executor.getContactedReplicas())
-                {
-                    MessageOut<ReadCommand> message = command.createMessage(MessagingService.instance().getVersion(endpoint));
-                    Tracing.trace("Enqueuing full data read to {}", endpoint);
-                    MessagingService.instance().sendRRWithFailure(message, endpoint, repairHandler);
-                }
+                retryOnDigestMismatch(null, null);
             }
         }
 
@@ -1813,6 +1939,8 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (Throwable t)
             {
+
+                logger.error("Error on read", t);
                 handler.onFailure(FBUtilities.getBroadcastAddress());
                 if (t instanceof TombstoneOverwhelmingException)
                     logger.error(t.getMessage());

@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements;
 
 
+import io.reactivex.Observable;
 import org.apache.cassandra.auth.DataResource;
 import org.apache.cassandra.auth.IResource;
 import org.apache.cassandra.cql3.CQLStatement;
@@ -42,13 +43,13 @@ public abstract class AuthorizationStatement extends ParsedStatement implements 
         return 0;
     }
 
-    public ResultMessage execute(QueryState state, QueryOptions options)
+    public Observable<ResultMessage> execute(QueryState state, QueryOptions options)
     throws RequestValidationException, RequestExecutionException
     {
         return execute(state.getClientState());
     }
 
-    public abstract ResultMessage execute(ClientState state) throws RequestValidationException, RequestExecutionException;
+    public abstract Observable<ResultMessage> execute(ClientState state) throws RequestValidationException, RequestExecutionException;
 
     public ResultMessage executeInternal(QueryState state, QueryOptions options)
     {

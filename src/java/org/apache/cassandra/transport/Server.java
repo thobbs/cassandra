@@ -34,17 +34,22 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
-import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelPipeline;
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
-import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
+import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.Version;
-import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.GlobalEventExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
@@ -52,7 +57,12 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.security.SSLFactory;
-import org.apache.cassandra.service.*;
+import org.apache.cassandra.service.CassandraDaemon;
+import org.apache.cassandra.service.IEndpointLifecycleSubscriber;
+import org.apache.cassandra.service.MigrationListener;
+import org.apache.cassandra.service.MigrationManager;
+import org.apache.cassandra.service.NativeTransportService;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.messages.EventMessage;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -86,7 +96,6 @@ public class Server implements CassandraDaemon.Server
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
 
     private EventLoopGroup workerGroup;
-    private EventExecutor eventExecutorGroup;
 
     private Server (Builder builder)
     {
@@ -103,8 +112,7 @@ public class Server implements CassandraDaemon.Server
             else
                 workerGroup = new NioEventLoopGroup();
         }
-        if (builder.eventExecutorGroup != null)
-            eventExecutorGroup = builder.eventExecutorGroup;
+
         EventNotifier notifier = new EventNotifier(this);
         StorageService.instance.register(notifier);
         MigrationManager.instance.register(notifier);
@@ -185,7 +193,6 @@ public class Server implements CassandraDaemon.Server
     public static class Builder
     {
         private EventLoopGroup workerGroup;
-        private EventExecutor eventExecutorGroup;
         private boolean useSSL = false;
         private InetAddress hostAddr;
         private int port = -1;
@@ -200,12 +207,6 @@ public class Server implements CassandraDaemon.Server
         public Builder withEventLoopGroup(EventLoopGroup eventLoopGroup)
         {
             this.workerGroup = eventLoopGroup;
-            return this;
-        }
-
-        public Builder withEventExecutor(EventExecutor eventExecutor)
-        {
-            this.eventExecutorGroup = eventExecutor;
             return this;
         }
 
@@ -329,10 +330,7 @@ public class Server implements CassandraDaemon.Server
             pipeline.addLast("messageDecoder", messageDecoder);
             pipeline.addLast("messageEncoder", messageEncoder);
 
-            if (server.eventExecutorGroup != null)
-                pipeline.addLast(server.eventExecutorGroup, "executor", dispatcher);
-            else
-                pipeline.addLast("executor", dispatcher);
+            pipeline.addLast("executor", dispatcher);
         }
     }
 

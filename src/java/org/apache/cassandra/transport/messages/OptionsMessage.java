@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import io.netty.buffer.ByteBuf;
-
+import io.reactivex.Observable;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.FrameCompressor;
@@ -56,7 +56,7 @@ public class OptionsMessage extends Message.Request
         super(Message.Type.OPTIONS);
     }
 
-    public Message.Response execute(QueryState state)
+    public Observable<Response> execute(QueryState state)
     {
         List<String> cqlVersions = new ArrayList<String>();
         cqlVersions.add(QueryProcessor.CQL_VERSION.toString());
@@ -71,7 +71,7 @@ public class OptionsMessage extends Message.Request
         supported.put(StartupMessage.CQL_VERSION, cqlVersions);
         supported.put(StartupMessage.COMPRESSION, compressions);
 
-        return new SupportedMessage(supported);
+        return Observable.just(new SupportedMessage(supported));
     }
 
     @Override

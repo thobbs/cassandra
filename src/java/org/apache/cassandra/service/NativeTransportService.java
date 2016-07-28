@@ -27,15 +27,16 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.epoll.Epoll;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.Future;
+import net.openhft.affinity.AffinitySupport;
+import org.apache.cassandra.concurrent.NettyRxScheduler;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.metrics.ClientMetrics;
-import org.apache.cassandra.transport.RequestThreadPoolExecutor;
 import org.apache.cassandra.transport.Server;
 
 /**
@@ -43,14 +44,15 @@ import org.apache.cassandra.transport.Server;
  */
 public class NativeTransportService
 {
-
     private static final Logger logger = LoggerFactory.getLogger(NativeTransportService.class);
 
     private Collection<Server> servers = Collections.emptyList();
 
+    private static Integer pIO = Integer.valueOf(System.getProperty("io.netty.ratioIO", "50"));
+    private static Boolean affinity = Boolean.valueOf(System.getProperty("io.netty.affinity","false"));
+
     private boolean initialized = false;
     private EventLoopGroup workerGroup;
-    private EventExecutor eventExecutorGroup;
 
     /**
      * Creates netty thread pools and event loops.
@@ -61,8 +63,6 @@ public class NativeTransportService
         if (initialized)
             return;
 
-        // prepare netty resources
-        eventExecutorGroup = new RequestThreadPoolExecutor();
 
         if (useEpoll())
         {
@@ -80,7 +80,6 @@ public class NativeTransportService
         InetAddress nativeAddr = DatabaseDescriptor.getRpcAddress();
 
         org.apache.cassandra.transport.Server.Builder builder = new org.apache.cassandra.transport.Server.Builder()
-                                                                .withEventExecutor(eventExecutorGroup)
                                                                 .withEventLoopGroup(workerGroup)
                                                                 .withHost(nativeAddr);
 
@@ -125,6 +124,38 @@ public class NativeTransportService
     public void start()
     {
         initialize();
+
+        int nettyThreads = Integer.valueOf(System.getProperty("io.netty.eventLoopThreads", "2"));
+
+        for (int i = 0; i < nettyThreads; i++)
+        {
+            final int cpuId = i;
+            EventLoop loop = workerGroup.next();
+
+            loop.schedule(() -> {
+                NettyRxScheduler.instance(loop);
+
+                if (affinity)
+                {
+                    logger.info("Locking {} netty thread to {}", cpuId, Thread.currentThread().getName());
+                    AffinitySupport.setAffinity(1L << cpuId);
+                }
+                {
+                    logger.info("Allocated netty thread to {}", Thread.currentThread().getName());
+                }
+            }, 0, TimeUnit.SECONDS);
+        }
+
+        logger.info("Netting ioWork ration to {}", pIO);
+        if (useEpoll())
+        {
+            ((EpollEventLoopGroup)workerGroup).setIoRatio(pIO);
+        }
+        else
+        {
+            ((NioEventLoopGroup)workerGroup).setIoRatio(pIO);
+        }
+
         servers.forEach(Server::start);
     }
 
@@ -146,9 +177,6 @@ public class NativeTransportService
 
         // shutdown executors used by netty for native transport server
         workerGroup.shutdownGracefully(3, 5, TimeUnit.SECONDS).awaitUninterruptibly();
-
-        // shutdownGracefully not implemented yet in RequestThreadPoolExecutor
-        eventExecutorGroup.shutdown();
     }
 
     /**
@@ -174,12 +202,6 @@ public class NativeTransportService
     EventLoopGroup getWorkerGroup()
     {
         return workerGroup;
-    }
-
-    @VisibleForTesting
-    EventExecutor getEventExecutor()
-    {
-        return eventExecutorGroup;
     }
 
     @VisibleForTesting

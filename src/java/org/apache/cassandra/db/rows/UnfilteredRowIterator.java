@@ -17,10 +17,8 @@
  */
 package org.apache.cassandra.db.rows;
 
-import java.util.Iterator;
-
-import org.apache.cassandra.config.CFMetaData;
-import org.apache.cassandra.db.*;
+import org.apache.cassandra.db.AsObservable;
+import org.apache.cassandra.db.DeletionTime;
 
 /**
  * An iterator over the rows of a given partition that also includes deletion informations.
@@ -46,7 +44,7 @@ import org.apache.cassandra.db.*;
  * the returned objects for longer than the iteration, it must make a copy of
  * it explicitly.
  */
-public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>
+public interface UnfilteredRowIterator extends BaseRowIterator<Unfiltered>, AsObservable<Unfiltered>
 {
     /**
      * The partition level deletion for the partition this iterate over.

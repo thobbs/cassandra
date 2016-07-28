@@ -17,16 +17,18 @@
  */
 package org.apache.cassandra.db.partitions;
 
-import java.util.*;
 import java.security.MessageDigest;
+import java.util.List;
 
+import io.reactivex.Observable;
 import org.apache.cassandra.db.EmptyIterators;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.RowIterators;
 import org.apache.cassandra.db.transform.MorePartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.utils.AbstractIterator;
 
-import org.apache.cassandra.db.SinglePartitionReadCommand;
-import org.apache.cassandra.db.rows.*;
 
 public abstract class PartitionIterators
 {
@@ -142,6 +144,11 @@ public abstract class PartitionIterators
 
             returned = true;
             return iterator;
+        }
+
+        public Observable<RowIterator> asObservable()
+        {
+            return Observable.just(iterator);
         }
 
         public void close()
