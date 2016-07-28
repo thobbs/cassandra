@@ -29,10 +29,14 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.*;
 import org.apache.cassandra.thrift.ThriftValidation;
 import org.apache.cassandra.transport.Event;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** A <code>CREATE KEYSPACE</code> statement parsed from a CQL query. */
 public class CreateKeyspaceStatement extends SchemaAlteringStatement
 {
+    private static final Logger logger = LoggerFactory.getLogger(CreateKeyspaceStatement.class);
+
     private static final Pattern PATTERN_WORD_CHARS = Pattern.compile("\\w+");
 
     private final String name;
@@ -102,6 +106,7 @@ public class CreateKeyspaceStatement extends SchemaAlteringStatement
         try
         {
             MigrationManager.announceNewKeyspace(ksm, isLocalOnly);
+            logger.debug("Completed announcing new keyspace '{}' and merging local schema changes", name);
             return new Event.SchemaChange(Event.SchemaChange.Change.CREATED, keyspace());
         }
         catch (AlreadyExistsException e)

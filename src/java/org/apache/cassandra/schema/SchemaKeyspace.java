@@ -1366,15 +1366,30 @@ public final class SchemaKeyspace
 
         // update everything altered
         for (MapDifference.ValueDifference<UserType> diff : typesDiff.entriesDiffering().values())
+        {
+            logger.debug("Detected altered type: {}", diff.rightValue());
             Schema.instance.updateType(diff.rightValue());
+        }
         for (MapDifference.ValueDifference<CFMetaData> diff : tablesDiff.entriesDiffering().values())
+        {
+            logger.debug("Detected altered table: {}", diff.rightValue());
             Schema.instance.updateTable(diff.rightValue());
+        }
         for (MapDifference.ValueDifference<ViewDefinition> diff : viewsDiff.entriesDiffering().values())
+        {
+            logger.debug("Detected altered view: {}", diff.rightValue());
             Schema.instance.updateView(diff.rightValue());
+        }
         for (MapDifference.ValueDifference<UDFunction> diff : udfsDiff.entriesDiffering().values())
+        {
+            logger.debug("Detected altered function: {}", diff.rightValue());
             Schema.instance.updateFunction(diff.rightValue());
+        }
         for (MapDifference.ValueDifference<UDAggregate> diff : udasDiff.entriesDiffering().values())
+        {
+            logger.debug("Detected altered aggregate function: {}", diff.rightValue());
             Schema.instance.updateAggregate(diff.rightValue());
+        }
     }
 
     /*

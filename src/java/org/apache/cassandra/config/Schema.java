@@ -598,6 +598,7 @@ public class Schema
     public void addKeyspace(KeyspaceMetadata ksm)
     {
         assert getKSMetaData(ksm.name) == null;
+        logger.debug("Adding keyspace {}", ksm.name);
         load(ksm);
 
         Keyspace.open(ksm.name);
@@ -606,12 +607,14 @@ public class Schema
 
     public void updateKeyspace(String ksName, KeyspaceParams newParams)
     {
+        logger.debug("Updating keyspace {}", ksName);
         KeyspaceMetadata ksm = update(ksName, ks -> ks.withSwapped(newParams));
         MigrationManager.instance.notifyUpdateKeyspace(ksm);
     }
 
     public void dropKeyspace(String ksName)
     {
+        logger.debug("Dropping keyspace {}", ksName);
         KeyspaceMetadata ksm = Schema.instance.getKSMetaData(ksName);
         String snapshotName = Keyspace.getTimestampedSnapshotNameWithPrefix(ksName, ColumnFamilyStore.SNAPSHOT_DROP_PREFIX);
 
@@ -648,6 +651,7 @@ public class Schema
 
     public void addTable(CFMetaData cfm)
     {
+        logger.debug("Adding table {}.{}", cfm.ksName, cfm.cfName);
         assert getCFMetaData(cfm.ksName, cfm.cfName) == null;
 
         // Make sure the keyspace is initialized
@@ -663,6 +667,7 @@ public class Schema
 
     public void updateTable(CFMetaData table)
     {
+        logger.debug("Updating table {}.{}", table.ksName, table.cfName);
         CFMetaData current = getCFMetaData(table.ksName, table.cfName);
         assert current != null;
         boolean changeAffectsStatements = current.apply(table);
@@ -674,6 +679,7 @@ public class Schema
 
     public void dropTable(String ksName, String tableName)
     {
+        logger.debug("Dropping table {}.{}", ksName, tableName);
         KeyspaceMetadata oldKsm = getKSMetaData(ksName);
         assert oldKsm != null;
         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(tableName);
@@ -702,6 +708,7 @@ public class Schema
     public void addView(ViewDefinition view)
     {
         assert getCFMetaData(view.ksName, view.viewName) == null;
+        logger.debug("Adding view {}.{}", view.ksName, view.viewName);
 
         Keyspace keyspace = Keyspace.open(view.ksName);
 
@@ -718,6 +725,7 @@ public class Schema
 
     public void updateView(ViewDefinition view)
     {
+        logger.debug("Updating view {}.{}", view.ksName, view.viewName);
         ViewDefinition current = getKSMetaData(view.ksName).views.get(view.viewName).get();
         boolean changeAffectsStatements = current.metadata.apply(view.metadata);
 
@@ -729,6 +737,7 @@ public class Schema
 
     public void dropView(String ksName, String viewName)
     {
+        logger.debug("Dropping view {}.{}", ksName, viewName);
         KeyspaceMetadata oldKsm = getKSMetaData(ksName);
         assert oldKsm != null;
         ColumnFamilyStore cfs = Keyspace.open(ksName).getColumnFamilyStore(viewName);
@@ -757,54 +766,63 @@ public class Schema
 
     public void addType(UserType ut)
     {
+        logger.debug("Adding UDT", ut);
         update(ut.keyspace, ks -> ks.withSwapped(ks.types.with(ut)));
         MigrationManager.instance.notifyCreateUserType(ut);
     }
 
     public void updateType(UserType ut)
     {
+        logger.debug("Updating UDT", ut);
         update(ut.keyspace, ks -> ks.withSwapped(ks.types.without(ut.name).with(ut)));
         MigrationManager.instance.notifyUpdateUserType(ut);
     }
 
     public void dropType(UserType ut)
     {
+        logger.debug("Dropping UDT", ut);
         update(ut.keyspace, ks -> ks.withSwapped(ks.types.without(ut.name)));
         MigrationManager.instance.notifyDropUserType(ut);
     }
 
     public void addFunction(UDFunction udf)
     {
+        logger.debug("Adding function {}", udf);
         update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.with(udf)));
         MigrationManager.instance.notifyCreateFunction(udf);
     }
 
     public void updateFunction(UDFunction udf)
     {
+        logger.debug("Updating function {}", udf);
         update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.without(udf.name(), udf.argTypes()).with(udf)));
         MigrationManager.instance.notifyUpdateFunction(udf);
     }
 
     public void dropFunction(UDFunction udf)
     {
+        logger.debug("Dropping function {}", udf);
         update(udf.name().keyspace, ks -> ks.withSwapped(ks.functions.without(udf.name(), udf.argTypes())));
         MigrationManager.instance.notifyDropFunction(udf);
     }
 
     public void addAggregate(UDAggregate uda)
     {
+        logger.debug("Adding aggregate function {}", uda);
         update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.with(uda)));
         MigrationManager.instance.notifyCreateAggregate(uda);
     }
 
     public void updateAggregate(UDAggregate uda)
     {
+        logger.debug("Updating aggregate function {}", uda);
         update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.without(uda.name(), uda.argTypes()).with(uda)));
         MigrationManager.instance.notifyUpdateAggregate(uda);
     }
 
     public void dropAggregate(UDAggregate uda)
     {
+        logger.debug("Dropping aggregate function {}", uda);
         update(uda.name().keyspace, ks -> ks.withSwapped(ks.functions.without(uda.name(), uda.argTypes())));
         MigrationManager.instance.notifyDropAggregate(uda);
     }
