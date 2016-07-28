@@ -278,7 +278,11 @@ public final class SchemaKeyspace
     static void flush()
     {
         if (!Boolean.getBoolean("cassandra.unsafesystem"))
+        {
+            logger.debug("Forcing flush of system schema tables");
             ALL.forEach(table -> FBUtilities.waitOnFuture(getSchemaCFS(table).forceFlush()));
+            logger.debug("Forced flush of system schema tables complete");
+        }
     }
 
     /**
@@ -1260,7 +1264,9 @@ public final class SchemaKeyspace
      */
     public static synchronized void mergeSchemaAndAnnounceVersion(Collection<Mutation> mutations) throws ConfigurationException
     {
+        logger.debug("Merging mutations into schema");
         mergeSchema(mutations);
+        logger.debug("Announcing new schema version");
         Schema.instance.updateVersionAndAnnounce();
     }
 
@@ -1289,6 +1295,7 @@ public final class SchemaKeyspace
         // dropped keyspaces
         for (KeyspaceMetadata keyspace : keyspacesDiff.entriesOnlyOnLeft().values())
         {
+            logger.debug("Detected dropped keyspace: {}", keyspace);
             keyspace.functions.udas().forEach(Schema.instance::dropAggregate);
             keyspace.functions.udfs().forEach(Schema.instance::dropFunction);
             keyspace.views.forEach(v -> Schema.instance.dropView(v.ksName, v.viewName));
@@ -1300,6 +1307,7 @@ public final class SchemaKeyspace
         // new keyspaces
         for (KeyspaceMetadata keyspace : keyspacesDiff.entriesOnlyOnRight().values())
         {
+            logger.debug("Detected newly added keyspace: {}", keyspace);
             Schema.instance.addKeyspace(KeyspaceMetadata.create(keyspace.name, keyspace.params));
             keyspace.types.forEach(Schema.instance::addType);
             keyspace.tables.forEach(Schema.instance::addTable);
@@ -1310,7 +1318,10 @@ public final class SchemaKeyspace
 
         // updated keyspaces
         for (Map.Entry<String, MapDifference.ValueDifference<KeyspaceMetadata>> diff : keyspacesDiff.entriesDiffering().entrySet())
+        {
+            logger.debug("Detected updated keyspace: {}", diff.getValue().rightValue());
             updateKeyspace(diff.getKey(), diff.getValue().leftValue(), diff.getValue().rightValue());
+        }
     }
 
     private static void updateKeyspace(String keyspaceName, KeyspaceMetadata keyspaceBefore, KeyspaceMetadata keyspaceAfter)
@@ -1334,7 +1345,10 @@ public final class SchemaKeyspace
 
         // update keyspace params, if changed
         if (!keyspaceBefore.params.equals(keyspaceAfter.params))
+        {
+            logger.debug("Detected updated keyspace params for {}", keyspaceName);
             Schema.instance.updateKeyspace(keyspaceName, keyspaceAfter.params);
+        }
 
         // drop everything removed
         udasDiff.entriesOnlyOnLeft().values().forEach(Schema.instance::dropAggregate);

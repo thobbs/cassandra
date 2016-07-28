@@ -566,6 +566,7 @@ public class Schema
     {
         version = SchemaKeyspace.calculateSchemaDigest();
         SystemKeyspace.updateSchemaVersion(version);
+        logger.debug("New schema version is {}", version);
     }
 
     /*
@@ -574,6 +575,7 @@ public class Schema
     public void updateVersionAndAnnounce()
     {
         updateVersion();
+        logger.debug("Passively announcing new schema version of {}", version);
         MigrationManager.passiveAnnounce(version);
     }
 

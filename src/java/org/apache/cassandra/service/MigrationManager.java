@@ -539,7 +539,10 @@ public class MigrationManager
             if (!endpoint.equals(FBUtilities.getBroadcastAddress()) &&
                     MessagingService.instance().knowsVersion(endpoint) &&
                     MessagingService.instance().getRawVersion(endpoint) == MessagingService.current_version)
+            {
+                logger.debug("Pushing schema mutation to {}", endpoint);
                 pushSchemaMutation(endpoint, schema);
+            }
         }
 
         return f;
