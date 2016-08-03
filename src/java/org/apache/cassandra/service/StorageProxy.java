@@ -56,6 +56,8 @@ import com.google.common.collect.Multimap;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.internal.subscriptions.EmptySubscription;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1757,44 +1759,43 @@ public class StorageProxy implements StorageProxyMBean
             executor.executeAsync();
         }
 
-        void maybeTryAdditionalReplicas()
+        Disposable maybeTryAdditionalReplicas(NettyRxScheduler scheduler)
         {
-            executor.maybeTryAdditionalReplicas();
+            return executor.maybeTryAdditionalReplicas(scheduler);
         }
 
-        Observable<PartitionIterator> getPartitionIterator(Scheduler scheduler)
+        Observable<PartitionIterator> getPartitionIterator(NettyRxScheduler scheduler)
         {
-            final PartitionIterator[] partitionIterator = new PartitionIterator[1];
-
+                final Disposable speculativeReads = maybeTryAdditionalReplicas(scheduler);
 
                 //Create observable based on callback
                 Observable<PartitionIterator> obs = Observable.create(subscriber -> {
                     executor.handler.onSignaledAction(scheduler, () -> {
+                        speculativeReads.dispose();
                         try
                         {
-                            partitionIterator[0] = executor.handler.get();
-                            subscriber.onSubscribe(new Subscription()
+                            PartitionIterator partitionIterator = null;
+                            try
                             {
-                                public void request(long l)
-                                {
-
-                                }
-
-                                public void cancel()
-                                {
-
-                                }
-                            });
-                            subscriber.onNext(partitionIterator[0]);
-                            subscriber.onComplete();
+                                partitionIterator = executor.handler.get();
+                                subscriber.onSubscribe(EmptySubscription.INSTANCE);
+                                subscriber.onNext(partitionIterator);
+                                subscriber.onComplete();
+                            }
+                            finally
+                            {
+                                if (partitionIterator != null)
+                                    partitionIterator.close();
+                            }
                         }
                         catch (DigestMismatchException e)
                         {
                             retryOnDigestMismatch(scheduler, () -> {
+                                PartitionIterator partitionIterator = null;
                                 try
                                 {
-                                    partitionIterator[0] = repairHandler.get();
-                                    subscriber.onNext(partitionIterator[0]);
+                                    partitionIterator = repairHandler.get();
+                                    subscriber.onNext(partitionIterator);
                                 }
                                 catch (DigestMismatchException e1)
                                 {
@@ -1803,23 +1804,16 @@ public class StorageProxy implements StorageProxyMBean
                                 finally
                                 {
                                     subscriber.onComplete();
+                                    if (partitionIterator != null)
+                                        partitionIterator.close();
                                 }
                             });
-                        }
-                        finally
-                        {
-                            if (partitionIterator[0] != null)
-                                partitionIterator[0].close();
                         }
                     });
 
                 });
 
                 doInitialQueries();
-
-                //FIXME: Needs to become async
-                //maybeTryAdditionalReplicas();
-
 
                 return obs;
         }

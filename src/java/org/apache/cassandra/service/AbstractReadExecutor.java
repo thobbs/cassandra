@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.collect.Iterables;
+import io.reactivex.disposables.Disposable;
+import io.reactivex.internal.disposables.EmptyDisposable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -130,7 +132,7 @@ public abstract class AbstractReadExecutor
      * Perform additional requests if it looks like the original will time out.  May block while it waits
      * to see if the original requests are answered first.
      */
-    public abstract void maybeTryAdditionalReplicas();
+    public abstract Disposable maybeTryAdditionalReplicas(NettyRxScheduler scheduler);
 
     /**
      * Get the replicas involved in the [finished] request.
@@ -224,9 +226,10 @@ public abstract class AbstractReadExecutor
                 makeDigestRequests(targetReplicas.subList(1, targetReplicas.size()));
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Disposable maybeTryAdditionalReplicas(NettyRxScheduler scheduler)
         {
             // no-op
+            return EmptyDisposable.INSTANCE;
         }
 
         public Collection<InetAddress> getContactedReplicas()
@@ -275,14 +278,13 @@ public abstract class AbstractReadExecutor
             }
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Disposable maybeTryAdditionalReplicas(NettyRxScheduler scheduler)
         {
             // no latency information, or we're overloaded
             if (cfs.sampleLatencyNanos > TimeUnit.MILLISECONDS.toNanos(command.getTimeout()))
-                return;
+                return EmptyDisposable.INSTANCE;
 
-            if (!handler.await(cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS))
-            {
+            return scheduler.scheduleDirect(() -> {
                 // Could be waiting on the data, or on enough digests.
                 ReadCommand retryCommand = command;
                 if (handler.resolver.isDataPresent())
@@ -297,7 +299,7 @@ public abstract class AbstractReadExecutor
                 speculated = true;
 
                 cfs.metric.speculativeRetries.inc();
-            }
+            }, cfs.sampleLatencyNanos, TimeUnit.NANOSECONDS);
         }
 
         public Collection<InetAddress> getContactedReplicas()
@@ -322,9 +324,10 @@ public abstract class AbstractReadExecutor
             this.cfs = cfs;
         }
 
-        public void maybeTryAdditionalReplicas()
+        public Disposable maybeTryAdditionalReplicas(NettyRxScheduler scheduler)
         {
             // no-op
+            return EmptyDisposable.INSTANCE;
         }
 
         public Collection<InetAddress> getContactedReplicas()
