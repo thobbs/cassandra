@@ -577,7 +577,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (!(ex instanceof WriteTimeoutException))
                         logger.error("Failed to apply paxos commit locally : {}", ex);
-                    responseHandler.onFailure(FBUtilities.getBroadcastAddress());
+                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
             }
 
@@ -642,7 +642,7 @@ public class StorageProxy implements StorageProxyMBean
                     writeMetricsMap.get(consistency_level).failures.mark();
                     WriteFailureException fe = (WriteFailureException)ex;
                     Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
-                                  fe.received, fe.blockFor, fe.failures);
+                                  fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
                 }
                 else
                 {
@@ -1023,7 +1023,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (OverloadedException | WriteTimeoutException e)
             {
-                wrapper.handler.onFailure(FBUtilities.getBroadcastAddress());
+                wrapper.handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
             }
         }
     }
@@ -1374,7 +1374,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (!(ex instanceof WriteTimeoutException))
                         logger.error("Failed to apply mutation locally : {}", ex);
-                    handler.onFailure(FBUtilities.getBroadcastAddress());
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
             }
 
@@ -1588,7 +1588,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (WriteFailureException e)
             {
-                throw new ReadFailureException(consistencyLevel, e.received, e.failures, e.blockFor, false);
+                throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
             }
 
             result = fetchRows(group.commands, consistencyForCommitOrFetch);
@@ -1842,18 +1842,23 @@ public class StorageProxy implements StorageProxyMBean
                 else
                 {
                     MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
-                    handler.onFailure(FBUtilities.getBroadcastAddress());
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
 
                 MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
             }
             catch (Throwable t)
             {
-                handler.onFailure(FBUtilities.getBroadcastAddress());
                 if (t instanceof TombstoneOverwhelmingException)
+                {
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
                     logger.error(t.getMessage());
+                }
                 else
+                {
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                     throw t;
+                }
             }
         }
     }
