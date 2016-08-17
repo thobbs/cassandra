@@ -72,8 +72,7 @@ public class CompactionController implements AutoCloseable
 
     public CompactionController(ColumnFamilyStore cfs, Set<SSTableReader> compacting, int gcBefore)
     {
-        this(cfs, compacting, gcBefore,
-             CompactionManager.instance.getRateLimiter(),
+        this(cfs, compacting, gcBefore, null,
              cfs.getCompactionStrategyManager().getCompactionParams().tombstoneOption());
     }
 
@@ -138,7 +137,7 @@ public class CompactionController implements AutoCloseable
      * works something like this;
      * 1. find "global" minTimestamp of overlapping sstables, compacting sstables and memtables containing any non-expired data
      * 2. build a list of fully expired candidates
-     * 3. check if the candidates to be dropped actually can be dropped (maxTimestamp < global minTimestamp)
+     * 3. check if the candidates to be dropped actually can be dropped {@code (maxTimestamp < global minTimestamp)}
      *    - if not droppable, remove from candidates
      * 4. return candidates.
      *

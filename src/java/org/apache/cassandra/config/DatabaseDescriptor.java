@@ -194,7 +194,7 @@ public class DatabaseDescriptor
     }
 
     @VisibleForTesting
-    static void applyAddressConfig(Config config) throws ConfigurationException
+    public static void applyAddressConfig(Config config) throws ConfigurationException
     {
         listenAddress = null;
         rpcAddress = null;
@@ -286,7 +286,6 @@ public class DatabaseDescriptor
             if (rpcAddress.isAnyLocalAddress())
                 throw new ConfigurationException("If rpc_address is set to a wildcard address (" + config.rpc_address + "), then " +
                                                  "you must set broadcast_rpc_address to a value other than " + config.rpc_address, false);
-            broadcastRpcAddress = rpcAddress;
         }
     }
 
@@ -1199,11 +1198,6 @@ public class DatabaseDescriptor
         return conf.cluster_name;
     }
 
-    public static int getMaxStreamingRetries()
-    {
-        return conf.max_streaming_retries;
-    }
-
     public static int getStoragePort()
     {
         return Integer.parseInt(System.getProperty("cassandra.storage_port", conf.storage_port.toString()));
@@ -1325,6 +1319,11 @@ public class DatabaseDescriptor
             default:
                 return getRpcTimeout();
         }
+    }
+
+    public static long getSlowQueryTimeout()
+    {
+        return conf.slow_query_log_timeout_in_ms;
     }
 
     /**
@@ -1551,6 +1550,9 @@ public class DatabaseDescriptor
         broadcastRpcAddress = broadcastRPCAddr;
     }
 
+    /**
+     * May be null, please use {@link FBUtilities#getBroadcastRpcAddress()} instead.
+     */
     public static InetAddress getBroadcastRpcAddress()
     {
         return broadcastRpcAddress;

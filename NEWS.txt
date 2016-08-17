@@ -13,12 +13,14 @@ restore snapshots created with the previous major version using the
 'sstableloader' tool. You can upgrade the file format of your snapshots
 using the provided 'sstableupgrade' tool.
 
-
 3.10
 ====
 
 New features
 ------------
+   - A slow query log has been added: slow queries will be logged at DEBUG level.
+     For more details refer to CASSANDRA-12403 and slow_query_log_timeout_in_ms
+     in cassandra.yaml.
    - Support for GROUP BY queries has been added.
    - A new compaction-stress tool has been added to test the throughput of compaction
      for any cassandra-stress user schema.  see compaction-stress help for how to use.
@@ -59,12 +61,27 @@ New features
      and org.apache.cassandra.metrics:type=Client,name=AuthFailure respectively.
    - Add support to "unset" JSON fields in prepared statements by specifying DEFAULT UNSET.
      See CASSANDRA-11424 for details
+   - Allow TTL with null value on insert and update. It will be treated as equivalent to inserting a 0.
 
 Upgrading
 ---------
+    - Request timeouts in cassandra.yaml (read_request_timeout_in_ms, etc) now apply to the
+      "full" request time on the coordinator.  Previously, they only covered the time from
+      when the coordinator sent a message to a replica until the time that the replica
+      responded.  Additionally, the previous behavior was to reset the timeout when performing
+      a read repair, making a second read to fix a short read, and when subranges were read
+      as part of a range scan or secondary index query.  In 3.10 and higher, the timeout
+      is no longer reset for these "subqueries".  The entire request must complete within
+      the specified timeout.  As a consequence, your timeouts may need to be adjusted
+      to account for this.  See CASSANDRA-12256 for more details.
     - Logs written to stdout are now consistent with logs written to files.
       Time is now local (it was UTC on the console and local in files). Date, thread, file
       and line info where added to stdout. (see CASSANDRA-12004)
+    - The 'clientutil' jar, which has been somewhat broken on the 3.x branch, is not longer provided.
+      The features provided by that jar are provided by any good java driver and we advise relying on drivers rather on
+      that jar, but if you need that jar for backward compatiblity until you do so, you should use the version provided
+      on previous Cassandra branch, like the 3.0 branch (by design, the functionality provided by that jar are stable
+      accross versions so using the 3.0 jar for a client connecting to 3.x should work without issues).
 
 3.8
 ===
@@ -97,12 +114,18 @@ New features
 
 Upgrading
 ---------
-    - The name "json" and "distinct" are not valid anymore a user-defined function
-      names (they are still valid as column name however). In the unlikely case where
-      you had defined functions with such names, you will need to recreate
-      those under a different name, change your code to use the new names and
-      drop the old versions, and this _before_ upgrade (see CASSANDRA-10783 for more
-      details).
+   - The ReversedType behaviour has been corrected for clustering columns of
+     BYTES type containing empty value. Scrub should be run on the existing
+     SSTables containing a descending clustering column of BYTES type to correct
+     their ordering. See CASSANDRA-12127 for more details.
+   - Ec2MultiRegionSnitch will no longer automatically set broadcast_rpc_address
+     to the public instance IP if this property is defined on cassandra.yaml.
+   - The name "json" and "distinct" are not valid anymore a user-defined function
+     names (they are still valid as column name however). In the unlikely case where
+     you had defined functions with such names, you will need to recreate
+     those under a different name, change your code to use the new names and
+     drop the old versions, and this _before_ upgrade (see CASSANDRA-10783 for more
+     details).
 
 Deprecation
 -----------

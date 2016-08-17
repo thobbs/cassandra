@@ -22,7 +22,7 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 import com.google.common.util.concurrent.RateLimiter;
@@ -43,31 +43,31 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
  */
 final class HintsDispatcher implements AutoCloseable
 {
-    private enum Action { CONTINUE, ABORT, RETRY }
+    private enum Action { CONTINUE, ABORT }
 
     private final HintsReader reader;
     private final UUID hostId;
     private final InetAddress address;
     private final int messagingVersion;
-    private final AtomicBoolean isPaused;
+    private final BooleanSupplier abortRequested;
 
-    private long currentPageOffset;
+    private InputPosition currentPagePosition;
 
-    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, AtomicBoolean isPaused)
+    private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, BooleanSupplier abortRequested)
     {
-        currentPageOffset = 0L;
+        currentPagePosition = null;
 
         this.reader = reader;
         this.hostId = hostId;
         this.address = address;
         this.messagingVersion = messagingVersion;
-        this.isPaused = isPaused;
+        this.abortRequested = abortRequested;
     }
 
-    static HintsDispatcher create(File file, RateLimiter rateLimiter, InetAddress address, UUID hostId, AtomicBoolean isPaused)
+    static HintsDispatcher create(File file, RateLimiter rateLimiter, InetAddress address, UUID hostId, BooleanSupplier abortRequested)
     {
         int messagingVersion = MessagingService.instance().getVersion(address);
-        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, isPaused);
+        return new HintsDispatcher(HintsReader.open(file, rateLimiter), hostId, address, messagingVersion, abortRequested);
     }
 
     public void close()
@@ -75,10 +75,9 @@ final class HintsDispatcher implements AutoCloseable
         reader.close();
     }
 
-    void seek(long bytes)
+    void seek(InputPosition position)
     {
-        reader.seek(bytes);
-        currentPageOffset = 0L;
+        reader.seek(position);
     }
 
     /**
@@ -88,7 +87,7 @@ final class HintsDispatcher implements AutoCloseable
     {
         for (HintsReader.Page page : reader)
         {
-            currentPageOffset = page.offset;
+            currentPagePosition = page.position;
             if (dispatch(page) != Action.CONTINUE)
                 return false;
         }
@@ -99,28 +98,16 @@ final class HintsDispatcher implements AutoCloseable
     /**
      * @return offset of the first non-delivered page
      */
-    long dispatchOffset()
+    InputPosition dispatchPosition()
     {
-        return currentPageOffset;
+        return currentPagePosition;
     }
 
-    private boolean isHostAlive()
-    {
-        return FailureDetector.instance.isAlive(address);
-    }
-
-    private boolean isPaused()
-    {
-        return isPaused.get();
-    }
 
     // retry in case of a timeout; stop in case of a failure, host going down, or delivery paused
     private Action dispatch(HintsReader.Page page)
     {
-        Action action = sendHintsAndAwait(page);
-        return action == Action.RETRY
-             ? dispatch(page)
-             : action;
+        return sendHintsAndAwait(page);
     }
 
     private Action sendHintsAndAwait(HintsReader.Page page)
@@ -143,7 +130,7 @@ final class HintsDispatcher implements AutoCloseable
 
         for (Callback cb : callbacks)
             if (cb.await() != Callback.Outcome.SUCCESS)
-                return Action.RETRY;
+                return Action.ABORT;
 
         return Action.CONTINUE;
     }
@@ -156,7 +143,7 @@ final class HintsDispatcher implements AutoCloseable
     {
         while (hints.hasNext())
         {
-            if (!isHostAlive() || isPaused())
+            if (abortRequested.getAsBoolean())
                 return Action.ABORT;
             callbacks.add(sendFunction.apply(hints.next()));
         }

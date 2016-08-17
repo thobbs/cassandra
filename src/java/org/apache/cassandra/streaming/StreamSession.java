@@ -102,10 +102,8 @@ import org.apache.cassandra.utils.concurrent.Refs;
  *       complete (received()). When all files for the StreamReceiveTask have been received, the sstables
  *       are added to the CFS (and 2ndary index are built, StreamReceiveTask.complete()) and the task
  *       is marked complete (taskCompleted())
- *   (b) If during the streaming of a particular file an I/O error occurs on the receiving end of a stream
- *       (FileMessage.deserialize), the node will retry the file (up to DatabaseDescriptor.getMaxStreamingRetries())
- *       by sending a RetryMessage to the sender. On receiving a RetryMessage, the sender simply issue a new
- *       FileMessage for that file.
+ *   (b) If during the streaming of a particular file an error occurs on the receiving end of a stream
+ *       (FileMessage.deserialize), the node will send a SessionFailedMessage to the sender and close the stream session.
  *   (c) When all transfer and receive tasks for a session are complete, the move to the Completion phase
  *       (maybeCompleted()).
  *
@@ -144,9 +142,9 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     /* can be null when session is created in remote */
     private final StreamConnectionFactory factory;
 
-    public final ConnectionHandler handler;
+    public final Map<String, Set<Range<Token>>> transferredRangesPerKeyspace = new HashMap<>();
 
-    private int retries;
+    public final ConnectionHandler handler;
 
     private AtomicBoolean isAborted = new AtomicBoolean(false);
     private final boolean keepSSTableLevel;
@@ -293,6 +291,13 @@ public class StreamSession implements IEndpointStateChangeSubscriber
         try
         {
             addTransferFiles(sections);
+            Set<Range<Token>> toBeUpdated = transferredRangesPerKeyspace.get(keyspace);
+            if (toBeUpdated == null)
+            {
+                toBeUpdated = new HashSet<>();
+            }
+            toBeUpdated.addAll(ranges);
+            transferredRangesPerKeyspace.put(keyspace, toBeUpdated);
         }
         finally
         {
@@ -490,11 +495,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
                 received(received.cfId, received.sequenceNumber);
                 break;
 
-            case RETRY:
-                RetryMessage retry = (RetryMessage) message;
-                retry(retry.cfId, retry.sequenceNumber);
-                break;
-
             case COMPLETE:
                 complete();
                 break;
@@ -622,18 +622,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     }
 
     /**
-     * Call back on receiving {@code StreamMessage.Type.RETRY} message.
-     *
-     * @param cfId ColumnFamily ID
-     * @param sequenceNumber Sequence number to indicate which file to stream again
-     */
-    public void retry(UUID cfId, int sequenceNumber)
-    {
-        OutgoingFileMessage message = transfers.get(cfId).createMessageForRetry(sequenceNumber);
-        handler.sendMessage(message);
-    }
-
-    /**
      * Check if session is completed on receiving {@code StreamMessage.Type.COMPLETE} message.
      */
     public synchronized void complete()
@@ -661,17 +649,6 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     {
         logger.error("[Stream #{}] Remote peer {} failed stream session.", planId(), peer.getHostAddress());
         closeSession(State.FAILED);
-    }
-
-    public void doRetry(FileMessageHeader header, Throwable e)
-    {
-        logger.warn("[Stream #{}] Retrying for following error", planId(), e);
-        // retry
-        retries++;
-        if (retries > DatabaseDescriptor.getMaxStreamingRetries())
-            onError(new IOException("Too many retries for " + header, e));
-        else
-            handler.sendMessage(new RetryMessage(header.cfId, header.sequenceNumber));
     }
 
     /**

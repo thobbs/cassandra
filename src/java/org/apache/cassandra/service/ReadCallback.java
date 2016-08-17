@@ -55,7 +55,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
 
     public final ResponseResolver resolver;
     private final SimpleCondition condition = new SimpleCondition();
-    private final long start;
+    private final long queryStartNanoTime;
     final int blockfor;
     final List<InetAddress> endpoints;
     private final ReadCommand command;
@@ -73,24 +73,25 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     /**
      * Constructor when response count has to be calculated and blocked for.
      */
-    public ReadCallback(ResponseResolver resolver, ConsistencyLevel consistencyLevel, ReadCommand command, List<InetAddress> filteredEndpoints)
+    public ReadCallback(ResponseResolver resolver, ConsistencyLevel consistencyLevel, ReadCommand command, List<InetAddress> filteredEndpoints, long queryStartNanoTime)
     {
         this(resolver,
              consistencyLevel,
              consistencyLevel.blockFor(Keyspace.open(command.metadata().ksName)),
              command,
              Keyspace.open(command.metadata().ksName),
-             filteredEndpoints);
+             filteredEndpoints,
+             queryStartNanoTime);
     }
 
-    public ReadCallback(ResponseResolver resolver, ConsistencyLevel consistencyLevel, int blockfor, ReadCommand command, Keyspace keyspace, List<InetAddress> endpoints)
+    public ReadCallback(ResponseResolver resolver, ConsistencyLevel consistencyLevel, int blockfor, ReadCommand command, Keyspace keyspace, List<InetAddress> endpoints, long queryStartNanoTime)
     {
         this.command = command;
         this.keyspace = keyspace;
         this.blockfor = blockfor;
         this.consistencyLevel = consistencyLevel;
         this.resolver = resolver;
-        this.start = System.nanoTime();
+        this.queryStartNanoTime = queryStartNanoTime;
         this.endpoints = endpoints;
         this.failureReasonByEndpoint = new ConcurrentHashMap<>();
         // we don't support read repair (or rapid read protection) for range scans yet (CASSANDRA-6897)
@@ -102,7 +103,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
 
     public boolean await(long timePastStart, TimeUnit unit)
     {
-        long time = unit.toNanos(timePastStart) - (System.nanoTime() - start);
+        long time = unit.toNanos(timePastStart) - (System.nanoTime() - queryStartNanoTime);
         try
         {
             return condition.await(time, TimeUnit.NANOSECONDS);
@@ -143,7 +144,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
 
         PartitionIterator result = blockfor == 1 ? resolver.getData() : resolver.resolve();
         if (logger.isTraceEnabled())
-            logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+            logger.trace("Read: {} ms.", TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - queryStartNanoTime));
         return result;
     }
 
@@ -168,7 +169,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                 TraceState traceState = Tracing.instance.get();
                 if (traceState != null)
                     traceState.trace("Initiating read-repair");
-                StageManager.getStage(Stage.READ_REPAIR).execute(new AsyncRepairRunner(traceState));
+                StageManager.getStage(Stage.READ_REPAIR).execute(new AsyncRepairRunner(traceState, queryStartNanoTime));
             }
         }
     }
@@ -215,10 +216,12 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
     private class AsyncRepairRunner implements Runnable
     {
         private final TraceState traceState;
+        private final long queryStartNanoTime;
 
-        public AsyncRepairRunner(TraceState traceState)
+        public AsyncRepairRunner(TraceState traceState, long queryStartNanoTime)
         {
             this.traceState = traceState;
+            this.queryStartNanoTime = queryStartNanoTime;
         }
 
         public void run()
@@ -241,7 +244,7 @@ public class ReadCallback implements IAsyncCallbackWithFailure<ReadResponse>
                 
                 ReadRepairMetrics.repairedBackground.mark();
                 
-                final DataResolver repairResolver = new DataResolver(keyspace, command, consistencyLevel, endpoints.size());
+                final DataResolver repairResolver = new DataResolver(keyspace, command, consistencyLevel, endpoints.size(), queryStartNanoTime);
                 AsyncRepairCallback repairHandler = new AsyncRepairCallback(repairResolver, endpoints.size());
 
                 for (InetAddress endpoint : endpoints)

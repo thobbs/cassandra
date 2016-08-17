@@ -103,6 +103,8 @@ public class Config
 
     public boolean cross_node_timeout = false;
 
+    public volatile long slow_query_log_timeout_in_ms = 500L;
+
     public volatile Double phi_convict_threshold = 8.0;
 
     public Integer concurrent_reads = 32;
@@ -177,6 +179,10 @@ public class Config
     public volatile Integer compaction_large_partition_warning_threshold_mb = 100;
     public Integer min_free_space_per_drive_in_mb = 50;
 
+    /**
+     * @deprecated retry support removed on CASSANDRA-10992
+     */
+    @Deprecated
     public Integer max_streaming_retries = 3;
 
     public volatile Integer stream_throughput_outbound_megabits_per_sec = 200;
