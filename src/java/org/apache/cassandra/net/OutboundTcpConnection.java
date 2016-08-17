@@ -311,8 +311,8 @@ public class OutboundTcpConnection extends FastThreadLocalThread
             {
                 logger.debug("Error writing to {}", poolReference.endPoint(), e);
 
-                // if the message was important, such as a repair acknowledgement, put it back on the queue
-                // to retry after re-connecting.  See CASSANDRA-5393
+                // If we haven't retried this message yet, put it back on the queue to retry after re-connecting.
+                // See CASSANDRA-5393 and CASSANDRA-12192.
                 if (qm.shouldRetry())
                 {
                     try
