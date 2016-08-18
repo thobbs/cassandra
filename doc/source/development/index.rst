@@ -14,13 +14,12 @@
 .. See the License for the specific language governing permissions and
 .. limitations under the License.
 
-.. highlight:: none
-
 Cassandra Development
-===================
+*********************
 
 .. toctree::
    :maxdepth: 2
 
+   ide
    testing
-   codestyle
+   code_style
