@@ -23,3 +23,4 @@ Cassandra Development
    ide
    testing
    code_style
+   how_to_review
