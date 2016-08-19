@@ -22,5 +22,6 @@ Cassandra Development
 
    ide
    testing
+   patches
    code_style
    how_to_review
