@@ -25,3 +25,4 @@ Cassandra Development
    patches
    code_style
    how_to_review
+   how_to_commit
