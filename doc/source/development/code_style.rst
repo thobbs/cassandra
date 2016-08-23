@@ -28,19 +28,19 @@ Exception handling
 ------------------
 
  - Never ever write ``catch (...) {}`` or ``catch (...) { logger.error() }`` merely to satisfy Java's compile-time exception checking. Always propagate the exception up or throw ``RuntimeException`` (or, if it "can't happen," ``AssertionError``). This makes the exceptions visible to automated tests.
- - Avoid propagating up checked exceptions that no caller handles. Rethrow as ``RuntimeException`` (or ``IOError``, if that is more applicable)
+ - Avoid propagating up checked exceptions that no caller handles. Rethrow as ``RuntimeException`` (or ``IOError``, if that is more applicable).
  - Similarly, logger.warn() is often a cop-out: is this an error or not? If it is don't hide it behind a warn; if it isn't, no need for the warning.
  - If you genuinely know an exception indicates an expected condition, it's okay to ignore it BUT this must be explicitly explained in a comment.
 
 Boilerplate
 -----------
 
- - Avoid redundant ``@Override`` annotations when implementing abstract or interface methods
+ - Avoid redundant ``@Override`` annotations when implementing abstract or interface methods.
  - Do not implement equals or hashcode methods unless they are actually needed.
  - Prefer public final fields to private fields with getters. (But prefer encapsulating behavior in "real" methods to either.)
  - Prefer requiring initialization in the constructor to setters.
- - Avoid redundant ``this`` references to member fields or methods
- - Do not extract interfaces (or abstract classes) unless you actually need multiple implementations of it
+ - Avoid redundant ``this`` references to member fields or methods.
+ - Do not extract interfaces (or abstract classes) unless you actually need multiple implementations of it.
  - Always include braces for nested levels of conditionals and loops. Only avoid braces for single level.
 
 Multiline statements
@@ -66,8 +66,8 @@ Multiline statements
 Whitespace
 ----------
 
- - Please make sure to use 4 spaces instead of the tab character for all your indentation
- - Many lines in many files have a bunch of trailing whitespace... Please either clean these up in a separate patch, or leave them alone, so that reviewers now and anyone reading code history later don't have to pay attention to whitespace diffs.
+ - Please make sure to use 4 spaces instead of the tab character for all your indentation.
+ - Many lines in many files have a bunch of trailing whitespace... Please either clean these up in a separate patch, or leave them alone, so that reviewers now and anyone reading code history later doesn't have to pay attention to whitespace diffs.
 
 Imports
 -------

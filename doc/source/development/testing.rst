@@ -19,15 +19,15 @@
 Testing
 *******
 
-Creating tests is one of the most important and also most difficult parts while developing Cassandra. There are different ways how to test your code depending on what you're working on.
+Creating tests is one of the most important and also most difficult parts of developing Cassandra. There are different ways to test your code depending on what you're working on.
 
 
 Unit Testing
 ============
 
-The most simple way to test code is Cassandra is probably by writing a unit test. Cassandra is using JUnit as testing framework for this and test cases can be found in the ``test/unit`` directory. Ideally you’d be able to create a unit test for your implementation that would exclusively cover the class you created (the unit under test). Unfortunately this is not always possible and Cassandra doesn’t have a very mock friendly code base. Often you’ll find yourself in a situation where you have to make use of an embedded Cassandra instance that you’ll be able to interact with in your test. If you want to make use of CQL in your test, you can simply extend CQLTester and use some of the convenient helper methods such as in the following example.
+The most simple way to test code in Cassandra is probably by writing a unit test. Cassandra uses JUnit as a testing framework and test cases can be found in the ``test/unit`` directory. Ideally you’d be able to create a unit test for your implementation that would exclusively cover the class you created (the unit under test). Unfortunately this is not always possible and Cassandra doesn’t have a very mock friendly code base. Often you’ll find yourself in a situation where you have to make use of an embedded Cassandra instance that you’ll be able to interact with in your test. If you want to make use of CQL in your test, you can simply extend CQLTester and use some of the convenient helper methods such as in the following example.
 
-::
+.. code-block:: java
 
   @Test
   public void testBatchAndList() throws Throwable
@@ -43,12 +43,18 @@ The most simple way to test code is Cassandra is probably by writing a unit test
                 row(list(1, 2, 3)));
   }
 
-Unit tests can be run from the command line using the ``ant test`` command, ``ant test -Dtest.name=<simple_classname>`` to execute a test suite or ``test testsome -Dtest.name=<FQCN> -Dtest.methods=<testmethod1>[,testmethod2]`` for individual tests.
+Unit tests can be run from the command line using the ``ant test`` command, ``ant test -Dtest.name=<simple_classname>`` to execute a test suite or ``ant testsome -Dtest.name=<FQCN> -Dtest.methods=<testmethod1>[,testmethod2]`` for individual tests.  For example, to run all test methods in the ``org.apache.cassandra.cql3.SimpleQueryTest`` class, you would run::
+
+    ant test -Dtest.name=SimpleQueryTest
+
+To run only the ``testStaticCompactTables()`` test method from that class, you would run::
+
+    ant testsome -Dtest.name=org.apache.cassandra.cql3.SimpleQueryTest -Dtest.methods=testStaticCompactTables
 
 Long running tests
 ------------------
 
-Test that consume a significant amount of time during execution can be found in the test/long directory and executed as a regular JUnit test or standalone program. Except from the execution time, there’s nothing really special about them. However, ant will execute tests under test/long only when using the ``ant long-test`` target.
+Test that consume a significant amount of time during execution can be found in the ``test/long`` directory and executed as a regular JUnit test or standalone program. Except for the execution time, there’s nothing really special about them. However, ant will execute tests under ``test/long`` only when using the ``ant long-test`` target.
 
 DTests
 ======
@@ -59,7 +65,7 @@ Using dtests helps us to prevent regression bugs by continually executing tests 
 
 The best way to learn how to write dtests is probably by reading the introduction "`How to Write a Dtest <http://www.datastax.com/dev/blog/how-to-write-a-dtest>`_" and by looking at existing, recently updated tests in the project. New tests must follow certain `style conventions <https://github.com/riptano/cassandra-dtest/blob/master/CONTRIBUTING.md>`_ that are being checked before accepting contributions. In contrast to Cassandra, dtest issues and pull-requests are managed on github, therefor you should make sure to link any created dtests in your Cassandra ticket and also refer to the ticket number in your dtest PR.
 
-Creating a good dtest can be though and should not prevent you from submitting patches! Please ask in the corresponding JIRA ticket how such a test would make sense and if a committer is able to support you.
+Creating a good dtest can be tough, but it should not prevent you from submitting patches! Please ask in the corresponding JIRA ticket how to write a good dtest for the patch. In most cases a reviewer or committer will able to support you, and in some cases they may offer to write a dtest for you.
 
 Performance Testing
 ===================

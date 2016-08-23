@@ -77,7 +77,7 @@ New releases created as part of the `tick-tock release process <http://www.plane
 Bug Fixes
 """""""""
 
-Creating patches for bug fixes is a bit more complicated as this will depend on how many different versions of Cassandra are affected. In each case, the order for merging such changes will be ``cassandra-2.1`` -> ``cassandra-2.2`` -> ``cassandra-3.0`` -> ``cassandra-3.x`` -> ``trunk``. But don't worry, merging from 2.1 would be the worst case for bugs that effect all currently supported versions, which isn't very common. As a contributor, you're also not expected to provide a single patch for each version. What you need to do however is
+Creating patches for bug fixes is a bit more complicated as this will depend on how many different versions of Cassandra are affected. In each case, the order for merging such changes will be ``cassandra-2.1`` -> ``cassandra-2.2`` -> ``cassandra-3.0`` -> ``cassandra-3.x`` -> ``trunk``. But don't worry, merging from 2.1 would be the worst case for bugs that affect all currently supported versions, which isn't very common. As a contributor, you're also not expected to provide a single patch for each version. What you need to do however is:
 
  * Be clear about which versions you could verify to be affected by the bug
  * For 2.x: ask if a bug qualifies to be fixed in this release line, as this may be handled on case by case bases
@@ -92,10 +92,14 @@ So you've finished coding and the great moment arrives: it's time to submit your
 
  1. Create a branch for your changes if you haven't done already. Many contributors name their branches based on ticket number and Cassandra version, e.g. ``git checkout -b 12345-3.0``
  2. Verify that you follow Cassandra's :doc:`code_style`
- 3. Make sure all tests (including yours) pass using ant as described in :doc:`testing`. If you suspect a test failure is unrelated to your change, it may be useful to check the test's status by searching the issue tracker or looking at `CI <https://cassci.datastax.com/>`_ results for the relevant upstream version.
+ 3. Make sure all tests (including yours) pass using ant as described in :doc:`testing`. If you suspect a test failure is unrelated to your change, it may be useful to check the test's status by searching the issue tracker or looking at `CI <https://cassci.datastax.com/>`_ results for the relevant upstream version.  Note that the full test suites take many hours to complete, so it is common to only run specific relevant tests locally before uploading a patch.  Once a patch has been uploaded, the reviewer or committer can help setup CI jobs to run the full test suites.
  4. Consider going through the :doc:`how_to_review` for your code. This will help you to understand how others will consider your change for inclusion.
- 5. Don’t make the committer squash commits for you in the root branch either. Multiple commits are fine - and often preferable - during review stage, especially for incremental review, but once +1d, do either (a) attach a patch to JIRA with a single squashed commit in it (per branch) or (b) squash the commits in-place in your branches into one.
- 6. Include CHANGES.txt entry (put it at the top of the list), and format the commit message appropriately in your patch ending with the following statement on the last line: ``patch by X; reviewed by Y for CASSANDRA-ZZZZZ``
+ 5. Don’t make the committer squash commits for you in the root branch either. Multiple commits are fine - and often preferable - during review stage, especially for incremental review, but once +1d, do either:
+
+   a. Attach a patch to JIRA with a single squashed commit in it (per branch), or
+   b. Squash the commits in-place in your branches into one
+
+ 6. Include a CHANGES.txt entry (put it at the top of the list), and format the commit message appropriately in your patch ending with the following statement on the last line: ``patch by X; reviewed by Y for CASSANDRA-ZZZZZ``
  7. When you're happy with the result, create a patch:
 
    ::
