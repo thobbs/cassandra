@@ -682,9 +682,9 @@ public class SelectStatement implements CQLStatement
              : limit;
     }
 
-    private Collection<ByteBuffer> getKeys(final QueryOptions options) throws InvalidRequestException
+    private NavigableSet<ByteBuffer> getKeys(final QueryOptions options) throws InvalidRequestException
     {
-        List<ByteBuffer> keys = new ArrayList<ByteBuffer>();
+        TreeSet<ByteBuffer> sortedKeys = new TreeSet<>(cfm.getKeyValidator());
         CBuilder builder = cfm.getKeyValidatorAsCType().builder();
         for (ColumnDefinition def : cfm.partitionKeyColumns())
         {
@@ -706,7 +706,7 @@ public class SelectStatement implements CQLStatement
                 {
                     if (val == null)
                         throw new InvalidRequestException(String.format("Invalid null value for partition key part %s", def.name));
-                    keys.add(builder.buildWith(val).toByteBuffer());
+                    sortedKeys.add(builder.buildWith(val).toByteBuffer());
                 }
             }
             else
@@ -720,7 +720,7 @@ public class SelectStatement implements CQLStatement
                 builder.add(val);
             }
         }
-        return keys;
+        return sortedKeys;
     }
 
     /**
