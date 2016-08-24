@@ -45,6 +45,7 @@ import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
@@ -578,7 +579,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (!(ex instanceof WriteTimeoutException))
                         logger.error("Failed to apply paxos commit locally : {}", ex);
-                    responseHandler.onFailure(FBUtilities.getBroadcastAddress());
+                    responseHandler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
             }
 
@@ -644,7 +645,7 @@ public class StorageProxy implements StorageProxyMBean
                     writeMetricsMap.get(consistency_level).failures.mark();
                     WriteFailureException fe = (WriteFailureException)ex;
                     Tracing.trace("Write failure; received {} of {} required replies, failed {} requests",
-                                  fe.received, fe.blockFor, fe.failures);
+                                  fe.received, fe.blockFor, fe.failureReasonByEndpoint.size());
                 }
                 else
                 {
@@ -964,7 +965,7 @@ public class StorageProxy implements StorageProxyMBean
         WriteResponseHandler<?> handler = new WriteResponseHandler<>(endpoints.all,
                                                                      Collections.<InetAddress>emptyList(),
                                                                      endpoints.all.size() == 1 ? ConsistencyLevel.ONE : ConsistencyLevel.TWO,
-                                                                     Keyspace.open(SystemKeyspace.NAME),
+                                                                     Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME),
                                                                      null,
                                                                      WriteType.BATCH_LOG,
                                                                      queryStartNanoTime);
@@ -1032,7 +1033,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (OverloadedException | WriteTimeoutException e)
             {
-                wrapper.handler.onFailure(FBUtilities.getBroadcastAddress());
+                wrapper.handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
             }
         }
     }
@@ -1386,7 +1387,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     if (!(ex instanceof WriteTimeoutException))
                         logger.error("Failed to apply mutation locally : {}", ex);
-                    handler.onFailure(FBUtilities.getBroadcastAddress());
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
             }
 
@@ -1519,7 +1520,7 @@ public class StorageProxy implements StorageProxyMBean
     private static boolean systemKeyspaceQuery(List<? extends ReadCommand> cmds)
     {
         for (ReadCommand cmd : cmds)
-            if (!Schema.isSystemKeyspace(cmd.metadata().ksName))
+            if (!SchemaConstants.isSystemKeyspace(cmd.metadata().ksName))
                 return false;
         return true;
     }
@@ -1600,7 +1601,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             catch (WriteFailureException e)
             {
-                throw new ReadFailureException(consistencyLevel, e.received, e.failures, e.blockFor, false);
+                throw new ReadFailureException(consistencyLevel, e.received, e.blockFor, false, e.failureReasonByEndpoint);
             }
 
             result = fetchRows(group.commands, consistencyForCommitOrFetch, queryStartNanoTime);
@@ -1841,7 +1842,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             try
             {
-                command.setMonitoringTime(new ConstructionTime(constructionTime), timeout, DatabaseDescriptor.getSlowQueryTimeout());
+                command.setMonitoringTime(new ConstructionTime(constructionTime), verb.getTimeout(), DatabaseDescriptor.getSlowQueryTimeout());
 
                 ReadResponse response;
                 try (ReadExecutionController executionController = command.executionController();
@@ -1857,18 +1858,23 @@ public class StorageProxy implements StorageProxyMBean
                 else
                 {
                     MessagingService.instance().incrementDroppedMessages(verb, System.currentTimeMillis() - constructionTime);
-                    handler.onFailure(FBUtilities.getBroadcastAddress());
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                 }
 
                 MessagingService.instance().addLatency(FBUtilities.getBroadcastAddress(), TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
             }
             catch (Throwable t)
             {
-                handler.onFailure(FBUtilities.getBroadcastAddress());
                 if (t instanceof TombstoneOverwhelmingException)
+                {
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
                     logger.error(t.getMessage());
+                }
                 else
+                {
+                    handler.onFailure(FBUtilities.getBroadcastAddress(), RequestFailureReason.UNKNOWN);
                     throw t;
+                }
             }
         }
     }
@@ -2522,19 +2528,17 @@ public class StorageProxy implements StorageProxyMBean
     {
         final long constructionTime;
         final MessagingService.Verb verb;
-        final long timeout;
 
         public DroppableRunnable(MessagingService.Verb verb)
         {
             this.constructionTime = System.currentTimeMillis();
             this.verb = verb;
-            this.timeout = DatabaseDescriptor.getTimeout(verb);
         }
 
         public final void run()
         {
             long timeTaken = System.currentTimeMillis() - constructionTime;
-            if (timeTaken > timeout)
+            if (timeTaken > verb.getTimeout())
             {
                 MessagingService.instance().incrementDroppedMessages(verb, timeTaken);
                 return;
@@ -2575,7 +2579,7 @@ public class StorageProxy implements StorageProxyMBean
         public final void run()
         {
             final MessagingService.Verb verb = verb();
-            long mutationTimeout = DatabaseDescriptor.getTimeout(verb);
+            long mutationTimeout = verb.getTimeout();
             long timeTaken = System.currentTimeMillis() - constructionTime;
             if (timeTaken > mutationTimeout)
             {

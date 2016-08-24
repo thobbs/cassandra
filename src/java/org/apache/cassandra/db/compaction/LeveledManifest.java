@@ -29,6 +29,7 @@ import com.google.common.collect.Sets;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -104,7 +105,36 @@ public class LeveledManifest
         {
             manifest.repairOverlappingSSTables(i);
         }
+        manifest.calculateLastCompactedKeys();
         return manifest;
+    }
+
+    /**
+     * If we want to start compaction in level n, find the newest (by modification time) file in level n+1
+     * and use its last token for last compacted key in level n;
+     */
+    public void calculateLastCompactedKeys()
+    {
+        for (int i = 0; i < generations.length - 1; i++)
+        {
+            // this level is empty
+            if (generations[i + 1].isEmpty())
+                continue;
+
+            SSTableReader sstableWithMaxModificationTime = null;
+            long maxModificationTime = Long.MIN_VALUE;
+            for (SSTableReader ssTableReader : generations[i + 1])
+            {
+                long modificationTime = ssTableReader.getCreationTimeFor(Component.DATA);
+                if (modificationTime >= maxModificationTime)
+                {
+                    sstableWithMaxModificationTime = ssTableReader;
+                    maxModificationTime = modificationTime;
+                }
+            }
+
+            lastCompactedKeys[i] = sstableWithMaxModificationTime.last;
+        }
     }
 
     public synchronized void add(SSTableReader reader)

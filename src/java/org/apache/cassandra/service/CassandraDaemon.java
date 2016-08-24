@@ -46,15 +46,12 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.addthis.metrics3.reporter.config.ReporterConfig;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.MetricRegistryListener;
-import com.codahale.metrics.SharedMetricRegistries;
 import org.apache.cassandra.batchlog.LegacyBatchlogMigrator;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.Schema;
+import org.apache.cassandra.config.SchemaConstants;
 import org.apache.cassandra.cql3.functions.ThreadAwareSecurityManager;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.*;
@@ -153,7 +150,7 @@ public class CassandraDaemon
         }
     }
 
-    private static final CassandraDaemon instance = new CassandraDaemon();
+    static final CassandraDaemon instance = new CassandraDaemon();
 
     public Server thriftServer;
     private NativeTransportService nativeTransportService;
@@ -264,7 +261,7 @@ public class CassandraDaemon
         for (String keyspaceName : Schema.instance.getKeyspaces())
         {
             // Skip system as we've already cleaned it
-            if (keyspaceName.equals(SystemKeyspace.NAME))
+            if (keyspaceName.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME))
                 continue;
 
             for (CFMetaData cfm : Schema.instance.getTablesAndViews(keyspaceName))
@@ -575,14 +572,7 @@ public class CassandraDaemon
         // Do not put any references to DatabaseDescriptor above the forceStaticInitialization call.
         try
         {
-            try
-            {
-                DatabaseDescriptor.forceStaticInitialization();
-            }
-            catch (ExceptionInInitializerError e)
-            {
-                throw e.getCause();
-            }
+            applyConfig();
 
             try
             {
@@ -643,6 +633,11 @@ public class CassandraDaemon
                 exitOrFail(3, "Exception encountered during startup: " + e.getMessage());
             }
         }
+    }
+
+    public void applyConfig()
+    {
+        DatabaseDescriptor.daemonInitialization();
     }
 
     public void startNativeTransport()
