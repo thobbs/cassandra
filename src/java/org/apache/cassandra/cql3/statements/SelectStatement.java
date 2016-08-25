@@ -695,18 +695,14 @@ public class SelectStatement implements CQLStatement
 
             if (builder.remainingCount() == 1)
             {
-                if (values.size() > 1 && !HAS_LOGGED_WARNING_FOR_IN_RESTRICTION_WITH_DUPLICATES  && containsDuplicates(values))
-                {
-                    // This approach does not fully prevent race conditions but it is not a big deal.
-                    HAS_LOGGED_WARNING_FOR_IN_RESTRICTION_WITH_DUPLICATES = true;
-                    logger.warn("SELECT queries with IN restrictions on the partition key containing duplicate values will return duplicate rows.");
-                }
-
                 for (ByteBuffer val : values)
                 {
                     if (val == null)
                         throw new InvalidRequestException(String.format("Invalid null value for partition key part %s", def.name));
-                    sortedKeys.add(builder.buildWith(val).toByteBuffer());
+
+                    ByteBuffer keyBuffer = builder.buildWith(val).toByteBuffer();
+                    validateKey(keyBuffer);
+                    sortedKeys.add(keyBuffer);
                 }
             }
             else
@@ -723,15 +719,19 @@ public class SelectStatement implements CQLStatement
         return sortedKeys;
     }
 
-    /**
-     * Checks if the specified list contains duplicate values.
-     *
-     * @param values the values to check
-     * @return <code>true</code> if the specified list contains duplicate values, <code>false</code> otherwise.
-     */
-    private static boolean containsDuplicates(List<ByteBuffer> values)
+    private void validateKey(ByteBuffer keyBuffer) throws InvalidRequestException
     {
-        return new HashSet<>(values).size() < values.size();
+        if (keyBuffer == null || keyBuffer.remaining() == 0)
+            throw new InvalidRequestException("Key may not be empty");
+
+        try
+        {
+            cfm.getKeyValidator().validate(keyBuffer);
+        }
+        catch (MarshalException exc)
+        {
+            throw new InvalidRequestException("Partition key IN clause contained invalid value: " + exc);
+        }
     }
 
     private ByteBuffer getKeyBound(Bound b, QueryOptions options) throws InvalidRequestException
