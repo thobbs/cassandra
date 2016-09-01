@@ -27,7 +27,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 
 import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableSet;
@@ -507,14 +506,37 @@ public abstract class CQLTester
                 if (!missing.isEmpty())
                     sb.append("and ").append(missing.size()).append(" missing row(s) ");
                 sb.append("in result.  Extra rows:\n    ");
-                sb.append(extraRows.stream().collect(Collectors.joining("\n    ")));
+
+                for (int i = 0; i < extraRows.size(); i++)
+                {
+                    sb.append(extraRows.get(i));
+                    if (i < extraRows.size() - 1)
+                        sb.append("\n    ");
+                }
+
                 if (!missing.isEmpty())
-                    sb.append("\nMissing Rows:\n    ").append(missingRows.stream().collect(Collectors.joining("\n    ")));
+                {
+                    sb.append("\nMissing Rows:\n    ");
+                    for (int i = 0; i < missingRows.size(); i++)
+                    {
+                        sb.append(missingRows.get(i));
+                        if (i < missingRows.size() - 1)
+                            sb.append("\n    ");
+                    }
+                }
                 Assert.fail(sb.toString());
             }
 
             if (!missing.isEmpty())
-                Assert.fail("Missing " + missing.size() + " row(s) in result: \n    " + missingRows.stream().collect(Collectors.joining("\n    ")));
+            {
+                sb.append("Missing ").append(missing.size()).append(" row(s) in result:\n    ");
+                for (int i = 0; i < missingRows.size(); i++)
+                {
+                    sb.append(missingRows.get(i));
+                    if (i < missingRows.size() - 1)
+                        sb.append("\n    ");
+                }
+            }
         }
 
         assert ignoreExtra || expectedRows.size() == actualRows.size();
