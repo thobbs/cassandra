@@ -56,14 +56,18 @@ public class PendingRangeCalculatorService
     {
         public void run()
         {
-            long start = System.currentTimeMillis();
-            List<String> keyspaces = Schema.instance.getNonLocalStrategyKeyspaces();
-            for (String keyspaceName : keyspaces)
+            try
             {
-                calculatePendingRanges(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName);
+                long start = System.currentTimeMillis();
+                List<String> keyspaces = Schema.instance.getNonLocalStrategyKeyspaces();
+                for (String keyspaceName : keyspaces)
+                    calculatePendingRanges(Keyspace.open(keyspaceName).getReplicationStrategy(), keyspaceName);
+                logger.debug("finished calculation for {} keyspaces in {}ms", keyspaces.size(), System.currentTimeMillis() - start);
             }
-            PendingRangeCalculatorService.instance.finishUpdate();
-            logger.debug("finished calculation for {} keyspaces in {}ms", keyspaces.size(), System.currentTimeMillis() - start);
+            finally
+            {
+                PendingRangeCalculatorService.instance.finishUpdate();
+            }
         }
     }
 

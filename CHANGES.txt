@@ -161,6 +161,8 @@ Merged from 3.0:
  * Fix JsonTransformer output of partition with deletion info (CASSANDRA-12418)
  * Fix NPE in SSTableLoader when specifying partial directory path (CASSANDRA-12609)
 Merged from 2.2:
+ * Decrement pending range calculator jobs counter in finally block
+  (CASSANDRA-12554)
  * Add local address entry in PropertyFileSnitch (CASSANDRA-11332)
  * cqlsh copy: fix missing counter values (CASSANDRA-12476)
  * Move migration tasks to non-periodic queue, assure flush executor shutdown after non-periodic executor (CASSANDRA-12251)
