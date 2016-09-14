@@ -52,6 +52,8 @@
  * Fix JsonTransformer output of partition with deletion info (CASSANDRA-12418)
  * Fix NPE in SSTableLoader when specifying partial directory path (CASSANDRA-12609)
 Merged from 2.2:
+ * Decrement pending range calculator jobs counter in finally block
+  (CASSANDRA-12554)
  * Add local address entry in PropertyFileSnitch (CASSANDRA-11332)
  * cqlshlib tests: increase default execute timeout (CASSANDRA-12481)
  * Forward writes to replacement node when replace_address != broadcast_address (CASSANDRA-8523)
