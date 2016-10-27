@@ -496,7 +496,6 @@ public class Keyspace
                         }
                         // continue in while loop
                     }
-
                 }
                 else
                 {
@@ -506,6 +505,7 @@ public class Keyspace
                         for (UUID cfid : mutation.getColumnFamilyIds())
                             columnFamilyStores.get(cfid).metric.viewLockAcquireTime.update(acquireTime, TimeUnit.MILLISECONDS);
                     }
+                    break;
                 }
             }
         }
