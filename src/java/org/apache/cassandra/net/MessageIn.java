@@ -28,9 +28,11 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.monitoring.ConstructionTime;
 import org.apache.cassandra.db.monitoring.MonitorableImpl;
+import org.apache.cassandra.db.UnknownColumnFamilyException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 
 public class MessageIn<T>
 {
@@ -111,7 +113,19 @@ public class MessageIn<T>
         if (payloadSize == 0 || serializer == null)
             return create(from, null, parameters, verb, version, constructionTime);
 
-        T2 payload = serializer.deserialize(in, version);
+        TrackedDataInputPlus trackedIn = new TrackedDataInputPlus(in);
+        T2 payload = null;
+        try
+        {
+            payload = serializer.deserialize(trackedIn, version);
+        }
+        catch (UnknownColumnFamilyException e)
+        {
+            int skip = payloadSize - (int) trackedIn.getBytesRead();
+            in.skipBytes(skip);
+            throw e;
+        } 
+                     
         return MessageIn.create(from, payload, parameters, verb, version, constructionTime);
     }
 

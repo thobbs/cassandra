@@ -96,10 +96,6 @@ public class IncomingTcpConnection extends Thread implements Closeable
             logger.trace("eof reading from socket; closing", e);
             // connection will be reset so no need to throw an exception.
         }
-        catch (UnknownColumnFamilyException e)
-        {
-            logger.warn("UnknownColumnFamilyException reading from socket; closing", e);
-        }
         catch (IOException e)
         {
             logger.trace("IOException reading from socket; closing", e);
@@ -187,7 +183,17 @@ public class IncomingTcpConnection extends Thread implements Closeable
         else
             id = input.readInt();
 
-        MessageIn message = MessageIn.read(input, version, id, MessageIn.readTimestamp(from, input, System.currentTimeMillis()));
+        MessageIn message = null;
+
+        try
+        {
+            message = MessageIn.read(input, version, id, MessageIn.readTimestamp(from, input, System.currentTimeMillis()));
+        }
+        catch (UnknownColumnFamilyException e)
+        {
+            logger.warn("UnknownColumnFamilyException reading from socket; skip remaining bytes ", e);
+        }
+
         if (message == null)
         {
             // callback expired; nothing to do
