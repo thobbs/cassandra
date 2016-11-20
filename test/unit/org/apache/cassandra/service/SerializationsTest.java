@@ -18,7 +18,11 @@
  */
 package org.apache.cassandra.service;
 
+import static org.junit.Assert.*;
+
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collections;
@@ -31,18 +35,29 @@ import org.junit.Test;
 import org.apache.cassandra.AbstractSerializationsTester;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
+import org.apache.cassandra.config.CFMetaData;
+import org.apache.cassandra.db.BufferDecoratedKey;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.UnknownColumnFamilyException;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.RandomPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus.DataInputStreamPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.MessageOut;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.MessagingService.Verb;
 import org.apache.cassandra.repair.NodePair;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.repair.Validator;
 import org.apache.cassandra.repair.messages.*;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTrees;
 
@@ -87,6 +102,34 @@ public class SerializationsTest extends AbstractSerializationsTester
     {
         ValidationRequest message = new ValidationRequest(DESC, 1234);
         testRepairMessageWrite("service.ValidationRequest.bin", message);
+    }
+
+    @Test
+    public void testUnknownColumnFamilyMessage() throws IOException
+    {
+        DecoratedKey key = new BufferDecoratedKey(new Murmur3Partitioner.LongToken(0),
+                ByteBufferUtil.EMPTY_BYTE_BUFFER); 
+        CFMetaData cfMetaData = CFMetaData.compile("create table test_table(key text primary key, value text);", "test");
+        PartitionUpdate update = PartitionUpdate.fullPartitionDelete(cfMetaData, key, 0, FBUtilities.nowInSeconds());
+        Mutation payload = new Mutation(update);
+
+        DataOutputBuffer out = new DataOutputBuffer();
+        MessageOut<Mutation> outMessage = new MessageOut<>(Verb.MUTATION, payload, Mutation.serializer);
+        outMessage.serialize(out, getVersion());
+
+        InputStream is = new ByteArrayInputStream(out.toByteArray());
+
+        try (DataInputStreamPlus in = new DataInputStreamPlus(is))
+        {
+            try{
+                MessageIn.read(in, getVersion(), -1);
+            } catch(UnknownColumnFamilyException e){
+                int available = in.available();
+                assertEquals(0, available);
+                return;
+            }
+            fail("Expect UnknownColumnFamilyException");
+        }
     }
 
     @Test
