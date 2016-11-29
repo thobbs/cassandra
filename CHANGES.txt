@@ -9,6 +9,7 @@
  * Fix validation of non-frozen UDT cells (CASSANDRA-12916)
  * AnticompactionRequestSerializer serializedSize is incorrect (CASSANDRA-12934)
 Merged from 2.2:
+ * cqlsh: fix DESC TYPES errors (CASSANDRA-12914)
  * Fix leak on skipped SSTables in sstableupgrade (CASSANDRA-12899)
 
 3.10
